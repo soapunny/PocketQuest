@@ -91,6 +91,7 @@ When you:
 
 ## 📁 Project Structure (Monorepo)
 
+```text
 pocketquest/
 ├── apps/
 │ ├── mobile/ # React Native (Expo) - Frontend
@@ -176,6 +177,7 @@ pocketquest/
 ├── package.json # Root scripts
 ├── tsconfig.base.json
 └── README.md
+```
 
 ---
 
