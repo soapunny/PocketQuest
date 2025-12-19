@@ -1,0 +1,16 @@
+{
+  "name": "pocketquest",
+  "private": true,
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "dev:mobile": "pnpm --filter ./apps/mobile start",
+    "dev:api": "pnpm --filter ./apps/api dev",
+    "dev": "pnpm -r --parallel dev"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.26.0"
+}
