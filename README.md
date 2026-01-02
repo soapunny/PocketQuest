@@ -1,82 +1,104 @@
 # PocketQuest 🧭💰
 
-**A goal-driven budgeting app where your character grows as you manage money better.**
+**PocketQuest is a mobile-first budgeting app that turns financial planning into a clear, structured monthly system.**
 
-PocketQuest is a **mobile-first personal finance app** that combines:
+It focuses on:
 
-- Expense / income / saving tracking
-- Weekly budget & item-based goals
-- RPG-style character growth (XP & levels)
+- Monthly budget & savings planning
+- Clear visibility into spending vs income
+- A foundation for future gamification (character system planned later)
 
-As you complete your financial goals, **your character levels up** — turning budgeting into a motivating quest.
+This repository contains a **monorepo** with:
 
----
-
-## ✨ Core Concept
-
-PocketQuest is built around **weekly plans**.
-
-Example:
-
-- **Budget Goals**
-  - Groceries ≤ $80
-  - Insurance ≤ $120
-- **Item Goals**
-  - Chicken breast
-  - Protein bar
-  - Banana
-  - Instant rice
-  - Apple juice
-
-When you:
-
-- Stay under budget
-- Purchase planned items
-- Maintain weekly streaks
-
-→ You gain **XP**, level up, and visually grow your character.
+- A React Native (Expo) mobile app
+- A Next.js API server
+- PostgreSQL database via Prisma
 
 ---
 
-## 🧩 Key Features (MVP)
+## ✨ Current Status (What’s Implemented)
 
-- 📱 **Mobile app (React Native + Expo)**
-- 💸 Transactions
-  - Expense / Income / Saving
-  - Category-based
-  - Optional item tags
-- 🎯 Weekly Plans
-  - Numeric budget goals
-  - Item checklist goals
-- 📊 Progress Engine
-  - Goal completion rate
-  - XP & level calculation
-- 🧙 Character Growth UI
-  - Level
-  - XP bar
-  - Growth stages
-- 🌍 Internationalization
-  - English / Korean
-- 🗄️ Backend API
-  - Next.js API routes
-  - PostgreSQL + Prisma
+### ✅ Completed
+
+- Monthly plan lifecycle (create → update → reload)
+- Server-backed budget goals & savings goals
+- Timezone-aware monthly periods
+- React Native UI fully wired to backend
+- PostgreSQL + Prisma integration
+- End-to-end flow: **Mobile → API → DB → Mobile**
+
+### ⏸️ Planned / Deferred
+
+- Adding brand-new goals not previously saved
+- Weekly / bi-weekly plans
+- Character / XP system (intentionally postponed)
+- Authentication & multi-user flows
+
+---
+
+## 🧠 Core Concept (Current)
+
+PocketQuest is built around **monthly plans**.
+
+Each month has **at most one plan per user**.
+
+A monthly plan contains:
+
+- Total budget limit
+- Budget goals (by category)
+- Savings goals
+- Currency & language
+- Timezone-aware period start
+
+### Why monthly?
+
+- Predictable income & expenses
+- Simpler mental model
+- Easier server-side consistency
+- Scales naturally to weekly/bi-weekly later
+
+---
+
+## 🧩 Key Features (Current MVP)
+
+### 📱 Mobile App (React Native + Expo)
+
+- Dashboard overview
+- Monthly plan editor
+- Budget goals by category
+- Savings goals
+- Transactions list & filters
+- English / Korean support
+
+### 🗄️ Backend API
+
+- Next.js App Router (API-only)
+- Monthly plan upsert (idempotent)
+- Plan update via PATCH
+- Transaction CRUD
+- Health check endpoint
+
+### 🗃️ Database
+
+- PostgreSQL
+- Prisma ORM
+- Strict uniqueness:
 
 ---
 
 ## 🏗️ Tech Stack
 
-### Mobile App
+### Mobile
 
 - React Native
 - Expo
 - TypeScript
 - React Navigation
-- TanStack Query (React Query)
 - i18next (EN / KO)
 
 ### Backend
 
-- Next.js (API-only)
+- Next.js (API routes only)
 - TypeScript
 - Prisma ORM
 - PostgreSQL
@@ -84,123 +106,173 @@ When you:
 ### Tooling
 
 - pnpm (monorepo)
-- VS Code
+- VS Code / Cursor
+- Git + GitHub
 - Jira (Kanban)
 
 ---
 
-## 📁 Project Structure (Monorepo)
+## 📁 Project Structure (Actual)
 
 ```text
 pocketquest/
 ├── apps/
-│ ├── mobile/ # React Native (Expo) - Frontend
-│ │ ├── app.config.ts # Expo config & env
-│ │ ├── app.json
-│ │ └── src/
-│ │ ├── app/
-│ │ │ ├── navigation/ # React Navigation setup
-│ │ │ │ ├── RootNavigator.tsx
-│ │ │ │ └── TabNavigator.tsx
-│ │ │ ├── screens/ # App screens
-│ │ │ │ ├── DashboardScreen.tsx
-│ │ │ │ ├── TransactionsScreen.tsx
-│ │ │ │ ├── AddTransactionModal.tsx
-│ │ │ │ ├── WeeklyPlanScreen.tsx
-│ │ │ │ ├── CharacterScreen.tsx
-│ │ │ │ └── SettingsScreen.tsx
-│ │ │ ├── components/ # Reusable UI components
-│ │ │ │ ├── SummaryCards.tsx
-│ │ │ │ ├── TransactionForm.tsx
-│ │ │ │ ├── TransactionList.tsx
-│ │ │ │ ├── GoalCards.tsx
-│ │ │ │ ├── XpBar.tsx
-│ │ │ │ └── CharacterStage.tsx
-│ │ │ ├── lib/ # Client-side utilities
-│ │ │ │ ├── api.ts # API client (fetch/axios)
-│ │ │ │ ├── queryClient.ts # TanStack Query setup
-│ │ │ │ ├── date.ts # Week/date helpers
-│ │ │ │ └── storage.ts # Local storage helpers
-│ │ │ ├── i18n/ # Internationalization
-│ │ │ │ ├── index.ts # i18n initialization
-│ │ │ │ ├── en.json
-│ │ │ │ └── ko.json
-│ │ │ └── theme/ # Design tokens
-│ │ │ └── tokens.ts
-│ │ └── main.tsx # App entry point
+│ ├── mobile/ # React Native (Expo)
+│ │ └── src/app/
+│ │ ├── screens/ # Dashboard, Plan, Transactions, Settings
+│ │ ├── components/ # Shared UI (ScreenHeader, Layout, Cards)
+│ │ ├── lib/ # planStore, api clients, helpers
+│ │ ├── i18n/ # EN / KO translations
+│ │ └── theme/ # Typography, spacing, tokens
 │ │
-│ └── server/ # Backend Server (Next.js)
-│ ├── src/
-│ │ ├── app/
-│ │ │ └── api/ # API routes
-│ │ │ ├── health/route.ts
-│ │ │ ├── auth/ # Authentication
-│ │ │ │ ├── sign-in/route.ts
-│ │ │ │ └── sign-up/route.ts
-│ │ │ ├── transactions/
-│ │ │ │ ├── route.ts
-│ │ │ │ └── [id]/route.ts
-│ │ │ ├── plans/
-│ │ │ │ └── week/
-│ │ │ │ ├── route.ts
-│ │ │ │ ├── budget-goals/route.ts
-│ │ │ │ └── item-goals/route.ts
-│ │ │ └── progress/
-│ │ │ └── week/route.ts
-│ │ └── lib/
-│ │ ├── prisma.ts # Prisma client
-│ │ ├── validators.ts # Zod schemas
-│ │ ├── progress.ts # XP & level logic
-│ │ └── date.ts # Week/date helpers
-│ ├── .env.local
-│ └── package.json
+│ └── server/ # Next.js API-only server
+│ └── src/app/api/
+│ ├── health/
+│ ├── plans/
+│ │ └── monthly/
+│ ├── transactions/
+│ └── auth/ # Placeholder
 │
-├── packages/
-│ └── shared/ # Shared logic & types
-│ └── src/
-│ ├── types.ts # Shared TypeScript types
-│ ├── schemas.ts # Shared Zod schemas
-│ ├── constants.ts # Enums, XP rules, defaults
-│ └── i18nKeys.ts # Translation key references
-│
-├── prisma/ # Database layer
+├── prisma/
 │ ├── schema.prisma
-│ ├── seed.ts
 │ └── migrations/
 │
-├── docs/ # Documentation
-│ ├── PRD.md
-│ ├── API.md
-│ └── DB.md
+├── packages/
+│ └── shared/ # (planned) shared types & schemas
 │
 ├── pnpm-workspace.yaml
-├── package.json # Root scripts
-├── tsconfig.base.json
+├── package.json
 └── README.md
 ```
 
 ---
 
-### 🧭 Architecture Summary
+## 🧭 Monthly Plan Lifecycle
 
-- **Frontend**
+PocketQuest operates around a **MONTHLY plan model**.
 
-  - React Native (Expo)
-  - Mobile-only UI
-  - Communicates with backend via REST API
+Each user can have **at most one plan per month**, enforced at the database level using a unique constraint on:
 
-- **Backend**
+(userId, periodType, periodStart)
 
-  - Next.js (API routes only)
-  - Prisma ORM
-  - PostgreSQL database
-
-- **Shared**
-  - Zod schemas
-  - TypeScript types
-  - Business rules (XP, enums)
-
-This structure allows **clear separation of concerns** while keeping
-a single source of truth for core logic.
+This guarantees idempotent behavior and prevents duplicate plans for the same month.
 
 ---
+
+### 1) Create or Get Monthly Plan (Upsert)
+
+POST /api/plans/monthly
+
+- The client sends a userId and optionally an at parameter (e.g. 2026-01).
+- The server calculates the correct periodStart based on the user’s timeZone.
+- If a plan for (userId, MONTHLY, periodStart) already exists, it is returned.
+- Otherwise, a new plan is created and returned.
+- This operation is safe to call repeatedly.
+
+---
+
+### 2) Update Monthly Plan (Budget & Savings Goals)
+
+PATCH /api/plans/monthly
+
+This endpoint updates:
+
+- Total monthly budget limit
+- Budget goals (by category)
+- Savings goals
+
+The server replaces the goal sets when provided, ensuring consistency.
+
+The API accepts both naming styles for compatibility:
+
+- limitMinor / targetMinor (server & database standard)
+- limitCents / targetCents (mobile UI naming)
+
+Internally, all values are stored as minor currency units.
+
+---
+
+### 3) Reload & Hydrate on App Start
+
+When the mobile app launches or the Plan screen mounts:
+
+1. The app calls POST /api/plans/monthly
+2. The server returns the current monthly plan
+3. The response is applied via applyServerPlan() in planStore
+4. The UI re-renders using persisted server data
+
+This completes the full loop:
+
+Mobile UI → API → Database → Mobile UI
+
+---
+
+## 🕒 Timezone Handling
+
+Timezone correctness is a first-class concern.
+
+- Each user has a timeZone field (IANA format, e.g. America/New_York)
+- Monthly periodStart is calculated using the user’s local timezone
+- The computed value is stored in UTC for consistency
+- This prevents duplicate or shifted plans across timezones
+
+---
+
+## 💾 Data Model (Simplified)
+
+Plan
+
+- userId
+- periodType (MONTHLY)
+- periodStart (UTC)
+- totalBudgetLimitMinor
+- budgetGoals[]
+- savingsGoals[]
+- currency
+- language
+
+Transaction
+
+- userId
+- type (EXPENSE | INCOME | SAVING)
+- amountMinor
+- currency
+- category
+- occurredAt
+
+---
+
+## 🚀 Running Locally
+
+Backend:
+cd apps/server
+pnpm install
+pnpm dev
+
+Mobile:
+cd apps/mobile
+pnpm install
+pnpm start
+
+Make sure PostgreSQL is running and DATABASE_URL is configured.
+
+---
+
+## 📌 Design Philosophy
+
+- Server is the source of truth
+- Consistency over premature features
+- Timezone correctness before analytics
+- Clear UX before gamification
+
+PocketQuest prioritizes correctness and clarity over speed of feature delivery.
+
+---
+
+## 🛣️ Next Steps
+
+- Fix edge case: adding new goals not previously saved
+- Introduce weekly / bi-weekly plans
+- Authentication & multi-user support
+- Analytics and insights
+- Optional gamification layer
