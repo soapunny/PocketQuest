@@ -5,18 +5,24 @@ import { useNavigation } from "@react-navigation/native";
 
 import DashboardScreen from "../screens/DashboardScreen";
 import TransactionsScreen from "../screens/TransactionsScreen";
-import WeeklyPlanScreen from "../screens/WeeklyPlanScreen";
-import CharacterScreen from "../screens/CharacterScreen";
-import SettingsScreen from "../screens/SettingsScreen";
+import PlanScreen from "../screens/PlanScreen";
+import ProfileScreen from "../screens/ProfileScreen";
 
 const Tab = createBottomTabNavigator();
+
+function EmptyScreen() {
+  return null;
+}
 
 function AddButton(props: BottomTabBarButtonProps) {
   const navigation = useNavigation<any>();
 
   return (
     <Pressable
-      {...props}
+      accessibilityRole={props.accessibilityRole}
+      accessibilityState={props.accessibilityState}
+      accessibilityLabel={props.accessibilityLabel}
+      testID={props.testID}
       onPress={() => navigation.navigate("AddTransactionModal")}
       style={({ pressed }) => [
         {
@@ -54,15 +60,21 @@ export default function TabNavigator() {
 
       <Tab.Screen
         name="Add"
-        component={WeeklyPlanScreen}
+        component={EmptyScreen}
         options={{
           tabBarLabel: "",
           tabBarButton: (props) => <AddButton {...props} />,
         }}
+        listeners={({ navigation }) => ({
+          tabPress: (e) => {
+            e.preventDefault();
+            navigation.navigate("AddTransactionModal");
+          },
+        })}
       />
 
-      <Tab.Screen name="Plan" component={WeeklyPlanScreen} />
-      <Tab.Screen name="Character" component={CharacterScreen} />
+      <Tab.Screen name="Plan" component={PlanScreen} />
+      <Tab.Screen name="Profile" component={ProfileScreen} />
     </Tab.Navigator>
   );
 }

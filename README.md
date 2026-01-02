@@ -129,7 +129,7 @@ pocketquest/
 │ │ │ └── tokens.ts
 │ │ └── main.tsx # App entry point
 │ │
-│ └── api/ # Backend API (Next.js)
+│ └── server/ # Backend Server (Next.js)
 │ ├── src/
 │ │ ├── app/
 │ │ │ └── api/ # API routes

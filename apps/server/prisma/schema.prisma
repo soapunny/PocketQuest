@@ -1,0 +1,166 @@
+// Prisma schema for PocketQuest
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =====================
+// Enums
+// =====================
+
+enum AuthProvider {
+  GOOGLE
+  KAKAO
+}
+
+enum TxType {
+  EXPENSE
+  INCOME
+  SAVING
+}
+
+enum CurrencyCode {
+  USD
+  KRW
+}
+
+enum PeriodType {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+}
+
+enum LanguageCode {
+  en
+  ko
+}
+
+// =====================
+// Models
+// =====================
+
+model User {
+  id              String       @id @default(cuid())
+  email           String?      @unique
+  name            String?
+  profileImageUri String?
+  // IANA timezone identifier (e.g., "America/New_York") used to compute plan period boundaries.
+  timeZone        String       @default("America/New_York")
+
+  provider        AuthProvider
+  providerId      String
+
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  // Relations
+  transactions    Transaction[]
+  plans           Plan[]
+
+  @@unique([provider, providerId])
+  @@index([provider, providerId])
+}
+
+model Transaction {
+  id          String       @id @default(cuid())
+  userId      String
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  type        TxType
+
+  // Store amounts as minor units (cents / won). Keep it non-negative and rely on `type`.
+  amountMinor Int
+  currency    CurrencyCode
+
+  // Optional FX snapshot: 1 USD = fxUsdKrw KRW at the time of the transaction.
+  fxUsdKrw    Float?
+
+  category    String
+  occurredAt  DateTime
+
+  note        String?
+
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([userId, occurredAt])
+  @@index([userId, type])
+  @@index([userId, category])
+}
+
+// Plan represents a budget/savings setup for a specific period.
+// Multiple plans per user are allowed, but the same period cannot be duplicated.
+model Plan {
+  id                   String        @id @default(cuid())
+
+  userId               String
+  user                 User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  periodType           PeriodType
+
+  // For BIWEEKLY: optional anchor date (e.g., Monday) used to compute biweekly boundaries.
+  periodAnchor         DateTime?
+
+  // Start of the plan period (e.g., first day of month/week)
+  periodStart          DateTime
+
+  // Optional end of the period (can be derived, but keeping it helps querying/ranges)
+  periodEnd            DateTime?
+
+  // Single app currency preference (your UX decision to keep it simple)
+  currency             CurrencyCode  @default(USD)
+
+  language             LanguageCode  @default(en)
+
+  // 0 = disabled
+  totalBudgetLimitMinor Int          @default(0)
+
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  // Relations
+  budgetGoals          BudgetGoal[]
+  savingsGoals         SavingsGoal[]
+
+  // Prevent duplicate plans for the same user+period
+  @@unique([userId, periodType, periodStart])
+  // 대시보드 / 히스토리 / 타입별 조회용
+  @@index([userId, periodType, periodStart])
+  // 단순 시간 조회용 (예: 이번 주, 이번 달)
+  @@index([userId, periodStart])
+}
+
+model BudgetGoal {
+  id         String   @id @default(cuid())
+  planId     String
+  plan       Plan     @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  category   String
+  limitMinor Int
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([planId, category])
+  @@index([planId])
+}
+
+model SavingsGoal {
+  id          String   @id @default(cuid())
+  planId      String
+  plan        Plan     @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  name        String
+  targetMinor Int
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([planId, name])
+  @@index([planId])
+}

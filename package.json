@@ -6,8 +6,11 @@
   "main": "index.js",
   "scripts": {
     "dev:mobile": "pnpm --filter ./apps/mobile start",
-    "dev:api": "pnpm --filter ./apps/api dev",
-    "dev": "pnpm -r --parallel dev"
+    "dev:server": "pnpm --filter ./apps/server dev",
+    "dev": "pnpm -r --parallel dev",
+    "db:generate": "pnpm --filter @pocketquest/prisma generate",
+    "db:migrate": "pnpm --filter @pocketquest/prisma migrate",
+    "db:studio": "pnpm --filter @pocketquest/prisma studio"
   },
   "keywords": [],
   "author": "",
