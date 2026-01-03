@@ -22,12 +22,12 @@ function absMinor(n: any) {
 function txToHomeMinor(tx: any, homeCurrency: Currency): number {
   const currency: Currency = tx?.currency === "KRW" ? "KRW" : "USD";
 
-  // Prefer new field; fallback to legacy amountCents
+  // Prefer new field; fallback to legacy amountMinor
   const rawAmount =
     typeof tx?.amountMinor === "number"
       ? tx.amountMinor
-      : typeof tx?.amountCents === "number"
-      ? tx.amountCents
+      : typeof tx?.amountMinor === "number"
+      ? tx.amountMinor
       : 0;
 
   if (!Number.isFinite(rawAmount) || rawAmount === 0) return 0;
@@ -216,4 +216,3 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
 });
-

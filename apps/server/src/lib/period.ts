@@ -1,14 +1,49 @@
 // apps/server/src/lib/period.ts
-import { startOfMonth } from "date-fns";
+import { addMonths, startOfMonth } from "date-fns";
 import { toZonedTime, fromZonedTime } from "date-fns-tz";
+
+function normalizeTimeZone(tzRaw: unknown): string {
+  const tz = typeof tzRaw === "string" ? tzRaw.trim() : "";
+  if (!tz) return "America/New_York";
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz }).format(new Date());
+    return tz;
+  } catch {
+    return "America/New_York";
+  }
+}
+
+function isValidDate(d: unknown): d is Date {
+  return d instanceof Date && !Number.isNaN(d.getTime());
+}
+
+function utcMonthStart(d: Date): Date {
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1, 0, 0, 0, 0));
+}
+
+function assertReasonableYear(d: Date): boolean {
+  const y = d.getUTCFullYear();
+  return y >= 1970 && y <= 2100;
+}
 
 export function getMonthlyPeriodStartUTC(
   timeZone: string,
   now: Date = new Date()
 ): Date {
-  const zonedNow = toZonedTime(now, timeZone);
-  const zonedStart = startOfMonth(zonedNow);
-  return fromZonedTime(zonedStart, timeZone);
+  const tz = normalizeTimeZone(timeZone);
+  const base = isValidDate(now) ? now : new Date();
+
+  try {
+    const zonedNow = toZonedTime(base, tz);
+    const zonedStart = startOfMonth(zonedNow);
+    const utc = fromZonedTime(zonedStart, tz);
+    if (!isValidDate(utc) || !assertReasonableYear(utc))
+      return utcMonthStart(base);
+    return utc;
+  } catch {
+    // Fallback to UTC month start to avoid propagating invalid/out-of-range dates
+    return utcMonthStart(base);
+  }
 }
 
 /**
@@ -19,16 +54,20 @@ export function getNextMonthlyPeriodStartUTC(
   timeZone: string,
   now: Date = new Date()
 ): Date {
-  // Compute this month's boundary in user's timezone
-  const zonedNow = toZonedTime(now, timeZone);
-  const zonedStart = startOfMonth(zonedNow);
+  const tz = normalizeTimeZone(timeZone);
+  const base = isValidDate(now) ? now : new Date();
 
-  // Move to next month while staying in user's timezone
-  const nextZonedStart = new Date(zonedStart);
-  nextZonedStart.setMonth(nextZonedStart.getMonth() + 1);
-
-  // Convert that boundary back to UTC for DB queries
-  return fromZonedTime(nextZonedStart, timeZone);
+  try {
+    const zonedNow = toZonedTime(base, tz);
+    const zonedStart = startOfMonth(zonedNow);
+    const nextZonedStart = addMonths(zonedStart, 1);
+    const utc = fromZonedTime(nextZonedStart, tz);
+    if (!isValidDate(utc) || !assertReasonableYear(utc))
+      return addMonths(utcMonthStart(base), 1);
+    return utc;
+  } catch {
+    return addMonths(utcMonthStart(base), 1);
+  }
 }
 
 /**
@@ -39,11 +78,18 @@ export function getPreviousMonthlyPeriodStartUTC(
   timeZone: string,
   now: Date = new Date()
 ): Date {
-  const zonedNow = toZonedTime(now, timeZone);
-  const zonedStart = startOfMonth(zonedNow);
+  const tz = normalizeTimeZone(timeZone);
+  const base = isValidDate(now) ? now : new Date();
 
-  const prevZonedStart = new Date(zonedStart);
-  prevZonedStart.setMonth(prevZonedStart.getMonth() - 1);
-
-  return fromZonedTime(prevZonedStart, timeZone);
+  try {
+    const zonedNow = toZonedTime(base, tz);
+    const zonedStart = startOfMonth(zonedNow);
+    const prevZonedStart = addMonths(zonedStart, -1);
+    const utc = fromZonedTime(prevZonedStart, tz);
+    if (!isValidDate(utc) || !assertReasonableYear(utc))
+      return addMonths(utcMonthStart(base), -1);
+    return utc;
+  } catch {
+    return addMonths(utcMonthStart(base), -1);
+  }
 }

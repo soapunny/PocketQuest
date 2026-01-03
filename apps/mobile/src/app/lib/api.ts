@@ -18,7 +18,7 @@ async function request<T>(
   options: RequestInit = {}
 ): Promise<T> {
   const url = `${API_URL}${endpoint}`;
-  
+
   // Get token from storage (will be stored by authStore)
   // For now, we'll pass token via headers from the caller
   const headers: HeadersInit = {
@@ -32,7 +32,9 @@ async function request<T>(
   });
 
   if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: "Unknown error" }));
+    const error = await response
+      .json()
+      .catch(() => ({ error: "Unknown error" }));
     throw new ApiError(response.status, error.error || "Request failed", error);
   }
 
@@ -104,7 +106,10 @@ export const plansApi = {
         headers: { Authorization: `Bearer ${token}` },
       });
     },
-    upsert: async (token: string, data: { category: string; limitCents: number }) => {
+    upsert: async (
+      token: string,
+      data: { category: string; limitMinor: number }
+    ) => {
       return request<any>("/api/plans/budget-goals", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
@@ -118,7 +123,10 @@ export const plansApi = {
         headers: { Authorization: `Bearer ${token}` },
       });
     },
-    create: async (token: string, data: { name: string; targetCents: number }) => {
+    create: async (
+      token: string,
+      data: { name: string; targetMinor: number }
+    ) => {
       return request<any>("/api/plans/savings-goals", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
@@ -126,10 +134,13 @@ export const plansApi = {
       });
     },
     delete: async (token: string, id: string) => {
-      return request<{ success: boolean }>(`/api/plans/savings-goals?id=${id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      return request<{ success: boolean }>(
+        `/api/plans/savings-goals?id=${id}`,
+        {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
     },
   },
 };
@@ -141,7 +152,10 @@ export const userApi = {
       headers: { Authorization: `Bearer ${token}` },
     });
   },
-  updateMe: async (token: string, data: { name?: string; profileImageUri?: string | null }) => {
+  updateMe: async (
+    token: string,
+    data: { name?: string; profileImageUri?: string | null }
+  ) => {
     return request<any>("/api/users/me", {
       method: "PATCH",
       headers: { Authorization: `Bearer ${token}` },
@@ -158,8 +172,4 @@ export const characterApi = {
     });
   },
 };
-
-
-
-
 

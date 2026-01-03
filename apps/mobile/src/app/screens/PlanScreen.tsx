@@ -36,12 +36,12 @@ function absMinor(n: any) {
 function txToHomeMinor(tx: any, homeCurrency: Currency): number {
   const currency: Currency = tx?.currency === "KRW" ? "KRW" : "USD";
 
-  // Prefer new field; fallback to legacy amountCents
+  // Prefer new field; fallback to legacy amountMinor
   const amountMinor =
     typeof tx?.amountMinor === "number"
       ? tx.amountMinor
-      : typeof tx?.amountCents === "number"
-      ? tx.amountCents
+      : typeof tx?.amountMinor === "number"
+      ? tx.amountMinor
       : 0;
 
   const absAmount = absMinor(amountMinor);
@@ -99,7 +99,7 @@ export default function PlanScreen() {
           ? sp.budgetGoals.map((g: any) => ({
               category: String(g.category ?? "Other"),
               // server uses limitMinor
-              limitCents: Number(g.limitMinor ?? g.limitCents ?? 0),
+              limitMinor: Number(g.limitMinor ?? 0),
             }))
           : [];
 
@@ -107,7 +107,7 @@ export default function PlanScreen() {
           ? sp.savingsGoals.map((g: any) => ({
               name: String(g.name ?? "Other"),
               // server uses targetMinor
-              targetCents: Number(g.targetMinor ?? g.targetCents ?? 0),
+              targetMinor: Number(g.targetMinor ?? g.targetMinor ?? 0),
             }))
           : [];
 
@@ -185,14 +185,14 @@ export default function PlanScreen() {
   useEffect(() => {
     const g = plan.budgetGoals.find((x) => x.category === selectedCategory);
     setSelectedLimit(
-      g && g.limitCents > 0 ? formatMoney(g.limitCents, baseCurrency) : ""
+      g && g.limitMinor > 0 ? formatMoney(g.limitMinor, baseCurrency) : ""
     );
   }, [selectedCategory, plan.budgetGoals, baseCurrency]);
 
   useEffect(() => {
     const g = plan.savingsGoals.find((x) => x.name === selectedSavingsGoal);
     setSelectedSavingsTarget(
-      g && g.targetCents > 0 ? formatMoney(g.targetCents, baseCurrency) : ""
+      g && g.targetMinor > 0 ? formatMoney(g.targetMinor, baseCurrency) : ""
     );
   }, [selectedSavingsGoal, plan.savingsGoals, baseCurrency]);
 
@@ -206,7 +206,7 @@ export default function PlanScreen() {
     return map;
   }, [periodTransactions, baseCurrency]);
 
-  const totalSpentCents = useMemo(() => {
+  const totalSpentMinor = useMemo(() => {
     let sum = 0;
     for (const tx of periodTransactions) {
       if (tx.type !== "EXPENSE") continue;
@@ -250,25 +250,95 @@ export default function PlanScreen() {
       setSavingToServer(true);
 
       // Server endpoint is monthly-only for now.
+      // IMPORTANT: use the same month key as hydration (YYYY-MM) so saves persist after restart.
+      // Avoid Date parsing/toISOString here (can throw "Date value out of bounds" on invalid dates).
       const at =
         type === "MONTHLY"
-          ? String((plan as any).periodStartISO || "").slice(0, 7)
+          ? String(startISO || new Date().toISOString()).slice(0, 7)
           : undefined;
+
+      // If the user typed a new value but didn't press the local "Save" button,
+      // we still want "Save to Server" to persist the latest edits.
+      const pendingLimitMinor = parseInputToMinor(selectedLimit, baseCurrency);
+      const pendingSavingsTargetMinor = parseInputToMinor(
+        selectedSavingsTarget,
+        baseCurrency
+      );
+
+      // Build a snapshot for payload (do NOT rely on async state updates)
+      const budgetGoalsSnapshot = [...(plan.budgetGoals ?? [])].map(
+        (g: any) => ({
+          category: String(g?.category ?? "Other"),
+          limitMinor: Number(g?.limitMinor ?? 0),
+        })
+      );
+
+      const savingsGoalsSnapshot = [...(plan.savingsGoals ?? [])].map(
+        (g: any) => ({
+          name: String(g?.name ?? "Other"),
+          targetMinor: Number(g?.targetMinor ?? 0),
+        })
+      );
+
+      // Override currently edited category/goal in the snapshot
+      {
+        const cat = String(selectedCategory ?? "Other");
+        const idx = budgetGoalsSnapshot.findIndex((g) => g.category === cat);
+        if (idx >= 0) budgetGoalsSnapshot[idx].limitMinor = pendingLimitMinor;
+        else if (pendingLimitMinor > 0)
+          budgetGoalsSnapshot.push({
+            category: cat,
+            limitMinor: pendingLimitMinor,
+          });
+      }
+
+      {
+        const name = String(selectedSavingsGoal ?? "Other");
+        const idx = savingsGoalsSnapshot.findIndex((g) => g.name === name);
+        if (idx >= 0)
+          savingsGoalsSnapshot[idx].targetMinor = pendingSavingsTargetMinor;
+        else if (pendingSavingsTargetMinor > 0)
+          savingsGoalsSnapshot.push({
+            name,
+            targetMinor: pendingSavingsTargetMinor,
+          });
+      }
+
+      // Also update local store so UI stays consistent after saving
+      upsertBudgetGoalLimit(selectedCategory, pendingLimitMinor);
+      upsertSavingsGoalTarget(selectedSavingsGoal, pendingSavingsTargetMinor);
 
       const payload = {
         userId: DEV_USER_ID,
         at,
-        // totalBudgetLimitCents in app == totalBudgetLimitMinor on server
-        totalBudgetLimitMinor: Number((plan as any).totalBudgetLimitCents || 0),
-        budgetGoals: (plan.budgetGoals || []).map((g: any) => ({
-          category: String(g.category || "Other"),
-          limitMinor: Number(g.limitCents || 0),
-        })),
-        savingsGoals: (plan.savingsGoals || []).map((g: any) => ({
-          name: String(g.name || "Other"),
-          targetMinor: Number(g.targetCents || 0),
-        })),
+        // totalBudgetLimitMinor in app == totalBudgetLimitMinor on server
+        totalBudgetLimitMinor: Number((plan as any).totalBudgetLimitMinor || 0),
+
+        // IMPORTANT: filter out zeros so server-side replace doesn't wipe goals accidentally
+        budgetGoals: budgetGoalsSnapshot
+          .filter((g) => (g.limitMinor ?? 0) > 0)
+          .map((g) => ({
+            category: String(g.category),
+            limitMinor: Number(g.limitMinor) || 0,
+          })),
+
+        savingsGoals: savingsGoalsSnapshot
+          .filter((g) => (g.targetMinor ?? 0) > 0)
+          .map((g) => ({
+            name: String(g.name),
+            targetMinor: Number(g.targetMinor) || 0,
+          })),
       };
+
+      console.log("[PlanScreen] PATCH monthly plan", {
+        at,
+        startISO,
+        selectedCategory,
+        pendingLimitMinor,
+        utilities: budgetGoalsSnapshot.find((g) => g.category === "Utilities")
+          ?.limitMinor,
+        goalsCount: budgetGoalsSnapshot.length,
+      });
 
       const res = await patchMonthlyPlan(payload);
 
@@ -278,14 +348,14 @@ export default function PlanScreen() {
       const budgetGoals = Array.isArray(sp?.budgetGoals)
         ? sp.budgetGoals.map((g: any) => ({
             category: String(g.category ?? "Other"),
-            limitCents: Number(g.limitMinor ?? g.limitCents ?? 0),
+            limitMinor: Number(g.limitMinor ?? 0),
           }))
         : [];
 
       const savingsGoals = Array.isArray(sp?.savingsGoals)
         ? sp.savingsGoals.map((g: any) => ({
             name: String(g.name ?? "Other"),
-            targetCents: Number(g.targetMinor ?? g.targetCents ?? 0),
+            targetMinor: Number(g.targetMinor ?? g.targetMinor ?? 0),
           }))
         : [];
 
@@ -400,7 +470,7 @@ export default function PlanScreen() {
           const goal = plan.budgetGoals.find(
             (g) => g.category === selectedCategory
           );
-          const limit = goal?.limitCents || 0;
+          const limit = goal?.limitMinor || 0;
           const spent = spentByCategory.get(selectedCategory) || 0;
           const ratio = limit > 0 ? spent / limit : 0;
           const status =
@@ -508,7 +578,7 @@ export default function PlanScreen() {
           const goal = plan.savingsGoals.find(
             (x) => x.name === selectedSavingsGoal
           );
-          const target = goal?.targetCents || 0;
+          const target = goal?.targetMinor || 0;
           const saved = savedByGoal.get(selectedSavingsGoal) || 0;
 
           const ratio = target > 0 ? saved / target : 0;

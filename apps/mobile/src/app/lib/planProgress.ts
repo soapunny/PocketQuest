@@ -36,12 +36,12 @@ function absMinor(n: any) {
 function txToHomeMinor(tx: any, homeCurrency: Currency): number {
   const currency: Currency = tx?.currency === "KRW" ? "KRW" : "USD";
 
-  // Prefer new field; fallback to legacy amountCents
+  // Prefer new field; fallback to legacy amountMinor
   const amountMinor =
     typeof tx?.amountMinor === "number"
       ? tx.amountMinor
-      : typeof tx?.amountCents === "number"
-      ? tx.amountCents
+      : typeof tx?.amountMinor === "number"
+      ? tx.amountMinor
       : 0;
 
   const absAmount = absMinor(amountMinor);
@@ -148,14 +148,14 @@ export function computePlanProgressPercent(plan: Plan, transactions: any[]) {
   let budgetSum = 0;
 
   for (const g of budgetGoals) {
-    if ((g as any).limitCents <= 0) continue;
+    if ((g as any).limitMinor <= 0) continue;
     budgetGoalsCount += 1;
     const spent = spentByCategory.get((g as any).category) || 0;
-    const ratio = spent / (g as any).limitCents;
+    const ratio = spent / (g as any).limitMinor;
     budgetSum += ratio > 1 ? 0 : Math.max(0, 1 - ratio);
   }
 
-  const totalLimit = absMinor((plan as any).totalBudgetLimitCents);
+  const totalLimit = absMinor((plan as any).totalBudgetLimitMinor);
   if (totalLimit > 0) {
     budgetGoalsCount += 1;
     const ratio = totalSpentHomeMinor / totalLimit;
@@ -169,11 +169,11 @@ export function computePlanProgressPercent(plan: Plan, transactions: any[]) {
     let sum = 0;
     let count = 0;
     for (const g of savingsGoals) {
-      if ((g as any).targetCents <= 0) continue;
+      if ((g as any).targetMinor <= 0) continue;
       count += 1;
       sum += Math.min(
         1,
-        Math.max(0, totalSavedHomeMinor / (g as any).targetCents)
+        Math.max(0, totalSavedHomeMinor / (g as any).targetMinor)
       );
     }
     savingsScore = count === 0 ? 0 : sum / count;
@@ -211,7 +211,10 @@ export function computeAllTimePlanProgressPercent(
       // Use absolute value for expenses (they're already negative in transactions)
       totalSpentHomeMinor += Math.abs(spent);
       const key = String(tx.category ?? "Other");
-      spentByCategory.set(key, (spentByCategory.get(key) || 0) + Math.abs(spent));
+      spentByCategory.set(
+        key,
+        (spentByCategory.get(key) || 0) + Math.abs(spent)
+      );
     } else if (isSavingsTx(tx)) {
       totalSavedHomeMinor += Math.abs(txToHomeMinor(tx, homeCurrency));
     }
@@ -224,23 +227,24 @@ export function computeAllTimePlanProgressPercent(
   let budgetSum = 0;
 
   for (const g of budgetGoals) {
-    if ((g as any).limitCents <= 0) continue;
+    if ((g as any).limitMinor <= 0) continue;
     budgetGoalsCount += 1;
     const spent = spentByCategory.get((g as any).category) || 0;
     // Simple ratio: if we spent less than the limit, we did well
     // This is a rough approximation since limits are per-period
-    const ratio = spent / Math.max(1, (g as any).limitCents);
+    const ratio = spent / Math.max(1, (g as any).limitMinor);
     budgetSum += ratio > 1 ? 0 : Math.max(0, 1 - ratio);
   }
 
-  const totalLimit = absMinor((plan as any).totalBudgetLimitCents);
+  const totalLimit = absMinor((plan as any).totalBudgetlimitMinor);
   if (totalLimit > 0) {
     budgetGoalsCount += 1;
     const ratio = totalSpentHomeMinor / Math.max(1, totalLimit);
     budgetSum += ratio > 1 ? 0 : Math.max(0, 1 - ratio);
   }
 
-  const budgetScore = budgetGoalsCount === 0 ? 0.5 : budgetSum / budgetGoalsCount;
+  const budgetScore =
+    budgetGoalsCount === 0 ? 0.5 : budgetSum / budgetGoalsCount;
 
   // For savings, we can compare total saved vs targets directly
   let savingsScore = 0;
@@ -248,10 +252,10 @@ export function computeAllTimePlanProgressPercent(
     let sum = 0;
     let count = 0;
     for (const g of savingsGoals) {
-      if ((g as any).targetCents <= 0) continue;
+      if ((g as any).targetMinor <= 0) continue;
       count += 1;
       // Compare total saved vs target (can exceed 1.0 = 100%)
-      const ratio = totalSavedHomeMinor / Math.max(1, (g as any).targetCents);
+      const ratio = totalSavedHomeMinor / Math.max(1, (g as any).targetMinor);
       sum += Math.min(1, Math.max(0, ratio));
     }
     savingsScore = count === 0 ? 0.5 : sum / count;

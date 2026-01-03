@@ -14,13 +14,13 @@ export type BudgetCategory = (typeof EXPENSE_CATEGORIES)[number] | string;
 export type BudgetGoal = {
   id: string;
   category: BudgetCategory;
-  limitCents: number;
+  limitMinor: number;
 };
 
 export type SavingsGoal = {
   id: string;
   name: string;
-  targetCents: number;
+  targetMinor: number;
 };
 
 export type PeriodType = "WEEKLY" | "BIWEEKLY" | "MONTHLY";
@@ -53,7 +53,7 @@ export type Plan = {
   // UI language
   language?: UILanguage;
 
-  totalBudgetLimitCents: number; // 0 = disabled
+  totalBudgetLimitMinor: number; // 0 = disabled
   budgetGoals: BudgetGoal[];
   savingsGoals: SavingsGoal[];
 };
@@ -70,10 +70,10 @@ type Store = {
   setDisplayCurrency: (c: Currency) => void;
   setAdvancedCurrencyMode: (enabled: boolean) => void;
   setLanguage: (lang: UILanguage) => void;
-  setTotalBudgetLimitCents: (cents: number) => void;
-  upsertBudgetGoalLimit: (category: BudgetCategory, limitCents: number) => void;
-  upsertSavingsGoalTarget: (name: string, targetCents: number) => void;
-  addSavingsGoal: (name: string, targetCents: number) => void;
+  setTotalBudgetLimitMinor: (minor: number) => void;
+  upsertBudgetGoalLimit: (category: BudgetCategory, limitMinor: number) => void;
+  upsertSavingsGoalTarget: (name: string, targetMinor: number) => void;
+  addSavingsGoal: (name: string, targetMinor: number) => void;
   removeSavingsGoal: (id: string) => void;
   applyServerPlan: (serverPlan: {
     periodType?: PeriodType;
@@ -81,23 +81,20 @@ type Store = {
     periodStartUTC?: string;
     periodStart?: string;
 
-    // server may send totals under either key
+    // totals are in minor units
     totalBudgetLimitMinor?: number | null;
-    totalBudgetLimitCents?: number | null;
 
-    // goals: allow either minor/cents field names and allow null
+    // goals use minor units
     budgetGoals?:
       | {
           category: string;
           limitMinor?: number | null;
-          limitCents?: number | null;
         }[]
       | null;
     savingsGoals?:
       | {
           name: string;
           targetMinor?: number | null;
-          targetCents?: number | null;
         }[]
       | null;
   }) => void;
@@ -169,7 +166,7 @@ function buildDefaultBudgetGoals(): BudgetGoal[] {
   return EXPENSE_CATEGORIES.map((c) => ({
     id: stableIdForKey("budget", String(c)),
     category: c,
-    limitCents: 0,
+    limitMinor: 0,
   }));
 }
 
@@ -188,22 +185,21 @@ function mergeBudgetGoalsWithDefaults(
   serverGoals: {
     category: string;
     limitMinor?: number | null;
-    limitCents?: number | null;
   }[]
 ): BudgetGoal[] {
   const byCat = new Map<string, number>();
   serverGoals.forEach((g) => {
     const cat = normalizeCategory(g.category);
-    const raw = g.limitMinor ?? g.limitCents;
+    const raw = g.limitMinor ?? 0;
     byCat.set(cat, normalizePositiveInt(raw));
   });
 
   // Start with defaults (keeps ordering + stable IDs)
   const merged: BudgetGoal[] = defaults.map((d) => ({
     ...d,
-    limitCents: byCat.has(String(d.category))
+    limitMinor: byCat.has(String(d.category))
       ? (byCat.get(String(d.category)) as number)
-      : d.limitCents,
+      : d.limitMinor,
   }));
 
   // Append any server categories not in defaults
@@ -213,7 +209,7 @@ function mergeBudgetGoalsWithDefaults(
       merged.push({
         id: stableIdForKey("budget", cat),
         category: cat,
-        limitCents: limit,
+        limitMinor: limit,
       });
     }
   });
@@ -226,13 +222,12 @@ function mergeSavingsGoals(
   serverGoals: {
     name: string;
     targetMinor?: number | null;
-    targetCents?: number | null;
   }[]
 ): SavingsGoal[] {
   const byName = new Map<string, number>();
   serverGoals.forEach((g) => {
     const name = normalizeCategory(g.name);
-    const raw = g.targetMinor ?? g.targetCents;
+    const raw = g.targetMinor ?? g.targetMinor;
     byName.set(name, normalizePositiveInt(raw));
   });
 
@@ -243,7 +238,7 @@ function mergeSavingsGoals(
     merged.push({
       id: existing?.id ?? stableIdForKey("savings", name),
       name,
-      targetCents: target,
+      targetMinor: target,
     });
   });
 
@@ -252,7 +247,7 @@ function mergeSavingsGoals(
 
 function sumBudgetLimits(goals: BudgetGoal[]) {
   return goals.reduce(
-    (sum, g) => sum + (g.limitCents > 0 ? g.limitCents : 0),
+    (sum, g) => sum + (g.limitMinor > 0 ? g.limitMinor : 0),
     0
   );
 }
@@ -280,17 +275,17 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       displayCurrency: DEFAULT_DISPLAY_CURRENCY,
       advancedCurrencyMode: false,
       language: "en",
-      totalBudgetLimitCents: 0,
+      totalBudgetLimitMinor: 0,
       budgetGoals: buildDefaultBudgetGoals(),
       savingsGoals: [],
     };
   });
 
-  const setTotalBudgetLimitCents: Store["setTotalBudgetLimitCents"] = (
-    cents
+  const setTotalBudgetLimitMinor: Store["setTotalBudgetLimitMinor"] = (
+    minor
   ) => {
-    const clean = Math.max(0, Number.isFinite(cents) ? Math.round(cents) : 0);
-    setPlan((p) => ({ ...p, totalBudgetLimitCents: clean }));
+    const clean = Math.max(0, Number.isFinite(minor) ? Math.round(minor) : 0);
+    setPlan((p) => ({ ...p, totalBudgetLimitMinor: clean }));
   };
 
   const setHomeCurrency: Store["setHomeCurrency"] = (c) => {
@@ -387,12 +382,12 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
   const upsertBudgetGoalLimit: Store["upsertBudgetGoalLimit"] = (
     category,
-    limitCents
+    limitMinor
   ) => {
     const cat = (category || "Other").toString().trim() || "Other";
     const cleanLimit = Math.max(
       0,
-      Number.isFinite(limitCents) ? Math.round(limitCents) : 0
+      Number.isFinite(limitMinor) ? Math.round(limitMinor) : 0
     );
 
     setPlan((p) => {
@@ -401,36 +396,36 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
       if (idx >= 0) {
         nextGoals = p.budgetGoals.slice();
-        nextGoals[idx] = { ...nextGoals[idx], limitCents: cleanLimit };
+        nextGoals[idx] = { ...nextGoals[idx], limitMinor: cleanLimit };
       } else {
         nextGoals = [
           ...p.budgetGoals,
-          { id: uid(), category: cat, limitCents: cleanLimit },
+          { id: uid(), category: cat, limitMinor: cleanLimit },
         ];
       }
 
       // ✅ total budget = sum of all category limits (only > 0)
       const total = nextGoals.reduce(
-        (sum, g) => sum + (g.limitCents > 0 ? g.limitCents : 0),
+        (sum, g) => sum + (g.limitMinor > 0 ? g.limitMinor : 0),
         0
       );
 
       return {
         ...p,
         budgetGoals: nextGoals,
-        totalBudgetLimitCents: total, // auto
+        totalBudgetLimitMinor: total, // auto
       };
     });
   };
 
   const upsertSavingsGoalTarget: Store["upsertSavingsGoalTarget"] = (
     name,
-    targetCents
+    targetMinor
   ) => {
     const n = (name || "Other").toString().trim() || "Other";
     const clean = Math.max(
       0,
-      Number.isFinite(targetCents) ? Math.round(targetCents) : 0
+      Number.isFinite(targetMinor) ? Math.round(targetMinor) : 0
     );
 
     setPlan((p) => {
@@ -438,7 +433,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
       if (idx >= 0) {
         const next = p.savingsGoals.slice();
-        next[idx] = { ...next[idx], targetCents: clean };
+        next[idx] = { ...next[idx], targetMinor: clean };
         return { ...p, savingsGoals: next };
       }
 
@@ -449,23 +444,23 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         ...p,
         savingsGoals: [
           ...p.savingsGoals,
-          { id: uid(), name: n, targetCents: clean },
+          { id: uid(), name: n, targetMinor: clean },
         ],
       };
     });
   };
 
-  const addSavingsGoal: Store["addSavingsGoal"] = (name, targetCents) => {
+  const addSavingsGoal: Store["addSavingsGoal"] = (name, targetMinor) => {
     const n = (name || "").trim();
     const t = Math.max(
       0,
-      Number.isFinite(targetCents) ? Math.round(targetCents) : 0
+      Number.isFinite(targetMinor) ? Math.round(targetMinor) : 0
     );
     if (!n || t <= 0) return;
 
     setPlan((p) => ({
       ...p,
-      savingsGoals: [...p.savingsGoals, { id: uid(), name: n, targetCents: t }],
+      savingsGoals: [...p.savingsGoals, { id: uid(), name: n, targetMinor: t }],
     }));
   };
 
@@ -499,8 +494,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         ? serverPlan!.savingsGoals
         : [];
 
-      const serverTotalRaw =
-        serverPlan?.totalBudgetLimitMinor ?? serverPlan?.totalBudgetLimitCents;
+      const serverTotalRaw = serverPlan?.totalBudgetLimitMinor;
       const serverTotalClean = normalizePositiveInt(serverTotalRaw);
 
       setPlan((p) => {
@@ -519,7 +513,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
         // Prefer explicit server total when provided (>0). Otherwise compute from category limits.
         const computedTotal = sumBudgetLimits(nextBudgetGoals);
-        const totalBudgetLimitCents =
+        const totalBudgetLimitMinor =
           serverTotalClean > 0 ? serverTotalClean : computedTotal;
 
         const nextPeriodStartISO = periodStartISO || p.periodStartISO;
@@ -531,7 +525,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
           // Keep legacy field aligned for WEEKLY (back-compat)
           weekStartISO:
             periodType === "WEEKLY" ? nextPeriodStartISO : p.weekStartISO,
-          totalBudgetLimitCents,
+          totalBudgetLimitMinor,
           budgetGoals: nextBudgetGoals,
           savingsGoals: nextSavingsGoals,
         };
@@ -553,7 +547,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       setDisplayCurrency,
       setAdvancedCurrencyMode,
       setLanguage,
-      setTotalBudgetLimitCents,
+      setTotalBudgetLimitMinor,
       upsertBudgetGoalLimit,
       upsertSavingsGoalTarget,
       addSavingsGoal,
@@ -568,7 +562,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       setDisplayCurrency,
       setAdvancedCurrencyMode,
       setLanguage,
-      setTotalBudgetLimitCents,
+      setTotalBudgetLimitMinor,
       upsertBudgetGoalLimit,
       upsertSavingsGoalTarget,
       addSavingsGoal,

@@ -88,13 +88,33 @@ async function request<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   const json = await readJsonSafe(res);
 
   if (!res.ok) {
-    const msg =
+    const baseMsgRaw =
       typeof json?.error === "string"
         ? json.error
         : typeof json?.message === "string"
         ? json.message
+        : res.statusText
+        ? res.statusText
         : `Request failed (${res.status})`;
-    throw new Error(msg);
+
+    const baseMsg = `(${res.status}) ${baseMsgRaw}`;
+
+    const details =
+      typeof json?.details === "string" ? `\nDetails: ${json.details}` : "";
+
+    // Keep debug small and safe for Alerts
+    let debug = "";
+    if (json?.debug != null) {
+      try {
+        const s = JSON.stringify(json.debug);
+        debug =
+          s.length > 500 ? `\nDebug: ${s.slice(0, 500)}…` : `\nDebug: ${s}`;
+      } catch {
+        debug = "";
+      }
+    }
+
+    throw new Error(`${baseMsg}${details}${debug}`);
   }
 
   return json as T;
@@ -147,7 +167,7 @@ export async function upsertMonthlyPlan(body: {
   return request<PlanGetResponse>(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ userId: body.userId, at: body.at }),
+    body: JSON.stringify({ userId: body.userId }),
   });
 }
 
@@ -159,8 +179,8 @@ export async function upsertMonthlyPlan(body: {
 export async function patchMonthlyPlan(
   body: PatchMonthlyPlanBody & { baseUrl?: string }
 ) {
-  const { baseUrl, ...payload } = body;
-  const url = withQuery(baseUrl, "/api/plans/monthly", { at: payload.at });
+  const { baseUrl, at, ...payload } = body;
+  const url = withQuery(baseUrl, "/api/plans/monthly", { at });
 
   return request<{ plan: ServerPlan; debug?: any }>(url, {
     method: "PATCH",

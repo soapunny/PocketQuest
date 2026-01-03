@@ -37,9 +37,9 @@ function currencyOfTx(tx: any): Currency {
 }
 
 function getTxAmountMinor(tx: any): number {
-  // Prefer new field; fall back to legacy amountCents
+  // Prefer new field; fall back to legacy amountMinor
   if (typeof tx?.amountMinor === "number") return tx.amountMinor;
-  if (typeof tx?.amountCents === "number") return tx.amountCents;
+  if (typeof tx?.amountMinor === "number") return tx.amountMinor;
   return 0;
 }
 

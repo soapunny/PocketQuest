@@ -5,7 +5,7 @@ import { z } from "zod";
 
 const budgetGoalSchema = z.object({
   category: z.string(),
-  limitCents: z.number().int(),
+  limitMinor: z.number().int(),
 });
 
 // GET /api/plans/budget-goals - Get all budget goals
@@ -16,7 +16,8 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const plan = await prisma.plan.findUnique({
+    // Fix: plan.findUnique expects a unique field. If userId is not unique, use findFirst.
+    const plan = await prisma.plan.findFirst({
       where: { userId: user.userId },
       include: { budgetGoals: true },
     });
@@ -25,7 +26,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Plan not found" }, { status: 404 });
     }
 
-    return NextResponse.json(plan.budgetGoals);
+    // plan.budgetGoals is included only if found, but could be undefined as a property
+    // Return empty array instead of undefined to be defensive
+    return NextResponse.json(plan.budgetGoals ?? []);
   } catch (error) {
     console.error("Get budget goals error:", error);
     return NextResponse.json(
@@ -46,8 +49,11 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const data = budgetGoalSchema.parse(body);
 
-    const plan = await prisma.plan.findUnique({
-      where: { userId: user.userId },
+    // userId is not unique on Plan (Plan is unique by a compound key),
+    // so we must use findFirst. We default to the latest MONTHLY plan.
+    const plan = await prisma.plan.findFirst({
+      where: { userId: user.userId, periodType: "MONTHLY" },
+      orderBy: { periodStart: "desc" },
     });
 
     if (!plan) {
@@ -62,12 +68,12 @@ export async function POST(request: NextRequest) {
         },
       },
       update: {
-        limitCents: data.limitCents,
+        limitMinor: data.limitMinor,
       },
       create: {
         planId: plan.id,
         category: data.category,
-        limitCents: data.limitCents,
+        limitMinor: data.limitMinor,
       },
     });
 
@@ -87,4 +93,3 @@ export async function POST(request: NextRequest) {
     );
   }
 }
-

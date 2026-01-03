@@ -25,7 +25,7 @@ function isIncomeTx(tx: any) {
 
   // Fallback: if it's explicitly not an EXPENSE or SAVING, and amount looks positive, treat as income.
   if (t && t !== "EXPENSE" && t !== "SAVING" && t !== "SAVINGS") {
-    return Number(tx?.amountMinor ?? tx?.amountCents ?? 0) > 0;
+    return Number(tx?.amountMinor ?? tx?.amountMinor ?? 0) > 0;
   }
 
   return false;
@@ -68,12 +68,12 @@ function absMinor(n: any) {
 function txToHomeMinor(tx: any, homeCurrency: Currency): number {
   const currency: Currency = tx?.currency === "KRW" ? "KRW" : "USD";
 
-  // Prefer new field; fallback to legacy amountCents
+  // Prefer new field; fallback to legacy amountMinor
   const rawAmount =
     typeof tx?.amountMinor === "number"
       ? tx.amountMinor
-      : typeof tx?.amountCents === "number"
-      ? tx.amountCents
+      : typeof tx?.amountMinor === "number"
+      ? tx.amountMinor
       : 0;
 
   if (!Number.isFinite(rawAmount) || rawAmount === 0) return 0;
@@ -139,16 +139,16 @@ export default function DashboardScreen() {
     const goals: any = (plan as any).budgetGoals;
     if (!goals) return 0;
 
-    // Array form: [{ category: string, limitCents: number }]
+    // Array form: [{ category: string, limitMinor: number }]
     if (Array.isArray(goals)) {
       const found = goals.find((g) => String(g.category) === category);
-      return found?.limitCents ?? 0;
+      return found?.limitMinor ?? 0;
     }
 
-    // Object/map form: { [category]: number } or { [category]: { limitCents } }
+    // Object/map form: { [category]: number } or { [category]: { limitMinor } }
     const v = (goals as any)[category];
     if (typeof v === "number") return v;
-    if (v && typeof v.limitCents === "number") return v.limitCents;
+    if (v && typeof v.limitMinor === "number") return v.limitMinor;
 
     return 0;
   };
@@ -247,7 +247,7 @@ export default function DashboardScreen() {
   const totalSavingsTargetHomeMinor = useMemo(() => {
     let sum = 0;
     for (const g of (plan as any).savingsGoals ?? []) {
-      const target = Number((g as any).targetCents ?? 0);
+      const target = Number((g as any).targetMinor ?? 0);
       if (Number.isFinite(target) && target > 0) sum += target;
     }
     return sum;
@@ -265,7 +265,7 @@ export default function DashboardScreen() {
       const name = String(
         (g as any).name ?? (g as any).title ?? (g as any).goalName ?? "Goal"
       );
-      const targetHomeMinor = Number((g as any).targetCents ?? 0);
+      const targetHomeMinor = Number((g as any).targetMinor ?? 0);
       if (!Number.isFinite(targetHomeMinor) || targetHomeMinor <= 0) continue;
 
       const savedHomeMinor = savedByGoalHomeMinor.get(name) ?? 0;
@@ -489,7 +489,7 @@ export default function DashboardScreen() {
         </View>
 
         {(() => {
-          const totalBudget = Number((plan as any).totalBudgetLimitCents ?? 0);
+          const totalBudget = Number((plan as any).totalBudgetlimitMinor ?? 0);
           const r = totalBudget > 0 ? totalSpentHomeMinor / totalBudget : NaN;
           const s = ratioStatus(r);
           const tone = summaryTone(
@@ -511,8 +511,8 @@ export default function DashboardScreen() {
         <View
           style={[
             styles.summaryPill,
-            Number((plan as any).totalBudgetLimitCents ?? 0) > 0
-              ? Number((plan as any).totalBudgetLimitCents) -
+            Number((plan as any).totalBudgetLimitMinor ?? 0) > 0
+              ? Number((plan as any).totalBudgetLimitMinor) -
                   totalSpentHomeMinor <
                 0
                 ? summaryTone("OVER")
@@ -528,8 +528,8 @@ export default function DashboardScreen() {
               styles.summaryValue,
               {
                 color:
-                  Number((plan as any).totalBudgetLimitCents ?? 0) > 0 &&
-                  Number((plan as any).totalBudgetLimitCents) -
+                  Number((plan as any).totalBudgetLimitMinor ?? 0) > 0 &&
+                  Number((plan as any).totalBudgetLimitMinor) -
                     totalSpentHomeMinor <
                     0
                     ? "#c00"
@@ -537,9 +537,9 @@ export default function DashboardScreen() {
               },
             ]}
           >
-            {Number((plan as any).totalBudgetLimitCents ?? 0) > 0
+            {Number((plan as any).totalBudgetLimitMinor ?? 0) > 0
               ? moneyHome(
-                  Number((plan as any).totalBudgetLimitCents) -
+                  Number((plan as any).totalBudgetLimitMinor) -
                     totalSpentHomeMinor,
                   homeCurrency
                 )
@@ -554,9 +554,9 @@ export default function DashboardScreen() {
           <Text style={CardSpacing.cardTitle}>
             {tr("Total Budget", "총 예산")}
           </Text>
-          {Number((plan as any).totalBudgetLimitCents ?? 0) > 0 ? (
+          {Number((plan as any).totalBudgetLimitMinor ?? 0) > 0 ? (
             (() => {
-              const totalBudget = Number((plan as any).totalBudgetLimitCents);
+              const totalBudget = Number((plan as any).totalBudgetLimitMinor);
               const r = totalSpentHomeMinor / totalBudget;
               const s = ratioStatus(r);
               const label =
@@ -583,9 +583,9 @@ export default function DashboardScreen() {
           )}
         </View>
 
-        {Number((plan as any).totalBudgetLimitCents ?? 0) > 0 ? (
+        {Number((plan as any).totalBudgetLimitMinor ?? 0) > 0 ? (
           (() => {
-            const totalBudget = Number((plan as any).totalBudgetLimitCents);
+            const totalBudget = Number((plan as any).totalBudgetLimitMinor);
             const ratio = totalSpentHomeMinor / totalBudget;
             const clamped = Math.min(1, Math.max(0, ratio));
             const remaining = totalBudget - totalSpentHomeMinor;
