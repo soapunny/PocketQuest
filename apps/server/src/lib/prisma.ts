@@ -1,21 +1,14 @@
 import { PrismaClient } from "@prisma/client";
-import { PrismaPg } from "@prisma/adapter-pg";
-import { Pool } from "pg";
 
-const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
+// 글로벌 객체에 PrismaClient를 캐싱하기 위한 타입 선언
+const globalForPrisma = globalThis as unknown as {
+  prisma?: PrismaClient;
+};
 
-// DATABASE_URL은 .env에 있어야 함 (Supabase Postgres connection string)
-const connectionString = process.env.DATABASE_URL;
+// PrismaClient를 한 번만 생성 (개발 환경에서 핫리로드 대응)
+export const prisma = globalForPrisma.prisma ?? new PrismaClient();
 
-if (!connectionString) {
-  // Next dev에서 조용히 죽지 말고 원인 바로 보이게
-  throw new Error("DATABASE_URL is missing. Set it in apps/server/.env");
+// 개발 환경에서는 글로벌에 캐싱
+if (process.env.NODE_ENV !== "production") {
+  globalForPrisma.prisma = prisma;
 }
-
-export const prisma =
-  globalForPrisma.prisma ??
-  new PrismaClient({
-    adapter: new PrismaPg(new Pool({ connectionString })),
-  });
-
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;

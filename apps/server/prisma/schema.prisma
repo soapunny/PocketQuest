@@ -1,11 +1,12 @@
 // Prisma schema for PocketQuest
 
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-client-js" //Prisma Client Generator: Read the schema and generate the code for CRUD operations from TS/JS.
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "postgresql" //Our DB => postgresql
+  url      = env("DATABASE_URL") // not used inㄴ Primsa 7.0
 }
 
 // =====================
@@ -44,87 +45,83 @@ enum LanguageCode {
 // =====================
 
 model User {
-  id              String       @id @default(cuid())
-  email           String?      @unique
-  name            String?
-  profileImageUri String?
+  id              String  @id @default(cuid()) //primary key/auto-create unique id(cuid)
+  email           String? @unique //unique constraint/email is required
+  name            String? // nickname
+  profileImageUri String? // profile image url
   // IANA timezone identifier (e.g., "America/New_York") used to compute plan period boundaries.
-  timeZone        String       @default("America/New_York")
+  timeZone        String  @default("America/New_York") //default value: America/New_York
 
-  provider        AuthProvider
-  providerId      String
+  provider   AuthProvider //auth provider type(GOOGLE, KAKAO, etc.)
+  providerId String //auth provider id(google id, kakao id, etc. external id)
 
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  createdAt DateTime @default(now()) //default value: current timestamp
+  updatedAt DateTime @updatedAt //auto-update updated at
 
-  // Relations
-  transactions    Transaction[]
-  plans           Plan[]
-
-  @@unique([provider, providerId])
-  @@index([provider, providerId])
+  transactions Transaction[] //relations: one to many(one user can have many transactions)
+  plans        Plan[] //relations: one to many(one user can have many plans)
 }
 
 model Transaction {
-  id          String       @id @default(cuid())
-  userId      String
-  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id     String @id @default(cuid()) //auto-create unique id(cuid)
+  userId String //user id(foreign key)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  type        TxType
+  type TxType //transaction type(EXPENSE, INCOME, SAVING)
 
   // Store amounts as minor units (cents / won). Keep it non-negative and rely on `type`.
-  amountMinor Int
-  currency    CurrencyCode
+  amountMinor Int //amount in minor units(cents / won)
+  currency    CurrencyCode //currency code(USD, KRW)
 
   // Optional FX snapshot: 1 USD = fxUsdKrw KRW at the time of the transaction.
-  fxUsdKrw    Float?
+  fxUsdKrw Float?
 
-  category    String
-  occurredAt  DateTime
+  category   String //category(groceries, gift, Emergency Fund, etc.)
+  occurredAt DateTime //occurred at(date and time)
 
-  note        String?
+  note String? //note(optional)
 
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  @@index([userId, occurredAt])
-  @@index([userId, type])
-  @@index([userId, category])
+  @@index([userId, occurredAt]) //index for querying transactions by user id and occurred at
+  @@index([userId, type]) //index for querying transactions by user id and type
+  @@index([userId, category]) //index for querying transactions by user id and category
 }
 
 // Plan represents a budget/savings setup for a specific period.
 // Multiple plans per user are allowed, but the same period cannot be duplicated.
 model Plan {
-  id                   String        @id @default(cuid())
+  id String @id @default(cuid())
 
-  userId               String
-  user                 User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  periodType           PeriodType
+  periodType PeriodType //period type(WEEKLY, BIWEEKLY, MONTHLY)
 
   // For BIWEEKLY: optional anchor date (e.g., Monday) used to compute biweekly boundaries.
-  periodAnchor         DateTime?
+  periodAnchor DateTime? //optional anchor date(e.g., Monday) used to compute biweekly boundaries.
 
   // Start of the plan period (e.g., first day of month/week)
-  periodStart          DateTime
+  periodStart DateTime //start of the plan period(e.g., first day of month/week)
 
   // Optional end of the period (can be derived, but keeping it helps querying/ranges)
-  periodEnd            DateTime?
+  periodEnd DateTime?
 
   // Single app currency preference (your UX decision to keep it simple)
-  currency             CurrencyCode  @default(USD)
+  currency CurrencyCode @default(USD)
 
-  language             LanguageCode  @default(en)
+  language LanguageCode @default(en)
 
   // 0 = disabled
-  totalBudgetLimitMinor Int          @default(0)
+  totalBudgetLimitMinor Int @default(0)
 
-  createdAt            DateTime      @default(now())
-  updatedAt            DateTime      @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Relations
-  budgetGoals          BudgetGoal[]
-  savingsGoals         SavingsGoal[]
+  budgetGoals  BudgetGoal[]
+  savingsGoals SavingsGoal[]
 
   // Prevent duplicate plans for the same user+period
   @@unique([userId, periodType, periodStart])
@@ -135,30 +132,30 @@ model Plan {
 }
 
 model BudgetGoal {
-  id         String   @id @default(cuid())
-  planId     String
-  plan       Plan     @relation(fields: [planId], references: [id], onDelete: Cascade)
+  id     String @id @default(cuid())
+  planId String
+  plan   Plan   @relation(fields: [planId], references: [id], onDelete: Cascade)
 
   category   String
   limitMinor Int
 
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([planId, category])
   @@index([planId])
 }
 
 model SavingsGoal {
-  id          String   @id @default(cuid())
-  planId      String
-  plan        Plan     @relation(fields: [planId], references: [id], onDelete: Cascade)
+  id     String @id @default(cuid())
+  planId String
+  plan   Plan   @relation(fields: [planId], references: [id], onDelete: Cascade)
 
   name        String
   targetMinor Int
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@unique([planId, name])
   @@index([planId])
