@@ -32,6 +32,9 @@ function getDevUserId(request: NextRequest, body?: unknown): string | null {
     if (typeof v === "string" && v.trim()) return v.trim();
   }
 
+  const envId = process.env.DEV_USER_ID;
+  if (envId && envId.trim()) return envId.trim();
+
   return null;
 }
 

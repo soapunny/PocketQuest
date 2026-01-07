@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { useFocusEffect } from "@react-navigation/native";
 import {
   Alert,
   FlatList,
@@ -18,7 +19,7 @@ import {
   INCOME_CATEGORIES,
   SAVINGS_GOALS,
 } from "../lib/categories";
-import { useTransactions } from "../lib/transactionsStore";
+import { fetchTransactions, TransactionDTO } from "../lib/transactionsApi";
 import { usePlan } from "../lib/planStore";
 import type { Currency } from "../lib/currency";
 import { formatMoney } from "../lib/currency";
@@ -36,11 +37,11 @@ function currencyOfTx(tx: any): Currency {
   return tx?.currency === "KRW" ? "KRW" : "USD";
 }
 
+//money minor unit
 function getTxAmountMinor(tx: any): number {
-  // Prefer new field; fall back to legacy amountMinor
-  if (typeof tx?.amountMinor === "number") return tx.amountMinor;
-  if (typeof tx?.amountMinor === "number") return tx.amountMinor;
-  return 0;
+  // Ensure we treat legacy signed values safely but store/display as non-negative.
+  const raw = typeof tx?.amountMinor === "number" ? tx.amountMinor : 0;
+  return Math.abs(raw); //abs minor > 0
 }
 
 function parseAmountTextToMinor(input: string, currency: Currency): number {
@@ -108,8 +109,72 @@ function typeUI(t: TxType) {
 }
 
 export default function TransactionsScreen() {
-  const { transactions, updateTransaction, deleteTransaction } =
-    useTransactions();
+  // 서버에서 받아온 트랜잭션들을 저장하는 로컬 상태
+  const [transactions, setTransactions] = useState<TransactionDTO[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  // 🔥 여기서 periodFilter를 먼저 선언
+  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>("ALL");
+
+  // 서버에서 트랜잭션 목록을 가져와 화면 상태에 반영
+  // useFocusEffect를 사용해서 화면이 다시 포커스될 때마다,
+  // 그리고 기간 필터(periodFilter)가 바뀔 때마다 자동으로 새로고침.
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+
+      // periodFilter 값에 따라 서버 range 파라미터를 결정
+      // THIS_YEAR 는 서버 range에 없으므로 ALL 로 받아온 뒤, 클라이언트에서 연도 필터를 적용.
+      const rangeParam: "ALL" | "THIS_MONTH" | "LAST_MONTH" =
+        periodFilter === "THIS_MONTH"
+          ? "THIS_MONTH"
+          : periodFilter === "LAST_MONTH"
+          ? "LAST_MONTH"
+          : "ALL";
+
+      (async () => {
+        try {
+          setIsLoading(true);
+          const { transactions } = await fetchTransactions({
+            range: rangeParam,
+            includeSummary: true,
+          });
+
+          if (isActive) {
+            setTransactions(transactions);
+          }
+        } catch (error) {
+          console.error(
+            "[TransactionsScreen] failed to load transactions from server",
+            error
+          );
+        } finally {
+          if (isActive) {
+            setIsLoading(false);
+          }
+        }
+      })();
+
+      // cleanup: 포커스가 풀리면 이후 setState 호출 방지
+      return () => {
+        isActive = false;
+      };
+    }, [periodFilter])
+  );
+
+  // 로컬 상태에서만 업데이트/삭제 반영
+  // (나중에 서버 PATCH/DELETE API와 연결 가능)
+  function updateTransaction(id: string, patch: Partial<TransactionDTO>) {
+    setTransactions((prev) =>
+      prev.map((tx) => (tx.id === id ? { ...tx, ...patch } : tx))
+    );
+  }
+
+  function deleteTransaction(id: string) {
+    setTransactions((prev) =>
+      prev.filter((tx) => (tx.id === id ? false : true))
+    );
+  }
+
   const { homeCurrency, language } = usePlan();
   const isKo = language === "ko";
   const tr = (en: string, ko: string) => (isKo ? ko : en);
@@ -129,7 +194,6 @@ export default function TransactionsScreen() {
 
   const [filterType, setFilterType] = useState<"ALL" | TxType>("ALL");
   const [searchText, setSearchText] = useState<string>("");
-  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>("ALL");
 
   const categoryOptions = useMemo(() => {
     if (type === "EXPENSE") return EXPENSE_CATEGORIES as readonly string[];
@@ -155,7 +219,9 @@ export default function TransactionsScreen() {
   }
 
   function getTxTimeMs(tx: any) {
-    const iso = tx?.createdAtISO ?? tx?.occurredAtISO;
+    // Prefer occurredAt from the DB model, fall back to createdAt or legacy *ISO fields.
+    const iso =
+      tx?.occurredAt ?? tx?.occurredAtISO ?? tx?.createdAt ?? tx?.createdAtISO;
     const t = iso ? new Date(iso).getTime() : NaN;
     return Number.isFinite(t) ? t : 0;
   }
@@ -257,8 +323,9 @@ export default function TransactionsScreen() {
       return;
     }
 
-    // Keep sign consistent: expense negative, income/saving positive
-    const nextAmountMinor = type === "EXPENSE" ? -absMinor : absMinor;
+    // DB 모델에서는 amountMinor를 항상 0 이상으로 저장하고,
+    // EXPENSE / INCOME / SAVING은 type으로 구분합니다.
+    const nextAmountMinor = absMinor;
 
     // Preserve fxUsdKrw if it exists (so historical conversion still works)
     const existing: any = editingTx as any;
@@ -384,10 +451,22 @@ export default function TransactionsScreen() {
         data={filteredTransactions}
         keyExtractor={(item: any) => item.id}
         renderItem={({ item }) => {
-          const cur = currencyOfTx(item as any);
-          const amtMinor = getTxAmountMinor(item as any);
-          const pill = typeUI((item as any).type as TxType);
+          const tx: any = item as any;
+          const cur = currencyOfTx(tx);
+          const amtMinor = getTxAmountMinor(tx);
+          const txType = (tx.type as TxType) ?? "EXPENSE";
+          const pill = typeUI(txType);
           const showFxNote = cur !== homeCurrency;
+
+          // Display-wise, treat EXPENSE as negative, INCOME/SAVING as positive,
+          // but keep the stored amountMinor non-negative in the DB.
+          const displayMinor = txType === "EXPENSE" ? -amtMinor : amtMinor;
+
+          const dateISO =
+            tx.occurredAt ??
+            tx.occurredAtISO ??
+            tx.createdAt ??
+            tx.createdAtISO;
 
           return (
             <Pressable
@@ -450,7 +529,7 @@ export default function TransactionsScreen() {
                   {(item as any).category}
                 </Text>
                 <Text style={[styles.txAmount, { color: pill.pillText }]}>
-                  {money(amtMinor, cur)}
+                  {money(displayMinor, cur)}
                 </Text>
 
                 {showFxNote ? (
@@ -462,9 +541,9 @@ export default function TransactionsScreen() {
                   </Text>
                 ) : null}
 
-                {!!(item as any).createdAtISO && (
+                {!!dateISO && (
                   <Text style={styles.metaText}>
-                    {new Date((item as any).createdAtISO).toLocaleString()}
+                    {new Date(dateISO).toLocaleString()}
                   </Text>
                 )}
 

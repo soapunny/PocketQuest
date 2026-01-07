@@ -5,20 +5,14 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev:mobile": "pnpm --filter ./apps/mobile start",
+    "dev:mobile": "cd apps/mobile && pnpm exec expo start",
+    "dev:mobile:clear": "cd apps/mobile && pnpm exec expo start -c",
+    "fix:mobile": "cd apps/mobile && pnpm exec expo install --fix",
     "dev:server": "pnpm --filter ./apps/server dev",
     "dev": "pnpm -r --parallel dev",
     "db:generate": "pnpm --filter @pocketquest/prisma generate",
     "db:migrate": "pnpm --filter @pocketquest/prisma migrate",
     "db:studio": "pnpm --filter @pocketquest/prisma studio"
-  },
-  "pnpm": {
-    "overrides": {
-      "react": "18.2.0",
-      "react-dom": "18.2.0",
-      "prisma": "6.19.1",
-      "@prisma/client": "6.19.1"
-    }
   },
   "keywords": [],
   "author": "",

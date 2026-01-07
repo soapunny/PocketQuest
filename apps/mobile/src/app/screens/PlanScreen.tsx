@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -7,7 +7,6 @@ import {
   ScrollView,
   StyleSheet,
   Alert,
-  ActivityIndicator,
 } from "react-native";
 
 import { usePlan } from "../lib/planStore";
@@ -36,12 +35,12 @@ function absMinor(n: any) {
 function txToHomeMinor(tx: any, homeCurrency: Currency): number {
   const currency: Currency = tx?.currency === "KRW" ? "KRW" : "USD";
 
-  // Prefer new field; fallback to legacy amountMinor
+  // Prefer new field; fallback to legacy amountCents
   const amountMinor =
     typeof tx?.amountMinor === "number"
       ? tx.amountMinor
-      : typeof tx?.amountMinor === "number"
-      ? tx.amountMinor
+      : typeof tx?.amountCents === "number"
+      ? tx.amountCents
       : 0;
 
   const absAmount = absMinor(amountMinor);
@@ -55,6 +54,16 @@ function txToHomeMinor(tx: any, homeCurrency: Currency): number {
 
 function placeholderForCurrency(currency: Currency) {
   return currency === "KRW" ? "0" : "0.00";
+}
+
+function currencyPrefix(currency: Currency) {
+  return currency === "KRW" ? "₩" : "$";
+}
+
+function formatMoneyNoSymbol(minor: number, currency: Currency) {
+  const s = formatMoney(minor, currency);
+  if (currency === "KRW") return s.replace(/^₩\s?/, "");
+  return s.replace(/^\$\s?/, "");
 }
 
 export default function PlanScreen() {
@@ -73,20 +82,30 @@ export default function PlanScreen() {
     "USD") as Currency;
   const { transactions } = useTransactions();
 
-  // DEV ONLY: replace with your real user id (until auth is wired)
-  const DEV_USER_ID = "cmjw3lb0d000076zuddg5lo6o";
+  // DEV ONLY: read from Expo public env so 각자 로컬 .env.development에서 설정 가능
+  // 예: EXPO_PUBLIC_DEV_USER_ID=cmjw3lb0d000076zuddg5lo6o
+  const DEV_USER_ID = process.env.EXPO_PUBLIC_DEV_USER_ID;
   const [serverHydrating, setServerHydrating] = useState(true);
+
+  const didHydrateRef = useRef(false);
 
   // Initial server sync (monthly only for now)
   useEffect(() => {
     let mounted = true;
+    if (didHydrateRef.current) return;
+    didHydrateRef.current = true;
 
     const load = async () => {
       try {
         setServerHydrating(true);
 
-        // Use current month for initial hydration (YYYY-MM)
-        const at = new Date().toISOString().slice(0, 7);
+        // Use the plan's current period month for hydration (YYYY-MM)
+        // This keeps hydration aligned with the period shown in the UI.
+        const range = getPlanPeriodRange(plan as any);
+        const at = String(range?.startISO || new Date().toISOString()).slice(
+          0,
+          7
+        );
 
         const res: any = await upsertMonthlyPlan({ userId: DEV_USER_ID, at });
         if (!mounted) return;
@@ -137,7 +156,7 @@ export default function PlanScreen() {
     return () => {
       mounted = false;
     };
-  }, [applyServerPlan]);
+  }, [applyServerPlan, plan]);
 
   const { startISO, endISO, type } = useMemo(
     () => getPlanPeriodRange(plan as any),
@@ -176,23 +195,29 @@ export default function PlanScreen() {
     EXPENSE_CATEGORIES[0]
   );
   const [selectedLimit, setSelectedLimit] = useState("");
+  const [savingBudgetGoal, setSavingBudgetGoal] = useState(false);
 
   const [selectedSavingsGoal, setSelectedSavingsGoal] = useState<string>(
     SAVINGS_GOALS[0]
   );
   const [selectedSavingsTarget, setSelectedSavingsTarget] = useState("");
+  const [savingSavingsGoal, setSavingSavingsGoal] = useState(false);
 
   useEffect(() => {
     const g = plan.budgetGoals.find((x) => x.category === selectedCategory);
     setSelectedLimit(
-      g && g.limitMinor > 0 ? formatMoney(g.limitMinor, baseCurrency) : ""
+      g && g.limitMinor > 0
+        ? formatMoneyNoSymbol(g.limitMinor, baseCurrency)
+        : ""
     );
   }, [selectedCategory, plan.budgetGoals, baseCurrency]);
 
   useEffect(() => {
     const g = plan.savingsGoals.find((x) => x.name === selectedSavingsGoal);
     setSelectedSavingsTarget(
-      g && g.targetMinor > 0 ? formatMoney(g.targetMinor, baseCurrency) : ""
+      g && g.targetMinor > 0
+        ? formatMoneyNoSymbol(g.targetMinor, baseCurrency)
+        : ""
     );
   }, [selectedSavingsGoal, plan.savingsGoals, baseCurrency]);
 
@@ -234,17 +259,167 @@ export default function PlanScreen() {
     return computePlanProgressPercent(plan as any, transactions);
   }, [plan, transactions]);
 
-  const saveSelectedCategoryLimit = () => {
-    const v = parseInputToMinor(selectedLimit, baseCurrency);
-    upsertBudgetGoalLimit(selectedCategory, v);
-  };
-  const clearSelectedCategoryLimit = () => {
-    setSelectedLimit("");
-    upsertBudgetGoalLimit(selectedCategory, 0);
+  const applyServerResponse = (res: any) => {
+    const sp: any = res?.plan;
+    if (!sp) return;
+
+    // 서버에서 내려온 "부분 goals"을 기존 plan과 merge
+    const currentBudget = Array.isArray(plan?.budgetGoals)
+      ? plan.budgetGoals
+      : [];
+    const currentSavings = Array.isArray(plan?.savingsGoals)
+      ? plan.savingsGoals
+      : [];
+
+    const incomingBudget = Array.isArray(sp?.budgetGoals)
+      ? sp.budgetGoals.map((g: any) => ({
+          category: String(g.category ?? "Other"),
+          limitMinor: Number(g.limitMinor ?? 0),
+        }))
+      : [];
+
+    const incomingSavings = Array.isArray(sp?.savingsGoals)
+      ? sp.savingsGoals.map((g: any) => ({
+          name: String(g.name ?? "Other"),
+          targetMinor: Number(g.targetMinor ?? 0),
+        }))
+      : [];
+
+    // merge budgetGoals by category
+    const budgetMap = new Map<
+      string,
+      { category: string; limitMinor: number }
+    >();
+    for (const g of currentBudget) budgetMap.set(g.category, { ...g });
+    for (const g of incomingBudget) {
+      if ((g.limitMinor ?? 0) <= 0) budgetMap.delete(g.category);
+      else budgetMap.set(g.category, g);
+    }
+
+    // merge savingsGoals by name
+    const savingsMap = new Map<string, { name: string; targetMinor: number }>();
+    for (const g of currentSavings) savingsMap.set(g.name, { ...g });
+    for (const g of incomingSavings) {
+      if ((g.targetMinor ?? 0) <= 0) savingsMap.delete(g.name);
+      else savingsMap.set(g.name, g);
+    }
+
+    applyServerPlan({
+      periodType: sp.periodType,
+      periodStartUTC: sp.periodStart,
+      totalBudgetLimitMinor: sp.totalBudgetLimitMinor,
+      budgetGoals: Array.from(budgetMap.values()),
+      savingsGoals: Array.from(savingsMap.values()),
+    });
   };
 
-  const [savingToServer, setSavingToServer] = useState(false);
+  // monthly-only key (YYYY-MM)
+  const at =
+    type === "MONTHLY"
+      ? String(startISO || new Date().toISOString()).slice(0, 7)
+      : undefined;
 
+  const saveSelectedCategoryLimit = async () => {
+    try {
+      if (savingBudgetGoal) return;
+      setSavingBudgetGoal(true);
+      const v = parseInputToMinor(selectedLimit, baseCurrency);
+
+      // Policy: saving 0 (or empty/invalid -> 0) deletes the goal
+      if (v <= 0) {
+        setSelectedLimit("");
+        upsertBudgetGoalLimit(selectedCategory, 0);
+
+        if (!at) {
+          Alert.alert(
+            tr("Save failed", "저장 실패"),
+            tr(
+              "Server sync is monthly-only for now.",
+              "서버 저장은 현재 월간만 지원해요."
+            )
+          );
+          return;
+        }
+
+        const res = await patchMonthlyPlan({
+          userId: DEV_USER_ID,
+          at,
+          budgetGoals: [{ category: selectedCategory, limitMinor: 0 }],
+        });
+
+        applyServerResponse(res);
+        return;
+      }
+
+      // optimistic local update
+      upsertBudgetGoalLimit(selectedCategory, v);
+
+      if (!at) {
+        Alert.alert(
+          tr("Save failed", "저장 실패"),
+          tr(
+            "Server sync is monthly-only for now.",
+            "서버 저장은 현재 월간만 지원해요."
+          )
+        );
+        return;
+      }
+
+      const res = await patchMonthlyPlan({
+        userId: DEV_USER_ID,
+        at,
+        budgetGoals: [{ category: selectedCategory, limitMinor: v }],
+      });
+
+      applyServerResponse(res);
+    } catch (e: any) {
+      Alert.alert(
+        tr("Save failed", "저장 실패"),
+        e?.message || "Unknown error"
+      );
+    } finally {
+      setSavingBudgetGoal(false);
+    }
+  };
+
+  const clearSelectedCategoryLimit = async () => {
+    try {
+      if (savingBudgetGoal) return;
+      setSavingBudgetGoal(true);
+      setSelectedLimit("");
+
+      // optimistic local update
+      upsertBudgetGoalLimit(selectedCategory, 0);
+
+      if (!at) {
+        Alert.alert(
+          tr("Save failed", "저장 실패"),
+          tr(
+            "Server sync is monthly-only for now.",
+            "서버 저장은 현재 월간만 지원해요."
+          )
+        );
+        return;
+      }
+
+      const res = await patchMonthlyPlan({
+        userId: DEV_USER_ID,
+        at,
+        budgetGoals: [{ category: selectedCategory, limitMinor: 0 }],
+      });
+
+      applyServerResponse(res);
+    } catch (e: any) {
+      Alert.alert(
+        tr("Save failed", "저장 실패"),
+        e?.message || "Unknown error"
+      );
+    } finally {
+      setSavingBudgetGoal(false);
+    }
+  };
+  // NOTE: legacy full-sync action (UI hidden). Keeping for now for debugging/future use.
+  /*
   const savePlanToServer = async () => {
     try {
       setSavingToServer(true);
@@ -382,6 +557,107 @@ export default function PlanScreen() {
       setSavingToServer(false);
     }
   };
+  */
+
+  const saveSelectedSavingsTarget = async () => {
+    try {
+      if (savingSavingsGoal) return;
+      setSavingSavingsGoal(true);
+      const v = parseInputToMinor(selectedSavingsTarget, baseCurrency);
+
+      // Policy: saving 0 (or empty/invalid -> 0) deletes the goal
+      if (v <= 0) {
+        setSelectedSavingsTarget("");
+        upsertSavingsGoalTarget(selectedSavingsGoal, 0);
+
+        if (!at) {
+          Alert.alert(
+            tr("Save failed", "저장 실패"),
+            tr(
+              "Server sync is monthly-only for now.",
+              "서버 저장은 현재 월간만 지원해요."
+            )
+          );
+          return;
+        }
+
+        const res = await patchMonthlyPlan({
+          userId: DEV_USER_ID,
+          at,
+          savingsGoals: [{ name: selectedSavingsGoal, targetMinor: 0 }],
+        });
+
+        applyServerResponse(res);
+        return;
+      }
+
+      // optimistic local update
+      upsertSavingsGoalTarget(selectedSavingsGoal, v);
+
+      if (!at) {
+        Alert.alert(
+          tr("Save failed", "저장 실패"),
+          tr(
+            "Server sync is monthly-only for now.",
+            "서버 저장은 현재 월간만 지원해요."
+          )
+        );
+        return;
+      }
+
+      const res = await patchMonthlyPlan({
+        userId: DEV_USER_ID,
+        at,
+        savingsGoals: [{ name: selectedSavingsGoal, targetMinor: v }],
+      });
+
+      applyServerResponse(res);
+    } catch (e: any) {
+      Alert.alert(
+        tr("Save failed", "저장 실패"),
+        e?.message || "Unknown error"
+      );
+    } finally {
+      setSavingSavingsGoal(false);
+    }
+  };
+
+  const clearSelectedSavingsTarget = async () => {
+    try {
+      if (savingSavingsGoal) return;
+      setSavingSavingsGoal(true);
+      setSelectedSavingsTarget("");
+
+      // optimistic local update
+      upsertSavingsGoalTarget(selectedSavingsGoal, 0);
+
+      if (!at) {
+        Alert.alert(
+          tr("Save failed", "저장 실패"),
+          tr(
+            "Server sync is monthly-only for now.",
+            "서버 저장은 현재 월간만 지원해요."
+          )
+        );
+        return;
+      }
+
+      const res = await patchMonthlyPlan({
+        userId: DEV_USER_ID,
+        at,
+        savingsGoals: [{ name: selectedSavingsGoal, targetMinor: 0 }],
+      });
+
+      applyServerResponse(res);
+    } catch (e: any) {
+      Alert.alert(
+        tr("Save failed", "저장 실패"),
+        e?.message || "Unknown error"
+      );
+    } finally {
+      setSavingSavingsGoal(false);
+    }
+  };
 
   console.log(
     "[PlanScreen] render",
@@ -413,28 +689,6 @@ export default function PlanScreen() {
         {serverHydrating ? (
           <Text style={styles.serverHint}>
             {tr("Loading from server...", "서버에서 불러오는 중...")}
-          </Text>
-        ) : null}
-        <Pressable
-          onPress={savePlanToServer}
-          disabled={savingToServer}
-          style={[styles.serverBtn, savingToServer && styles.serverBtnDisabled]}
-        >
-          {savingToServer ? (
-            <ActivityIndicator />
-          ) : (
-            <Text style={styles.serverBtnText}>
-              {tr("Save to Server", "서버에 저장")}
-            </Text>
-          )}
-        </Pressable>
-
-        {type !== "MONTHLY" ? (
-          <Text style={styles.serverHint}>
-            {tr(
-              "(Server sync is monthly-only for now)",
-              "(서버 동기화는 현재 월간만 지원)"
-            )}
           </Text>
         ) : null}
       </View>
@@ -510,31 +764,44 @@ export default function PlanScreen() {
               )}
 
               <View style={styles.row}>
-                <TextInput
-                  value={selectedLimit}
-                  onChangeText={setSelectedLimit}
-                  placeholder={
-                    isKo
-                      ? `${periodLabel} 한도 (${baseCurrency})`
-                      : `${periodLabel.toLowerCase()} limit (${baseCurrency})`
-                  }
-                  inputMode={baseCurrency === "KRW" ? "numeric" : "decimal"}
-                  keyboardType={
-                    baseCurrency === "KRW" ? "number-pad" : "decimal-pad"
-                  }
-                  style={styles.input}
-                />
+                <View style={styles.moneyInputWrap}>
+                  <Text style={styles.moneyPrefix}>
+                    {currencyPrefix(baseCurrency)}
+                  </Text>
+                  <TextInput
+                    value={selectedLimit}
+                    onChangeText={setSelectedLimit}
+                    placeholder={placeholderForCurrency(baseCurrency)}
+                    inputMode={baseCurrency === "KRW" ? "numeric" : "decimal"}
+                    keyboardType={
+                      baseCurrency === "KRW" ? "number-pad" : "decimal-pad"
+                    }
+                    style={styles.moneyInput}
+                  />
+                </View>
                 <Pressable
                   onPress={saveSelectedCategoryLimit}
-                  style={styles.saveBtn}
+                  disabled={savingBudgetGoal}
+                  style={[
+                    styles.saveBtn,
+                    savingBudgetGoal && styles.saveBtnDisabled,
+                  ]}
                 >
-                  <Text style={styles.saveBtnText}>{tr("Save", "저장")}</Text>
+                  <Text style={styles.saveBtnText}>
+                    {savingBudgetGoal
+                      ? tr("Saving...", "저장중...")
+                      : tr("Save", "저장")}
+                  </Text>
                 </Pressable>
               </View>
 
               <Pressable
                 onPress={clearSelectedCategoryLimit}
-                style={styles.linkWrap}
+                disabled={savingBudgetGoal}
+                style={[
+                  styles.linkWrap,
+                  savingBudgetGoal && styles.linkDisabled,
+                ]}
               >
                 <Text style={styles.linkText}>
                   {tr("Clear this category limit", "이 카테고리 한도 지우기")}
@@ -609,39 +876,44 @@ export default function PlanScreen() {
               )}
 
               <View style={styles.row}>
-                <TextInput
-                  value={selectedSavingsTarget}
-                  onChangeText={setSelectedSavingsTarget}
-                  placeholder={
-                    isKo
-                      ? `${periodLabel} 목표 (${baseCurrency})`
-                      : `${periodLabel.toLowerCase()} target (${baseCurrency})`
-                  }
-                  inputMode={baseCurrency === "KRW" ? "numeric" : "decimal"}
-                  keyboardType={
-                    baseCurrency === "KRW" ? "number-pad" : "decimal-pad"
-                  }
-                  style={styles.input}
-                />
+                <View style={styles.moneyInputWrap}>
+                  <Text style={styles.moneyPrefix}>
+                    {currencyPrefix(baseCurrency)}
+                  </Text>
+                  <TextInput
+                    value={selectedSavingsTarget}
+                    onChangeText={setSelectedSavingsTarget}
+                    placeholder={placeholderForCurrency(baseCurrency)}
+                    inputMode={baseCurrency === "KRW" ? "numeric" : "decimal"}
+                    keyboardType={
+                      baseCurrency === "KRW" ? "number-pad" : "decimal-pad"
+                    }
+                    style={styles.moneyInput}
+                  />
+                </View>
                 <Pressable
-                  onPress={() =>
-                    upsertSavingsGoalTarget(
-                      selectedSavingsGoal,
-                      parseInputToMinor(selectedSavingsTarget, baseCurrency)
-                    )
-                  }
-                  style={styles.saveBtn}
+                  onPress={saveSelectedSavingsTarget}
+                  disabled={savingSavingsGoal}
+                  style={[
+                    styles.saveBtn,
+                    savingSavingsGoal && styles.saveBtnDisabled,
+                  ]}
                 >
-                  <Text style={styles.saveBtnText}>{tr("Save", "저장")}</Text>
+                  <Text style={styles.saveBtnText}>
+                    {savingSavingsGoal
+                      ? tr("Saving...", "저장중...")
+                      : tr("Save", "저장")}
+                  </Text>
                 </Pressable>
               </View>
 
               <Pressable
-                onPress={() => {
-                  setSelectedSavingsTarget("");
-                  upsertSavingsGoalTarget(selectedSavingsGoal, 0);
-                }}
-                style={styles.linkWrap}
+                onPress={clearSelectedSavingsTarget}
+                disabled={savingSavingsGoal}
+                style={[
+                  styles.linkWrap,
+                  savingSavingsGoal && styles.linkDisabled,
+                ]}
               >
                 <Text style={styles.linkText}>
                   {tr("Clear this savings target", "이 저축 목표 지우기")}
@@ -717,14 +989,24 @@ const styles = StyleSheet.create({
   cardBody: { color: "#666", marginBottom: 10 },
 
   row: { flexDirection: "row", gap: 10, alignItems: "center" },
-  input: {
+  moneyInputWrap: {
     flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
     borderWidth: 1,
     borderColor: "#ddd",
     borderRadius: 12,
     paddingHorizontal: 12,
-    paddingVertical: 10,
     backgroundColor: "white",
+  },
+  moneyPrefix: {
+    fontWeight: "800",
+    color: "#111",
+    marginRight: 6,
+  },
+  moneyInput: {
+    flex: 1,
+    paddingVertical: 10,
   },
   saveBtn: {
     width: 92,
@@ -735,6 +1017,8 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   saveBtnText: { color: "white", fontWeight: "800" },
+  saveBtnDisabled: { opacity: 0.6 },
+  linkDisabled: { opacity: 0.5 },
 
   linkWrap: { marginTop: 10 },
   linkText: { color: "#666", fontWeight: "600" },

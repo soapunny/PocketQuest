@@ -6,7 +6,7 @@ generator client {
 
 datasource db {
   provider = "postgresql" //Our DB => postgresql
-  url      = env("DATABASE_URL") // not used inㄴ Primsa 7.0
+  url      = env("DATABASE_URL") // not used in Primsa 7.0
 }
 
 // =====================

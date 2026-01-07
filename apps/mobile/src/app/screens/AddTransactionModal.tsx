@@ -10,7 +10,8 @@ import {
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 
-import { TxType, useTransactions } from "../lib/transactionsStore";
+import { TxType } from "../lib/transactionsApi";
+import { createTransaction } from "../lib/transactionsApi";
 import {
   EXPENSE_CATEGORIES,
   INCOME_CATEGORIES,
@@ -27,7 +28,6 @@ import ScreenCard from "../components/layout/ScreenCard";
 
 export default function AddTransactionModal() {
   const navigation = useNavigation();
-  const { addTransaction } = useTransactions();
 
   const { homeCurrency, displayCurrency, language } = usePlan();
   const isKo = language === "ko";
@@ -87,25 +87,35 @@ export default function AddTransactionModal() {
 
   const canSave = (amountValue ?? 0) > 0 && fxValid;
 
-  const onSave = () => {
+  const onSave = async () => {
     if (!canSave) return;
 
+    // 항상 양수(또는 0 이상)로 minor 단위를 저장하고,
+    // EXPENSE/INCOME/SAVING 구분은 type으로 처리합니다.
     const absMinor = Math.round(
       (amountValue ?? 0) * (currency === "USD" ? 100 : 1)
     );
-    const amountMinor = type === "EXPENSE" ? -absMinor : absMinor;
+    const amountMinor = absMinor;
 
-    addTransaction({
-      type,
-      amountMinor,
-      currency,
-      fxUsdKrw: fxNeeded ? fxUsdKrw : undefined,
-      category,
-      occurredAtISO: new Date().toISOString(),
-      note: note.trim() || undefined,
-    } as any);
+    try {
+      await createTransaction({
+        type,
+        amountMinor,
+        currency,
+        fxUsdKrw: fxNeeded ? fxUsdKrw : undefined,
+        category,
+        occurredAtISO: new Date().toISOString(),
+        note: note.trim() || undefined,
+      });
 
-    navigation.goBack();
+      navigation.goBack();
+    } catch (error) {
+      console.error(
+        "[AddTransactionModal] failed to create transaction",
+        error
+      );
+      // TODO: 필요하면 여기서 Alert 등으로 에러 표시 가능
+    }
   };
 
   return (

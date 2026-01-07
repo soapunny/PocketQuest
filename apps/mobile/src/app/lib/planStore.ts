@@ -6,6 +6,8 @@ import React, {
   useMemo,
   useState,
 } from "react";
+const API_BASE_URL =
+  process.env.EXPO_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 import { EXPENSE_CATEGORIES } from "./categories";
 import type { Currency } from "./currency";
 
@@ -98,6 +100,10 @@ type Store = {
         }[]
       | null;
   }) => void;
+  // --- NEW: bootstrap/initialize 상태 및 함수 ---
+  isInitialized: boolean;
+  isLoading: boolean;
+  initialize: () => Promise<void>;
 };
 
 const PlanContext = createContext<Store | null>(null);
@@ -280,6 +286,8 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       savingsGoals: [],
     };
   });
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   const setTotalBudgetLimitMinor: Store["setTotalBudgetLimitMinor"] = (
     minor
@@ -368,6 +376,127 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         };
       });
     }, []);
+
+  const applyServerPlan: Store["applyServerPlan"] = useCallback(
+    (serverPlan) => {
+      // Be permissive: server might omit some fields
+      const periodType: PeriodType = (serverPlan?.periodType ??
+        plan.periodType ??
+        "MONTHLY") as PeriodType;
+
+      // Server sends DateTime ISO for periodStart. Use date-only (YYYY-MM-DD).
+      const rawStart = (
+        serverPlan?.periodStartUTC ??
+        serverPlan?.periodStart ??
+        ""
+      ).toString();
+      const periodStartISO = rawStart ? rawStart.slice(0, 10) : "";
+
+      const serverBudgetGoals = Array.isArray(serverPlan?.budgetGoals)
+        ? serverPlan!.budgetGoals
+        : [];
+
+      const serverSavingsGoals = Array.isArray(serverPlan?.savingsGoals)
+        ? serverPlan!.savingsGoals
+        : [];
+
+      const serverTotalRaw = serverPlan?.totalBudgetLimitMinor;
+      const serverTotalClean = normalizePositiveInt(serverTotalRaw);
+
+      setPlan((p) => {
+        // Merge budget goals against defaults so chips/order stay stable
+        const defaults = buildDefaultBudgetGoals();
+        const nextBudgetGoals = mergeBudgetGoalsWithDefaults(
+          defaults,
+          serverBudgetGoals
+        );
+
+        // Savings goals: keep stable IDs when possible
+        const nextSavingsGoals = mergeSavingsGoals(
+          p.savingsGoals,
+          serverSavingsGoals
+        );
+
+        // Prefer explicit server total when provided (>0). Otherwise compute from category limits.
+        const computedTotal = sumBudgetLimits(nextBudgetGoals);
+        const totalBudgetLimitMinor =
+          serverTotalClean > 0 ? serverTotalClean : computedTotal;
+
+        const nextPeriodStartISO = periodStartISO || p.periodStartISO;
+
+        return {
+          ...p,
+          periodType,
+          periodStartISO: nextPeriodStartISO,
+          // Keep legacy field aligned for WEEKLY (back-compat)
+          weekStartISO:
+            periodType === "WEEKLY" ? nextPeriodStartISO : p.weekStartISO,
+          totalBudgetLimitMinor,
+          budgetGoals: nextBudgetGoals,
+          savingsGoals: nextSavingsGoals,
+        };
+      });
+    },
+    [plan.periodType]
+  );
+
+  const initialize: Store["initialize"] = useCallback(async () => {
+    // 이미 초기화 중이거나 끝났다면 다시 실행하지 않음
+    if (isInitialized || isLoading) return;
+    setIsLoading(true);
+    try {
+      // 1) 클라이언트 기준으로 기간 롤오버 먼저 보정
+      refreshPeriodIfNeeded();
+
+      // 2) 서버에서 현재 Plan 데이터 가져오기
+      //    - /api/plans GET: 가장 최근 Plan을 반환
+      const endpoint = `${API_BASE_URL}/api/plans`;
+      try {
+        const res = await fetch(endpoint, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        });
+
+        if (!res.ok) {
+          console.warn(
+            "[planStore] Failed to fetch plan from server",
+            res.status,
+            res.statusText
+          );
+        } else {
+          const raw = await res.json();
+          // 서버 Plan(Prisma 모델)을 클라이언트 Plan 패치용 구조로 변환
+          const serverPlan = {
+            periodType: raw.periodType,
+            periodStartUTC: raw.periodStart,
+            totalBudgetLimitMinor: raw.totalBudgetLimitMinor ?? null,
+            budgetGoals: Array.isArray(raw.budgetGoals)
+              ? raw.budgetGoals.map((g: any) => ({
+                  category: g.category,
+                  limitMinor:
+                    typeof g.limitMinor === "number" ? g.limitMinor : null,
+                }))
+              : null,
+            savingsGoals: Array.isArray(raw.savingsGoals)
+              ? raw.savingsGoals.map((g: any) => ({
+                  name: g.name,
+                  targetMinor:
+                    typeof g.targetMinor === "number" ? g.targetMinor : null,
+                }))
+              : null,
+          };
+          applyServerPlan(serverPlan);
+        }
+      } catch (err) {
+        console.error("[planStore] Error while fetching plan from server", err);
+      }
+    } finally {
+      setIsLoading(false);
+      setIsInitialized(true);
+    }
+  }, [isInitialized, isLoading, refreshPeriodIfNeeded, applyServerPlan]);
 
   useEffect(() => {
     // Ensure correct start on app launch
@@ -471,69 +600,6 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     }));
   };
 
-  const applyServerPlan: Store["applyServerPlan"] = useCallback(
-    (serverPlan) => {
-      // Be permissive: server might omit some fields
-      const periodType: PeriodType = (serverPlan?.periodType ??
-        plan.periodType ??
-        "MONTHLY") as PeriodType;
-
-      // Server sends DateTime ISO for periodStart. Use date-only (YYYY-MM-DD).
-      const rawStart = (
-        serverPlan?.periodStartUTC ??
-        serverPlan?.periodStart ??
-        ""
-      ).toString();
-      const periodStartISO = rawStart ? rawStart.slice(0, 10) : "";
-
-      const serverBudgetGoals = Array.isArray(serverPlan?.budgetGoals)
-        ? serverPlan!.budgetGoals
-        : [];
-
-      const serverSavingsGoals = Array.isArray(serverPlan?.savingsGoals)
-        ? serverPlan!.savingsGoals
-        : [];
-
-      const serverTotalRaw = serverPlan?.totalBudgetLimitMinor;
-      const serverTotalClean = normalizePositiveInt(serverTotalRaw);
-
-      setPlan((p) => {
-        // Merge budget goals against defaults so chips/order stay stable
-        const defaults = buildDefaultBudgetGoals();
-        const nextBudgetGoals = mergeBudgetGoalsWithDefaults(
-          defaults,
-          serverBudgetGoals
-        );
-
-        // Savings goals: keep stable IDs when possible
-        const nextSavingsGoals = mergeSavingsGoals(
-          p.savingsGoals,
-          serverSavingsGoals
-        );
-
-        // Prefer explicit server total when provided (>0). Otherwise compute from category limits.
-        const computedTotal = sumBudgetLimits(nextBudgetGoals);
-        const totalBudgetLimitMinor =
-          serverTotalClean > 0 ? serverTotalClean : computedTotal;
-
-        const nextPeriodStartISO = periodStartISO || p.periodStartISO;
-
-        return {
-          ...p,
-          periodType,
-          periodStartISO: nextPeriodStartISO,
-          // Keep legacy field aligned for WEEKLY (back-compat)
-          weekStartISO:
-            periodType === "WEEKLY" ? nextPeriodStartISO : p.weekStartISO,
-          totalBudgetLimitMinor,
-          budgetGoals: nextBudgetGoals,
-          savingsGoals: nextSavingsGoals,
-        };
-      });
-    },
-    [plan.periodType]
-  );
-
   const store = useMemo<Store>(
     () => ({
       plan,
@@ -552,7 +618,11 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       upsertSavingsGoalTarget,
       addSavingsGoal,
       removeSavingsGoal,
-      applyServerPlan, // <-- add the missing required property
+      applyServerPlan,
+      // --- NEW: bootstrap 상태 + 함수 ---
+      isInitialized,
+      isLoading,
+      initialize,
     }),
     [
       plan,
@@ -568,14 +638,21 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       addSavingsGoal,
       removeSavingsGoal,
       applyServerPlan,
+      // --- NEW dependencies ---
+      isInitialized,
+      isLoading,
+      initialize,
     ]
   );
 
   return React.createElement(PlanContext.Provider, { value: store }, children);
 }
 
-export function usePlan() {
+export function usePlanStore() {
   const ctx = useContext(PlanContext);
-  if (!ctx) throw new Error("usePlan must be used within PlanProvider");
+  if (!ctx) throw new Error("usePlanStore must be used within PlanProvider");
   return ctx;
 }
+
+// 기존 코드와의 호환성을 위해 usePlan도 그대로 export (alias)
+export const usePlan = usePlanStore;

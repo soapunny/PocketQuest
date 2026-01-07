@@ -1,5 +1,31 @@
 import { z } from "zod";
 import { fromZonedTime, toZonedTime } from "date-fns-tz";
+import { NextRequest, NextResponse } from "next/server";
+// NOTE: Avoid importing model types (e.g., BudgetGoal) because some Prisma client builds may not export them reliably in this repo setup.
+import { prisma } from "@/lib/prisma";
+import { getMonthlyPeriodStartUTC } from "@/lib/period";
+
+function getDevUserId(request: NextRequest, body?: unknown): string | null {
+  if (process.env.NODE_ENV === "production") return null;
+
+  const headerId = request.headers.get("x-dev-user-id");
+  if (headerId && headerId.trim()) return headerId.trim();
+
+  const urlId = request.nextUrl.searchParams.get("userId");
+  if (urlId && urlId.trim()) return urlId.trim();
+
+  if (body && typeof body === "object" && body !== null && "userId" in body) {
+    const v = (body as any).userId;
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+
+  const envId = process.env.DEV_USER_ID;
+  if (envId && envId.trim()) return envId.trim();
+
+  return null;
+}
+
+type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
 function parseAtToMonthStartUTC(atRaw: string, timeZone: string): Date | null {
   const s = String(atRaw || "").trim();
@@ -74,10 +100,6 @@ function parseAtToDate(atRaw: string | null | undefined): Date {
   }
   return parsed;
 }
-import { NextRequest, NextResponse } from "next/server";
-import type { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
-import { getMonthlyPeriodStartUTC } from "@/lib/period";
 
 function normalizeTimeZone(tzRaw: unknown): string {
   const tz = typeof tzRaw === "string" ? tzRaw.trim() : "";
@@ -152,11 +174,13 @@ function monthlyPeriodStartUTCFromAt(
 }
 
 export async function GET(request: NextRequest) {
-  const userId = (request.nextUrl.searchParams.get("userId") || "").trim();
+  const queryUserId = (request.nextUrl.searchParams.get("userId") || "").trim();
+  const devUserId = !queryUserId ? getDevUserId(request) : null;
+  const userId = queryUserId || devUserId || "";
 
   if (!userId) {
     return NextResponse.json(
-      // DEV ONLY: userId is passed explicitly.
+      // DEV ONLY: userId is passed explicitly or resolved from DEV_USER_ID.
       // In production, this should come from auth/session.
       { error: "userId is required (dev only)" },
       { status: 400 }
@@ -318,103 +342,163 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-  const body: unknown = await request.json().catch(() => ({}));
-
-  const userId =
-    typeof body === "object" &&
-    body !== null &&
-    "userId" in body &&
-    typeof (body as any).userId === "string"
-      ? (body as any).userId.trim()
-      : "";
-
-  if (!userId) {
-    return NextResponse.json(
-      // DEV ONLY: userId is passed explicitly.
-      // In production, this should come from auth/session.
-      { error: "userId is required (dev only)" },
-      { status: 400 }
-    );
-  }
-
-  // Optional: same formats as GET (?at=YYYY-MM or ISO)
-  // Client contract: `at` is query-only.
-  const atRaw = (request.nextUrl.searchParams.get("at") || "").trim();
-
-  // 1) 유저 timezone 조회
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { id: true, timeZone: true },
-  });
-
-  if (!user) {
-    return NextResponse.json({ error: "User not found" }, { status: 404 });
-  }
-
-  const timeZone = normalizeTimeZone(user.timeZone);
-
-  const atDate = parseAtToUTC(atRaw, timeZone);
-
-  // 2) 월 시작 계산(UTC 저장값)
   try {
-    assertValidDate(atDate, "atDate");
-    assertReasonableDateRange(atDate, "atDate");
-  } catch (e: any) {
-    return NextResponse.json(
-      {
-        error: "Invalid date inputs",
-        details: e?.message ?? String(e),
-        debug: { at: atRaw || null, note: "Expected at=YYYY-MM" },
+    const body: unknown = await request.json().catch(() => ({}));
+
+    let userId =
+      typeof body === "object" &&
+      body !== null &&
+      "userId" in body &&
+      typeof (body as any).userId === "string"
+        ? (body as any).userId.trim()
+        : "";
+
+    if (!userId) {
+      const devUserId = getDevUserId(request, body);
+      if (devUserId) {
+        userId = devUserId;
+      }
+    }
+
+    if (!userId) {
+      return NextResponse.json(
+        // DEV ONLY: userId is passed explicitly or resolved from DEV_USER_ID.
+        // In production, this should come from auth/session.
+        { error: "userId is required (dev only)" },
+        { status: 400 }
+      );
+    }
+
+    // Client contract: prefer query (?at=YYYY-MM or ISO). Backward-compat: allow body.at.
+    const atRawQuery = (request.nextUrl.searchParams.get("at") || "").trim();
+    const atRawBody =
+      typeof body === "object" &&
+      body !== null &&
+      "at" in body &&
+      typeof (body as any).at === "string"
+        ? String((body as any).at).trim()
+        : "";
+    const atRaw = atRawQuery || atRawBody;
+
+    // 1) Fetch user timezone
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, timeZone: true },
+    });
+
+    if (!user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    const timeZone = normalizeTimeZone(user.timeZone);
+
+    // 2) Normalize/validate dates (same rules as PATCH)
+    const atDate = parseAtToUTC(atRaw, timeZone);
+
+    try {
+      assertValidDate(atDate, "atDate");
+      assertReasonableDateRange(atDate, "atDate");
+    } catch (e: any) {
+      return NextResponse.json(
+        {
+          error: "Invalid date inputs",
+          details: e?.message ?? String(e),
+          debug: { at: atRaw || null, note: "Expected at=YYYY-MM" },
+        },
+        { status: 400 }
+      );
+    }
+
+    const periodStart = monthlyPeriodStartUTCFromAt(atRaw, timeZone);
+
+    if (process.env.NODE_ENV === "development") {
+      console.log("[POST monthly] atRaw/atDate/periodStart", {
+        atRaw: atRaw || null,
+        atDate:
+          atDate instanceof Date ? atDate.toISOString?.() : String(atDate),
+        periodStart:
+          periodStart instanceof Date
+            ? periodStart.toISOString?.()
+            : String(periodStart),
+        timeZone,
+      });
+    }
+
+    // 3) Upsert plan for this month (idempotent create if missing)
+    const plan = await prisma.plan.upsert({
+      where: {
+        userId_periodType_periodStart: {
+          userId,
+          periodType: "MONTHLY",
+          periodStart,
+        },
       },
-      { status: 400 }
-    );
-  }
-
-  const periodStart = monthlyPeriodStartUTCFromAt(atRaw, timeZone);
-
-  // 3) (userId, periodType, periodStart) 유니크키로 upsert
-  const plan = await prisma.plan.upsert({
-    where: {
-      userId_periodType_periodStart: {
+      update: {},
+      create: {
         userId,
         periodType: "MONTHLY",
         periodStart,
+        // Defaults (can later come from settings)
+        currency: "USD",
+        language: "en",
+        totalBudgetLimitMinor: 0,
       },
-    },
-    update: {},
-    create: {
-      userId,
-      periodType: "MONTHLY",
-      periodStart,
-      // 나중에 settings에서 가져오게 바꿔도 됨
-      currency: "USD",
-      language: "en",
-      totalBudgetLimitMinor: 0,
-    },
-    include: {
-      budgetGoals: true,
-      savingsGoals: true,
-    },
-  });
+      include: {
+        budgetGoals: true,
+        savingsGoals: true,
+      },
+    });
 
-  return NextResponse.json({
-    plan,
-    ...(process.env.NODE_ENV === "development"
-      ? {
-          debug: {
-            timeZone,
-            periodStartUTC: periodStart.toISOString(),
-            at: atRaw || null,
-          },
-        }
-      : {}),
-  });
+    return NextResponse.json({
+      plan,
+      ...(process.env.NODE_ENV === "development"
+        ? {
+            debug: {
+              timeZone,
+              periodStartUTC: periodStart.toISOString(),
+              at: atRaw || null,
+            },
+          }
+        : {}),
+    });
+  } catch (error: any) {
+    console.error("POST /api/plans/monthly error:", error);
+
+    const isDev = process.env.NODE_ENV === "development";
+    const message =
+      error && typeof error.message === "string"
+        ? error.message
+        : typeof error === "string"
+        ? error
+        : "Internal server error";
+
+    const code =
+      error && typeof error.code === "string" ? error.code : undefined;
+    const meta =
+      error && typeof error.meta === "object" ? error.meta : undefined;
+    const name =
+      error && typeof error.name === "string" ? error.name : undefined;
+
+    return NextResponse.json(
+      isDev
+        ? {
+            error: message,
+            name,
+            code,
+            meta,
+          }
+        : { error: "Internal server error" },
+      { status: 500 }
+    );
+  }
 }
 
 const patchMonthlyPlanSchema = z.object({
   // DEV ONLY: userId is passed explicitly.
   // In production, this should come from auth/session.
   userId: z.string().min(1),
+  // Backward-compat: allow `at` in body; query param still wins.
+  at: z.string().optional(),
 
   // Update fields
   totalBudgetLimitMinor: z.number().int().nonnegative().optional(),
@@ -464,8 +548,10 @@ export async function PATCH(request: NextRequest) {
 
     const { userId } = parsed.data;
 
-    // Determine month anchor: query-only (?at=YYYY-MM or ISO)
-    const atRaw = (request.nextUrl.searchParams.get("at") || "").trim();
+    const atRawQuery = (request.nextUrl.searchParams.get("at") || "").trim();
+    const atRawBody =
+      typeof parsed.data.at === "string" ? parsed.data.at.trim() : "";
+    const atRaw = atRawQuery || atRawBody;
 
     // 1) 유저 timezone 조회
     const user = await prisma.user.findUnique({
@@ -513,103 +599,130 @@ export async function PATCH(request: NextRequest) {
     }
 
     // 3) Plan upsert + (optional) replace goals
-    const result = await prisma.$transaction(
-      async (tx: Prisma.TransactionClient) => {
-        const plan = await tx.plan.upsert({
-          where: {
-            userId_periodType_periodStart: {
-              userId,
-              periodType: "MONTHLY",
-              periodStart,
-            },
-          },
-          update: {
-            ...(typeof parsed.data.totalBudgetLimitMinor === "number"
-              ? { totalBudgetLimitMinor: parsed.data.totalBudgetLimitMinor }
-              : {}),
-          },
-          create: {
+    const result = await prisma.$transaction(async (tx: TxClient) => {
+      const plan = await tx.plan.upsert({
+        where: {
+          userId_periodType_periodStart: {
             userId,
             periodType: "MONTHLY",
             periodStart,
-            // Defaults (can later come from settings)
-            currency: "USD",
-            language: "en",
-            totalBudgetLimitMinor: parsed.data.totalBudgetLimitMinor ?? 0,
           },
-          select: { id: true },
-        });
+        },
+        update: {
+          ...(typeof parsed.data.totalBudgetLimitMinor === "number"
+            ? { totalBudgetLimitMinor: parsed.data.totalBudgetLimitMinor }
+            : {}),
+        },
+        create: {
+          userId,
+          periodType: "MONTHLY",
+          periodStart,
+          // Defaults (can later come from settings)
+          currency: "USD",
+          language: "en",
+          totalBudgetLimitMinor: parsed.data.totalBudgetLimitMinor ?? 0,
+        },
+        select: { id: true },
+      });
 
-        // Replace BudgetGoals if provided
-        if (parsed.data.budgetGoals) {
-          await tx.budgetGoal.deleteMany({ where: { planId: plan.id } });
+      // Merge BudgetGoals if provided (PATCH semantics: update only the provided categories)
+      // - limitMinor <= 0 => delete that category for this plan
+      // - limitMinor > 0  => upsert that category for this plan
+      // IMPORTANT: Do NOT delete goals that are not included in the payload.
+      if (parsed.data.budgetGoals) {
+        // Normalize + dedupe by category (last write wins)
+        const byCategory = new Map<string, number>();
+        for (const g of parsed.data.budgetGoals) {
+          const category = String((g as any)?.category ?? "").trim();
+          const limitMinor = Math.max(
+            0,
+            Math.round(Number((g as any)?.limitMinor) || 0)
+          );
+          if (!category) continue;
+          byCategory.set(category, limitMinor);
+        }
 
-          // Normalize + dedupe by category to avoid unique constraint errors
-          const byCategory = new Map<
-            string,
-            { planId: string; category: string; limitMinor: number }
-          >();
-          for (const g of parsed.data.budgetGoals) {
-            const category = String((g as any)?.category ?? "").trim();
-            const limitMinor = Math.max(
-              0,
-              Math.round(Number((g as any)?.limitMinor) || 0)
-            );
-            if (!category) continue;
-            // Keep only non-zero goals (zeros mean "not set")
-            if (limitMinor <= 0) continue;
-            byCategory.set(category, { planId: plan.id, category, limitMinor });
+        for (const [category, limitMinor] of byCategory.entries()) {
+          // Delete only this category when explicitly set to 0
+          if (limitMinor <= 0) {
+            await tx.budgetGoal.deleteMany({
+              where: { planId: plan.id, category },
+            });
+            continue;
           }
 
-          const goals = Array.from(byCategory.values());
-          if (goals.length > 0) {
-            await tx.budgetGoal.createMany({
-              data: goals,
-              // In case the DB has a unique constraint that still collides,
-              // skip duplicates rather than failing the whole transaction.
-              skipDuplicates: true,
+          // Upsert by (planId, category) without relying on Prisma compound-unique name
+          const existing = await tx.budgetGoal.findFirst({
+            where: { planId: plan.id, category },
+            select: { id: true },
+          });
+
+          if (existing?.id) {
+            await tx.budgetGoal.update({
+              where: { id: existing.id },
+              data: { limitMinor },
+            });
+          } else {
+            await tx.budgetGoal.create({
+              data: { planId: plan.id, category, limitMinor },
             });
           }
         }
-
-        // Replace SavingsGoals if provided
-        if (parsed.data.savingsGoals) {
-          await tx.savingsGoal.deleteMany({ where: { planId: plan.id } });
-
-          // Normalize + dedupe by name
-          const byName = new Map<
-            string,
-            { planId: string; name: string; targetMinor: number }
-          >();
-          for (const g of parsed.data.savingsGoals) {
-            const name = String((g as any)?.name ?? "").trim();
-            const raw = (g as any)?.targetMinor ?? (g as any)?.targetCents ?? 0;
-            const targetMinor = Math.max(0, Math.round(Number(raw) || 0));
-            if (!name) continue;
-            if (targetMinor <= 0) continue;
-            byName.set(name, { planId: plan.id, name, targetMinor });
-          }
-
-          const goals = Array.from(byName.values());
-          if (goals.length > 0) {
-            await tx.savingsGoal.createMany({
-              data: goals,
-              skipDuplicates: true,
-            });
-          }
-        }
-
-        // Return full plan with relations
-        return tx.plan.findUnique({
-          where: { id: plan.id },
-          include: { budgetGoals: true, savingsGoals: true },
-        });
       }
-    );
+
+      // Merge SavingsGoals if provided (PATCH semantics: update only the provided names)
+      // - targetMinor <= 0 => delete that name for this plan
+      // - targetMinor > 0  => upsert that name for this plan
+      // IMPORTANT: Do NOT delete goals that are not included in the payload.
+      if (parsed.data.savingsGoals) {
+        // Normalize + dedupe by name (last write wins)
+        const byName = new Map<string, number>();
+        for (const g of parsed.data.savingsGoals) {
+          const name = String((g as any)?.name ?? "").trim();
+          const raw = (g as any)?.targetMinor ?? (g as any)?.targetCents ?? 0;
+          const targetMinor = Math.max(0, Math.round(Number(raw) || 0));
+          if (!name) continue;
+          byName.set(name, targetMinor);
+        }
+
+        for (const [name, targetMinor] of byName.entries()) {
+          if (targetMinor <= 0) {
+            await tx.savingsGoal.deleteMany({
+              where: { planId: plan.id, name },
+            });
+            continue;
+          }
+
+          const existing = await tx.savingsGoal.findFirst({
+            where: { planId: plan.id, name },
+            select: { id: true },
+          });
+
+          if (existing?.id) {
+            await tx.savingsGoal.update({
+              where: { id: existing.id },
+              data: { targetMinor },
+            });
+          } else {
+            await tx.savingsGoal.create({
+              data: { planId: plan.id, name, targetMinor },
+            });
+          }
+        }
+      }
+
+      // Return full plan with relations
+      return tx.plan.findUnique({
+        where: { id: plan.id },
+        include: { budgetGoals: true, savingsGoals: true },
+      });
+    });
 
     console.log(
       "[PATCH monthly] saved goals:",
-      result?.budgetGoals?.find((g) => g.category === "Utilities")
+      result?.budgetGoals?.find(
+        (g: { category: string }) => g.category === "Utilities"
+      )
     );
 
     return NextResponse.json({

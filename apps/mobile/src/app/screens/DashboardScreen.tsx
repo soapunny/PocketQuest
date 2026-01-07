@@ -1,7 +1,8 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState, useCallback } from "react";
 import { View, Text, ScrollView, Pressable, StyleSheet } from "react-native";
 import { usePlan } from "../lib/planStore";
-import { useTransactions } from "../lib/transactionsStore";
+import { useFocusEffect } from "@react-navigation/native";
+import { fetchTransactions, TransactionDTO } from "../lib/transactionsApi";
 
 import ScreenLayout from "../components/layout/ScreenLayout";
 import ScreenHeader from "../components/layout/ScreenHeader";
@@ -106,7 +107,45 @@ export default function DashboardScreen() {
   const isKo = language === "ko";
 
   const tr = (en: string, ko: string) => (isKo ? ko : en);
-  const { transactions } = useTransactions();
+
+  const [transactions, setTransactions] = useState<TransactionDTO[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+
+  // 서버에서 트랜잭션을 가져와 대시보드에 반영.
+  // 화면이 포커스될 때마다 최신 DB 상태를 기준으로 다시 불러옵니다.
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+
+      (async () => {
+        try {
+          setIsLoading(true);
+          // 대시보드는 기간 요약용이라, 서버 summary가 필요 없으면 includeSummary: false 로 호출합니다.
+          const { transactions } = await fetchTransactions({
+            range: "ALL",
+            includeSummary: false,
+          });
+
+          if (isActive) {
+            setTransactions(transactions);
+          }
+        } catch (error) {
+          console.error(
+            "[DashboardScreen] failed to load transactions from server",
+            error
+          );
+        } finally {
+          if (isActive) {
+            setIsLoading(false);
+          }
+        }
+      })();
+
+      return () => {
+        isActive = false;
+      };
+    }, [])
+  );
 
   const { startISO, endISO, type } = useMemo(
     () => getPlanPeriodRange(plan as any),
@@ -122,14 +161,26 @@ export default function DashboardScreen() {
 
   const periodTransactions = useMemo(() => {
     return transactions.filter((t) => {
-      const iso = String(
+      // 우선순위:
+      // 1) occurredAtISO (서버에서 명시적으로 내려주는 발생 시각)
+      // 2) occurredAt (Date 또는 ISO 문자열)
+      // 3) dateISO (구버전 필드)
+      // 4) createdAtISO / createdAt (없을 때만 최후의 수단)
+      const raw =
+        (t as any).occurredAtISO ??
+        (t as any).occurredAt ??
         (t as any).dateISO ??
-          (t as any).occurredAtISO ??
-          (t as any).createdAtISO ??
-          (t as any).createdAt ??
-          ""
-      );
+        (t as any).createdAtISO ??
+        (t as any).createdAt ??
+        "";
+
+      if (!raw) return false;
+
+      const iso =
+        typeof raw === "string" ? raw : new Date(raw as any).toISOString();
+
       if (!iso) return false;
+
       return isISOInRange(iso, startISO, endISO);
     });
   }, [transactions, startISO, endISO]);

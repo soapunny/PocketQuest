@@ -31,6 +31,26 @@ const getPlanQuerySchema = z.object({
   periodStartISO: z.string().min(1).optional(),
 });
 
+function getDevUserId(request: NextRequest, body?: unknown): string | null {
+  if (process.env.NODE_ENV === "production") return null;
+
+  const headerId = request.headers.get("x-dev-user-id");
+  if (headerId && headerId.trim()) return headerId.trim();
+
+  const urlId = request.nextUrl.searchParams.get("userId");
+  if (urlId && urlId.trim()) return urlId.trim();
+
+  if (body && typeof body === "object" && body !== null && "userId" in body) {
+    const v = (body as any).userId;
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+
+  const envId = process.env.DEV_USER_ID;
+  if (envId && envId.trim()) return envId.trim();
+
+  return null;
+}
+
 function isoToUTCDate(iso: unknown): Date {
   // Interpret YYYY-MM-DD as UTC midnight
   const s = String(iso || "");
@@ -39,9 +59,18 @@ function isoToUTCDate(iso: unknown): Date {
 }
 
 export async function GET(request: NextRequest) {
-  const user = getAuthUser(request);
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const authed = getAuthUser(request);
+  const devUserId = !authed ? getDevUserId(request) : null;
+  const userId = authed?.userId ?? devUserId;
+
+  if (!userId) {
+    return NextResponse.json(
+      {
+        error: "Unauthorized",
+        hint: "DEV: set DEV_USER_ID or pass x-dev-user-id / ?userId",
+      },
+      { status: 401 }
+    );
   }
 
   const url = new URL(request.url);
@@ -67,7 +96,7 @@ export async function GET(request: NextRequest) {
       const plan = await prisma.plan.findUnique({
         where: {
           userId_periodType_periodStart: {
-            userId: user.userId,
+            userId,
             periodType,
             periodStart: isoToUTCDate(periodStartISO),
           },
@@ -84,7 +113,7 @@ export async function GET(request: NextRequest) {
 
     // Otherwise, return the most recent plan for this user.
     const plan = await prisma.plan.findFirst({
-      where: { userId: user.userId },
+      where: { userId },
       orderBy: { periodStart: "desc" },
       include,
     });
@@ -104,10 +133,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const user = getAuthUser(request);
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const authed = getAuthUser(request);
 
   let body: unknown;
   try {
@@ -121,6 +147,19 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json(
       { error: "Invalid body", details: parsed.error.flatten() },
       { status: 400 }
+    );
+  }
+
+  const devUserId = !authed ? getDevUserId(request, body) : null;
+  const userId = authed?.userId ?? devUserId;
+
+  if (!userId) {
+    return NextResponse.json(
+      {
+        error: "Unauthorized",
+        hint: "DEV: set DEV_USER_ID or pass x-dev-user-id / ?userId / body.userId",
+      },
+      { status: 401 }
     );
   }
 
@@ -146,13 +185,13 @@ export async function PATCH(request: NextRequest) {
     const plan = await prisma.plan.upsert({
       where: {
         userId_periodType_periodStart: {
-          userId: user.userId,
+          userId,
           periodType: data.periodType,
           periodStart,
         },
       },
       create: {
-        userId: user.userId,
+        userId,
         periodType: data.periodType,
         periodStart,
         periodAnchor,

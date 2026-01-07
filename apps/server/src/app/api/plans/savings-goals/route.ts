@@ -5,19 +5,50 @@ import { z } from "zod";
 
 const savingsGoalSchema = z.object({
   name: z.string(),
-  targetCents: z.number().int(),
+  // Store as minor units (cents/won) and keep it non-negative.
+  targetMinor: z.number().int().nonnegative(),
 });
 
-// GET /api/plans/savings-goals - Get all savings goals
+function getDevUserId(request: NextRequest, body?: unknown): string | null {
+  if (process.env.NODE_ENV === "production") return null;
+
+  const headerId = request.headers.get("x-dev-user-id");
+  if (headerId && headerId.trim()) return headerId.trim();
+
+  const urlId = request.nextUrl.searchParams.get("userId");
+  if (urlId && urlId.trim()) return urlId.trim();
+
+  if (body && typeof body === "object" && body !== null && "userId" in body) {
+    const v = (body as any).userId;
+    if (typeof v === "string" && v.trim()) return v.trim();
+  }
+
+  const envId = process.env.DEV_USER_ID;
+  if (envId && envId.trim()) return envId.trim();
+
+  return null;
+}
+
+// GET /api/plans/savings-goals - Get all savings goals (for the latest plan of the user)
 export async function GET(request: NextRequest) {
-  const user = getAuthUser(request);
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const authed = getAuthUser(request);
+  const devUserId = !authed ? getDevUserId(request) : null;
+  const userId = authed?.userId ?? devUserId;
+
+  if (!userId) {
+    return NextResponse.json(
+      {
+        error: "Unauthorized",
+        hint: "DEV: set DEV_USER_ID or pass x-dev-user-id / ?userId",
+      },
+      { status: 401 }
+    );
   }
 
   try {
-    const plan = await prisma.plan.findUnique({
-      where: { userId: user.userId },
+    const plan = await prisma.plan.findFirst({
+      where: { userId },
+      orderBy: { periodStart: "desc" },
       include: { savingsGoals: true },
     });
 
@@ -35,19 +66,30 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST /api/plans/savings-goals - Create savings goal
+// POST /api/plans/savings-goals - Create savings goal on the latest plan
 export async function POST(request: NextRequest) {
-  const user = getAuthUser(request);
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const authed = getAuthUser(request);
 
   try {
-    const body = await request.json();
+    const body: unknown = await request.json();
     const data = savingsGoalSchema.parse(body);
 
-    const plan = await prisma.plan.findUnique({
-      where: { userId: user.userId },
+    const devUserId = !authed ? getDevUserId(request, body) : null;
+    const userId = authed?.userId ?? devUserId;
+
+    if (!userId) {
+      return NextResponse.json(
+        {
+          error: "Unauthorized",
+          hint: "DEV: set DEV_USER_ID or pass x-dev-user-id / ?userId / body.userId",
+        },
+        { status: 401 }
+      );
+    }
+
+    const plan = await prisma.plan.findFirst({
+      where: { userId },
+      orderBy: { periodStart: "desc" },
     });
 
     if (!plan) {
@@ -58,7 +100,7 @@ export async function POST(request: NextRequest) {
       data: {
         planId: plan.id,
         name: data.name,
-        targetCents: data.targetCents,
+        targetMinor: data.targetMinor,
       },
     });
 
@@ -81,9 +123,18 @@ export async function POST(request: NextRequest) {
 
 // DELETE /api/plans/savings-goals/[id] - Delete savings goal
 export async function DELETE(request: NextRequest) {
-  const user = getAuthUser(request);
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const authed = getAuthUser(request);
+  const devUserId = !authed ? getDevUserId(request) : null;
+  const userId = authed?.userId ?? devUserId;
+
+  if (!userId) {
+    return NextResponse.json(
+      {
+        error: "Unauthorized",
+        hint: "DEV: set DEV_USER_ID or pass x-dev-user-id / ?userId",
+      },
+      { status: 401 }
+    );
   }
 
   try {
@@ -91,11 +142,15 @@ export async function DELETE(request: NextRequest) {
     const id = searchParams.get("id");
 
     if (!id) {
-      return NextResponse.json({ error: "Missing id parameter" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Missing id parameter" },
+        { status: 400 }
+      );
     }
 
-    const plan = await prisma.plan.findUnique({
-      where: { userId: user.userId },
+    const plan = await prisma.plan.findFirst({
+      where: { userId },
+      orderBy: { periodStart: "desc" },
     });
 
     if (!plan) {
@@ -111,7 +166,10 @@ export async function DELETE(request: NextRequest) {
     });
 
     if (!savingsGoal) {
-      return NextResponse.json({ error: "Savings goal not found" }, { status: 404 });
+      return NextResponse.json(
+        { error: "Savings goal not found" },
+        { status: 404 }
+      );
     }
 
     await prisma.savingsGoal.delete({
@@ -127,4 +185,3 @@ export async function DELETE(request: NextRequest) {
     );
   }
 }
-
