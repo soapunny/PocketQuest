@@ -91,7 +91,7 @@ export async function GET(request: NextRequest) {
 
     const include = { budgetGoals: true, savingsGoals: true } as const;
 
-    // If caller provides both, fetch that exact plan.
+    // 1) caller가 periodType + periodStartISO를 주면 해당 플랜 정확히 조회 (기존 유지)
     if (periodType && periodStartISO) {
       const plan = await prisma.plan.findUnique({
         where: {
@@ -111,7 +111,25 @@ export async function GET(request: NextRequest) {
       return NextResponse.json(plan);
     }
 
-    // Otherwise, return the most recent plan for this user.
+    // 2) 기본 동작: User.activePlanId(=activePlan) 반환 (새 구조의 핵심)
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { activePlanId: true },
+    });
+
+    if (user?.activePlanId) {
+      const activePlan = await prisma.plan.findUnique({
+        where: { id: user.activePlanId },
+        include,
+      });
+
+      if (activePlan) {
+        return NextResponse.json(activePlan);
+      }
+      // activePlanId가 있는데 plan이 없으면(데이터 꼬임) 아래 fallback으로 복구
+    }
+
+    // 3) fallback: activePlanId가 아직 없거나 데이터가 꼬였으면 최신 플랜 반환 (기존과 동일)
     const plan = await prisma.plan.findFirst({
       where: { userId },
       orderBy: { periodStart: "desc" },

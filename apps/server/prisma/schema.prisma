@@ -60,6 +60,9 @@ model User {
 
   transactions Transaction[] //relations: one to many(one user can have many transactions)
   plans        Plan[] //relations: one to many(one user can have many plans)
+
+  activePlanId    String? @unique
+  activePlan      Plan?   @relation("ActivePlan", fields: [activePlanId], references: [id], onDelete: SetNull)
 }
 
 model Transaction {
@@ -97,22 +100,20 @@ model Plan {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  periodType PeriodType //period type(WEEKLY, BIWEEKLY, MONTHLY)
+  isActive Boolean @default(false)
+  activeForUser User? @relation("ActivePlan")
 
+  periodType PeriodType //period type(WEEKLY, BIWEEKLY, MONTHLY)
   // For BIWEEKLY: optional anchor date (e.g., Monday) used to compute biweekly boundaries.
   periodAnchor DateTime? //optional anchor date(e.g., Monday) used to compute biweekly boundaries.
-
   // Start of the plan period (e.g., first day of month/week)
   periodStart DateTime //start of the plan period(e.g., first day of month/week)
-
   // Optional end of the period (can be derived, but keeping it helps querying/ranges)
   periodEnd DateTime?
 
   // Single app currency preference (your UX decision to keep it simple)
   currency CurrencyCode @default(USD)
-
   language LanguageCode @default(en)
-
   // 0 = disabled
   totalBudgetLimitMinor Int @default(0)
 

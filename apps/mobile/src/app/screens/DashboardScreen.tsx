@@ -7,11 +7,12 @@ import { fetchTransactions, TransactionDTO } from "../lib/transactionsApi";
 import ScreenLayout from "../components/layout/ScreenLayout";
 import ScreenHeader from "../components/layout/ScreenHeader";
 import ScreenCard from "../components/layout/ScreenCard";
+import { CardSpacing } from "../components/Typography";
 
 import { getPlanPeriodRange, isISOInRange } from "../lib/planProgress";
 import type { Currency } from "../lib/currency";
 import { convertMinor, formatMoney } from "../lib/currency";
-import { CardSpacing } from "../components/Typography";
+import { postRollover } from "../lib/planApi"; // 네가 만든 파일 경로 맞춰
 
 function isIncomeTx(tx: any) {
   const t = String(tx?.type || "").toUpperCase();
@@ -103,7 +104,8 @@ function moneyHome(amountHomeMinor: number, homeCurrency: Currency) {
 }
 
 export default function DashboardScreen() {
-  const { plan, homeCurrency, displayCurrency, language } = usePlan();
+  const { plan, homeCurrency, displayCurrency, language, refreshPlan } =
+    usePlan();
   const isKo = language === "ko";
 
   const tr = (en: string, ko: string) => (isKo ? ko : en);
@@ -120,31 +122,41 @@ export default function DashboardScreen() {
       (async () => {
         try {
           setIsLoading(true);
-          // 대시보드는 기간 요약용이라, 서버 summary가 필요 없으면 includeSummary: false 로 호출합니다.
+
+          // 1) rollover 먼저 (실패해도 대시보드는 뜨게)
+          try {
+            const r = await postRollover();
+            if (r?.rolled) {
+              // 2) active plan 재조회해서 planStore 갱신
+              if (typeof refreshPlan === "function") {
+                await refreshPlan();
+              }
+            }
+          } catch (e) {
+            console.warn("[DashboardScreen] rollover failed/skipped", e);
+          }
+
+          // 3) transactions 로드
           const { transactions } = await fetchTransactions({
             range: "ALL",
             includeSummary: false,
           });
 
-          if (isActive) {
-            setTransactions(transactions);
-          }
+          if (isActive) setTransactions(transactions);
         } catch (error) {
           console.error(
             "[DashboardScreen] failed to load transactions from server",
             error
           );
         } finally {
-          if (isActive) {
-            setIsLoading(false);
-          }
+          if (isActive) setIsLoading(false);
         }
       })();
 
       return () => {
         isActive = false;
       };
-    }, [])
+    }, [refreshPlan])
   );
 
   const { startISO, endISO, type } = useMemo(
@@ -540,7 +552,7 @@ export default function DashboardScreen() {
         </View>
 
         {(() => {
-          const totalBudget = Number((plan as any).totalBudgetlimitMinor ?? 0);
+          const totalBudget = Number((plan as any).totalBudgetLimitMinor ?? 0);
           const r = totalBudget > 0 ? totalSpentHomeMinor / totalBudget : NaN;
           const s = ratioStatus(r);
           const tone = summaryTone(

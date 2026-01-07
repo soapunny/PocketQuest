@@ -6,8 +6,8 @@ import React, {
   useMemo,
   useState,
 } from "react";
-const API_BASE_URL =
-  process.env.EXPO_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
+
+import { API_BASE_URL } from "./config";
 import { EXPENSE_CATEGORIES } from "./categories";
 import type { Currency } from "./currency";
 
@@ -77,6 +77,8 @@ type Store = {
   upsertSavingsGoalTarget: (name: string, targetMinor: number) => void;
   addSavingsGoal: (name: string, targetMinor: number) => void;
   removeSavingsGoal: (id: string) => void;
+
+  refreshPlan: () => Promise<boolean>;
   applyServerPlan: (serverPlan: {
     periodType?: PeriodType;
     // server may send DateTime ISO under either key
@@ -100,7 +102,8 @@ type Store = {
         }[]
       | null;
   }) => void;
-  // --- NEW: bootstrap/initialize 상태 및 함수 ---
+
+  // --- bootstrap/initialize 상태 및 함수 ---
   isInitialized: boolean;
   isLoading: boolean;
   initialize: () => Promise<void>;
@@ -286,6 +289,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       savingsGoals: [],
     };
   });
+
   const [isInitialized, setIsInitialized] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -377,14 +381,15 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       });
     }, []);
 
+  /**
+   * ✅ applyServerPlan을 먼저 정의 (refreshPlan에서 참조하므로 순서 중요)
+   * - deps는 []: setPlan(updater)만 사용하므로 stale problem 없음
+   */
   const applyServerPlan: Store["applyServerPlan"] = useCallback(
     (serverPlan) => {
-      // Be permissive: server might omit some fields
       const periodType: PeriodType = (serverPlan?.periodType ??
-        plan.periodType ??
         "MONTHLY") as PeriodType;
 
-      // Server sends DateTime ISO for periodStart. Use date-only (YYYY-MM-DD).
       const rawStart = (
         serverPlan?.periodStartUTC ??
         serverPlan?.periodStart ??
@@ -393,31 +398,28 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       const periodStartISO = rawStart ? rawStart.slice(0, 10) : "";
 
       const serverBudgetGoals = Array.isArray(serverPlan?.budgetGoals)
-        ? serverPlan!.budgetGoals
+        ? serverPlan.budgetGoals
         : [];
 
       const serverSavingsGoals = Array.isArray(serverPlan?.savingsGoals)
-        ? serverPlan!.savingsGoals
+        ? serverPlan.savingsGoals
         : [];
 
       const serverTotalRaw = serverPlan?.totalBudgetLimitMinor;
       const serverTotalClean = normalizePositiveInt(serverTotalRaw);
 
       setPlan((p) => {
-        // Merge budget goals against defaults so chips/order stay stable
         const defaults = buildDefaultBudgetGoals();
         const nextBudgetGoals = mergeBudgetGoalsWithDefaults(
           defaults,
           serverBudgetGoals
         );
 
-        // Savings goals: keep stable IDs when possible
         const nextSavingsGoals = mergeSavingsGoals(
           p.savingsGoals,
           serverSavingsGoals
         );
 
-        // Prefer explicit server total when provided (>0). Otherwise compute from category limits.
         const computedTotal = sumBudgetLimits(nextBudgetGoals);
         const totalBudgetLimitMinor =
           serverTotalClean > 0 ? serverTotalClean : computedTotal;
@@ -428,7 +430,6 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
           ...p,
           periodType,
           periodStartISO: nextPeriodStartISO,
-          // Keep legacy field aligned for WEEKLY (back-compat)
           weekStartISO:
             periodType === "WEEKLY" ? nextPeriodStartISO : p.weekStartISO,
           totalBudgetLimitMinor,
@@ -437,72 +438,74 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         };
       });
     },
-    [plan.periodType]
+    []
   );
 
+  const refreshPlan: Store["refreshPlan"] = useCallback(async () => {
+    const endpoint = `${API_BASE_URL}/api/plans`;
+
+    try {
+      const res = await fetch(endpoint, {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      if (!res.ok) {
+        console.warn(
+          "[planStore] Failed to refresh plan from server",
+          res.status,
+          res.statusText
+        );
+        return false;
+      }
+
+      const raw = await res.json();
+
+      const serverPlan = {
+        periodType: raw.periodType,
+        periodStartUTC: raw.periodStart,
+        totalBudgetLimitMinor: raw.totalBudgetLimitMinor ?? null,
+        budgetGoals: Array.isArray(raw.budgetGoals)
+          ? raw.budgetGoals.map((g: any) => ({
+              category: g.category,
+              limitMinor:
+                typeof g.limitMinor === "number" ? g.limitMinor : null,
+            }))
+          : null,
+        savingsGoals: Array.isArray(raw.savingsGoals)
+          ? raw.savingsGoals.map((g: any) => ({
+              name: g.name,
+              targetMinor:
+                typeof g.targetMinor === "number" ? g.targetMinor : null,
+            }))
+          : null,
+      };
+
+      applyServerPlan(serverPlan);
+      return true;
+    } catch (err) {
+      console.error("[planStore] Error while refreshing plan", err);
+      return false;
+    }
+  }, [applyServerPlan]);
+
   const initialize: Store["initialize"] = useCallback(async () => {
-    // 이미 초기화 중이거나 끝났다면 다시 실행하지 않음
     if (isInitialized || isLoading) return;
     setIsLoading(true);
     try {
-      // 1) 클라이언트 기준으로 기간 롤오버 먼저 보정
+      // 1) 클라이언트 기준 기간 보정 (UI용)
       refreshPeriodIfNeeded();
 
-      // 2) 서버에서 현재 Plan 데이터 가져오기
-      //    - /api/plans GET: 가장 최근 Plan을 반환
-      const endpoint = `${API_BASE_URL}/api/plans`;
-      try {
-        const res = await fetch(endpoint, {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-          },
-        });
-
-        if (!res.ok) {
-          console.warn(
-            "[planStore] Failed to fetch plan from server",
-            res.status,
-            res.statusText
-          );
-        } else {
-          const raw = await res.json();
-          // 서버 Plan(Prisma 모델)을 클라이언트 Plan 패치용 구조로 변환
-          const serverPlan = {
-            periodType: raw.periodType,
-            periodStartUTC: raw.periodStart,
-            totalBudgetLimitMinor: raw.totalBudgetLimitMinor ?? null,
-            budgetGoals: Array.isArray(raw.budgetGoals)
-              ? raw.budgetGoals.map((g: any) => ({
-                  category: g.category,
-                  limitMinor:
-                    typeof g.limitMinor === "number" ? g.limitMinor : null,
-                }))
-              : null,
-            savingsGoals: Array.isArray(raw.savingsGoals)
-              ? raw.savingsGoals.map((g: any) => ({
-                  name: g.name,
-                  targetMinor:
-                    typeof g.targetMinor === "number" ? g.targetMinor : null,
-                }))
-              : null,
-          };
-          applyServerPlan(serverPlan);
-        }
-      } catch (err) {
-        console.error("[planStore] Error while fetching plan from server", err);
-      }
+      // 2) 서버 plan 로드 (중복 fetch 제거)
+      await refreshPlan();
     } finally {
       setIsLoading(false);
       setIsInitialized(true);
     }
-  }, [isInitialized, isLoading, refreshPeriodIfNeeded, applyServerPlan]);
+  }, [isInitialized, isLoading, refreshPeriodIfNeeded, refreshPlan]);
 
   useEffect(() => {
-    // Ensure correct start on app launch
     refreshPeriodIfNeeded();
-    // Poll periodically so the plan rolls over even if the app stays open.
-    // 60s is light and good enough for weekly/monthly boundaries.
     const id = setInterval(() => {
       refreshPeriodIfNeeded();
     }, 60 * 1000);
@@ -533,7 +536,6 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         ];
       }
 
-      // ✅ total budget = sum of all category limits (only > 0)
       const total = nextGoals.reduce(
         (sum, g) => sum + (g.limitMinor > 0 ? g.limitMinor : 0),
         0
@@ -542,7 +544,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       return {
         ...p,
         budgetGoals: nextGoals,
-        totalBudgetLimitMinor: total, // auto
+        totalBudgetLimitMinor: total,
       };
     });
   };
@@ -566,7 +568,6 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         return { ...p, savingsGoals: next };
       }
 
-      // target이 0이면 새로 만들 필요 없음
       if (clean <= 0) return p;
 
       return {
@@ -603,6 +604,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   const store = useMemo<Store>(
     () => ({
       plan,
+      refreshPlan,
       setPeriodType,
       refreshPeriodIfNeeded,
       homeCurrency: plan.homeCurrency,
@@ -619,13 +621,13 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       addSavingsGoal,
       removeSavingsGoal,
       applyServerPlan,
-      // --- NEW: bootstrap 상태 + 함수 ---
       isInitialized,
       isLoading,
       initialize,
     }),
     [
       plan,
+      refreshPlan, // ✅ deps 추가 (중요)
       setPeriodType,
       refreshPeriodIfNeeded,
       setHomeCurrency,
@@ -638,7 +640,6 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       addSavingsGoal,
       removeSavingsGoal,
       applyServerPlan,
-      // --- NEW dependencies ---
       isInitialized,
       isLoading,
       initialize,
