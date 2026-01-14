@@ -107,6 +107,58 @@ export function getPreviousMonthlyPeriodStartUTC(
   }
 }
 
+/**
+ * Weekly periodStart (UTC)를 반환
+ * - 사용자의 timezone 기준으로 "이번 주 시작(월요일 00:00)"을 계산한 뒤 UTC로 변환
+ * - weekStartsOn: 0(일)~6(토), 기본값 1(월)
+ */
+export function getWeeklyPeriodStartUTC(
+  timeZone: string,
+  now: Date = new Date(),
+  weekStartsOn: 0 | 1 | 2 | 3 | 4 | 5 | 6 = 1 // ✅ Monday
+): Date {
+  const tz = normalizeTimeZone(timeZone);
+  const base = isValidDate(now) ? now : new Date();
+
+  try {
+    // 1) now를 유저 timezone의 "현지 시간"으로 변환
+    const zonedNow = toZonedTime(base, tz);
+
+    // 2) 현지 기준 "오늘 00:00"으로 내림
+    const localMidnight = new Date(
+      zonedNow.getFullYear(),
+      zonedNow.getMonth(),
+      zonedNow.getDate(),
+      0,
+      0,
+      0,
+      0
+    );
+
+    // 3) 오늘 요일(0=일 ~ 6=토)
+    const day = localMidnight.getDay();
+
+    // 4) weekStartsOn(월요일=1)까지 며칠을 되돌릴지 계산
+    const diff = (day - weekStartsOn + 7) % 7;
+
+    // 5) 주 시작일로 이동
+    localMidnight.setDate(localMidnight.getDate() - diff);
+
+    // 6) 현지 주 시작(00:00)을 UTC로 변환해서 반환
+    const utc = fromZonedTime(localMidnight, tz);
+
+    // 안전장치
+    if (!isValidDate(utc) || !assertReasonableYear(utc)) {
+      return utcMonthStart(base); // fallback (극히 드묾)
+    }
+
+    return utc;
+  } catch {
+    // fallback: timezone 계산 실패 시 UTC 기준으로 대충 반환(극히 드묾)
+    return utcMonthStart(base);
+  }
+}
+
 export type PeriodType = "WEEKLY" | "BIWEEKLY" | "MONTHLY";
 
 function legacyNextPeriodEnd(base: Date, periodType: PeriodType): Date {

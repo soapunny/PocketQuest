@@ -7,7 +7,7 @@ import React, {
   useState,
 } from "react";
 
-import { API_BASE_URL } from "./config";
+import { API_BASE_URL, DEV_USER_ID } from "./config";
 import { EXPENSE_CATEGORIES } from "./categories";
 import type { Currency } from "./currency";
 
@@ -443,25 +443,85 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
   const refreshPlan: Store["refreshPlan"] = useCallback(async () => {
     const endpoint = `${API_BASE_URL}/api/plans`;
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "x-dev-user-id": DEV_USER_ID,
+    };
 
     try {
+      // 1) active plan 조회
       const res = await fetch(endpoint, {
         method: "GET",
-        headers: { "Content-Type": "application/json" },
+        headers,
       });
 
+      // 404면 최초 생성 흐름으로 넘어감
+      if (res.status === 404) {
+        console.log("[planStore] No plan found. Creating weekly plan...");
+
+        const createRes = await fetch(endpoint, {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify({
+            periodType: "WEEKLY",
+            // WEEKLY는 서버가 periodStart를 계산하므로 periodStartISO 불필요
+            currency: "USD",
+            language: "en",
+            totalBudgetLimitMinor: 0,
+            // biweekly 전용 anchor는 안 보내도 됨 (검증 로직이 BIWEEKLY에만 걸리게 했으니까)
+          }),
+        });
+
+        if (!createRes.ok) {
+          const text = await createRes.text().catch(() => "");
+          console.warn(
+            "[planStore] Failed to create weekly plan",
+            createRes.status,
+            text
+          );
+          return false;
+        }
+
+        const raw = await createRes.json();
+
+        applyServerPlan({
+          periodType: raw.periodType,
+          periodStartUTC: raw.periodStart,
+          totalBudgetLimitMinor: raw.totalBudgetLimitMinor ?? null,
+          budgetGoals: Array.isArray(raw.budgetGoals)
+            ? raw.budgetGoals.map((g: any) => ({
+                category: g.category,
+                limitMinor:
+                  typeof g.limitMinor === "number" ? g.limitMinor : null,
+              }))
+            : null,
+          savingsGoals: Array.isArray(raw.savingsGoals)
+            ? raw.savingsGoals.map((g: any) => ({
+                name: g.name,
+                targetMinor:
+                  typeof g.targetMinor === "number" ? g.targetMinor : null,
+              }))
+            : null,
+        });
+
+        return true;
+      }
+
+      // 그 외 에러는 실패 처리
       if (!res.ok) {
+        const text = await res.text().catch(() => "");
         console.warn(
           "[planStore] Failed to refresh plan from server",
           res.status,
-          res.statusText
+          text
         );
         return false;
       }
 
+      // 2) 정상 조회면 plan 적용
       const raw = await res.json();
 
-      const serverPlan = {
+      applyServerPlan({
         periodType: raw.periodType,
         periodStartUTC: raw.periodStart,
         totalBudgetLimitMinor: raw.totalBudgetLimitMinor ?? null,
@@ -479,9 +539,8 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
                 typeof g.targetMinor === "number" ? g.targetMinor : null,
             }))
           : null,
-      };
+      });
 
-      applyServerPlan(serverPlan);
       return true;
     } catch (err) {
       console.error("[planStore] Error while refreshing plan", err);

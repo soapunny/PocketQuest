@@ -100,7 +100,6 @@ model Plan {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  isActive Boolean @default(false)
   activeForUser User? @relation("ActivePlan")
 
   periodType PeriodType //period type(WEEKLY, BIWEEKLY, MONTHLY)
