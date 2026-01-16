@@ -1,14 +1,18 @@
 import React, { useMemo } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { usePlan } from "../lib/planStore";
-import type { PeriodType, UILanguage } from "../lib/planStore";
+import { type PeriodType, type UILanguage } from "../lib/planStore";
 import type { Currency } from "../lib/currency";
 import ScreenHeader from "../components/layout/ScreenHeader";
 import ScreenLayout from "../components/layout/ScreenLayout";
 
 const OPTIONS: Array<{ label: string; value: PeriodType; help: string }> = [
   { label: "Weekly", value: "WEEKLY", help: "Resets every Monday." },
-  { label: "Bi-weekly", value: "BIWEEKLY", help: "2-week blocks (Mon start)." },
+  {
+    label: "Bi-weekly",
+    value: "BIWEEKLY",
+    help: "2-week blocks (anchor-based).",
+  },
   {
     label: "Monthly",
     value: "MONTHLY",
@@ -30,17 +34,19 @@ export default function SettingsScreen() {
   const {
     plan,
     setPeriodType,
+    switchPeriodType,
     homeCurrency,
     displayCurrency,
     setHomeCurrency,
     setDisplayCurrency,
+    switchPlanCurrency,
     advancedCurrencyMode,
     setAdvancedCurrencyMode,
     language,
     setLanguage,
   } = usePlan();
 
-  const current = (plan.periodType ?? "WEEKLY") as PeriodType;
+  const current = (plan.periodType ?? "MONTHLY") as PeriodType;
   const isAdvanced = !!advancedCurrencyMode;
 
   const combinedCurrency = useMemo<Currency>(() => {
@@ -59,7 +65,6 @@ export default function SettingsScreen() {
         />
       }
     >
-
       <View style={styles.card}>
         <Text style={styles.cardTitle}>{isKo ? "언어" : "Language"}</Text>
         <Text style={styles.help}>
@@ -116,7 +121,13 @@ export default function SettingsScreen() {
             return (
               <Pressable
                 key={opt.value}
-                onPress={() => setPeriodType(opt.value)}
+                onPress={async () => {
+                  const ok = await switchPeriodType(opt.value);
+                  if (!ok) {
+                    // fallback: update local state so UI still responds in dev
+                    setPeriodType(opt.value);
+                  }
+                }}
                 style={[
                   styles.segmentBtn,
                   selected && styles.segmentBtnSelected,
@@ -307,9 +318,20 @@ export default function SettingsScreen() {
                 return (
                   <Pressable
                     key={opt.value}
-                    onPress={() => {
+                    onPress={async () => {
+                      // 1) UI는 즉시 바꾸기 (선택 표시 + 단위 바로 바뀜)
                       setHomeCurrency(opt.value);
                       setDisplayCurrency(opt.value);
+
+                      // 2) 서버에 저장 (DB currency 업데이트)
+                      const ok = await switchPlanCurrency(opt.value);
+
+                      if (!ok) {
+                        // 실패해도 일단 UI는 유지 (원하면 여기서 revert도 가능)
+                        console.warn(
+                          "[SettingsScreen] switchPlanCurrency failed; kept local currency"
+                        );
+                      }
                     }}
                     style={[
                       styles.segmentBtn,

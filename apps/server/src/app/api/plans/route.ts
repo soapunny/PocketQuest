@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { getAuthUser } from "@/lib/auth";
 import { getWeeklyPeriodStartUTC, calcNextPeriodEnd } from "@/lib/period";
 import { z } from "zod";
+import { toZonedTime, fromZonedTime } from "date-fns-tz";
+import { addDays } from "date-fns";
 
 const periodTypeSchema = z.enum(["WEEKLY", "BIWEEKLY", "MONTHLY"]);
 
@@ -25,6 +27,10 @@ const patchPlanSchema = z.object({
   advancedCurrencyMode: z.boolean().optional(),
   language: z.string().min(1).optional(),
   totalBudgetLimitMinor: z.number().int().nonnegative().optional(),
+  // If true, set this plan as the user's active plan (updates User.activePlanId)
+  setActive: z.boolean().optional(),
+  // If true, server will compute the current periodStart for the given periodType when periodStartISO is omitted
+  useCurrentPeriod: z.boolean().optional(),
 });
 
 const getPlanQuerySchema = z.object({
@@ -57,6 +63,63 @@ function isoToUTCDate(iso: unknown): Date {
   const s = String(iso || "");
   const [y, m, d] = s.split("-").map((n) => Number(n));
   return new Date(Date.UTC(y, (m || 1) - 1, d || 1, 0, 0, 0));
+}
+
+function getMonthlyPeriodStartUTC_local(
+  timeZone: string,
+  now: Date = new Date()
+): Date {
+  const zonedNow = toZonedTime(now, timeZone);
+  const zonedStart = new Date(
+    zonedNow.getFullYear(),
+    zonedNow.getMonth(),
+    1,
+    0,
+    0,
+    0,
+    0
+  );
+  return fromZonedTime(zonedStart, timeZone);
+}
+
+function getBiweeklyPeriodStartUTC_local(
+  timeZone: string,
+  anchorUTC: Date,
+  now: Date = new Date(),
+  blockDays: number = 14
+): Date {
+  const zonedNow = toZonedTime(now, timeZone);
+  const nowMidnight = new Date(
+    zonedNow.getFullYear(),
+    zonedNow.getMonth(),
+    zonedNow.getDate(),
+    0,
+    0,
+    0,
+    0
+  );
+
+  const zonedAnchor = toZonedTime(anchorUTC, timeZone);
+  const anchorMidnight = new Date(
+    zonedAnchor.getFullYear(),
+    zonedAnchor.getMonth(),
+    zonedAnchor.getDate(),
+    0,
+    0,
+    0,
+    0
+  );
+
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const diffDays = Math.floor(
+    (nowMidnight.getTime() - anchorMidnight.getTime()) / msPerDay
+  );
+
+  // Proper modulo for negative values
+  const offset = ((diffDays % blockDays) + blockDays) % blockDays;
+  const blockStart = addDays(nowMidnight, -offset);
+
+  return fromZonedTime(blockStart, timeZone);
 }
 
 export async function GET(request: NextRequest) {
@@ -200,13 +263,8 @@ export async function PATCH(request: NextRequest) {
     const timeZone = user.timeZone ?? "America/New_York";
     const data = parsed.data;
 
-    // ✅ non-weekly는 periodStartISO가 필수
-    if (data.periodType !== "WEEKLY" && !data.periodStartISO) {
-      return NextResponse.json(
-        { error: "periodStartISO is required for non-weekly plans" },
-        { status: 400 }
-      );
-    }
+    const setActive = data.setActive === true;
+    const useCurrentPeriod = data.useCurrentPeriod === true;
 
     // ✅ biweekly는 periodAnchorISO가 필수 (2주 단위 기준점)
     if (data.periodType === "BIWEEKLY" && !data.periodAnchorISO) {
@@ -216,12 +274,35 @@ export async function PATCH(request: NextRequest) {
       );
     }
 
+    // ✅ non-weekly는 기본적으로 periodStartISO가 필요하지만,
+    // setActive+useCurrentPeriod 조합이면 서버가 현재 기간의 periodStart를 계산한다.
+    if (
+      data.periodType !== "WEEKLY" &&
+      !data.periodStartISO &&
+      !(setActive && useCurrentPeriod)
+    ) {
+      return NextResponse.json(
+        { error: "periodStartISO is required for non-weekly plans" },
+        { status: 400 }
+      );
+    }
+
     let periodStart: Date;
 
     if (data.periodType === "WEEKLY") {
       // ✅ Weekly는 서버가 월요일 기준으로 계산 (유저 타임존 기준)
       periodStart = getWeeklyPeriodStartUTC(timeZone);
+    } else if (setActive && useCurrentPeriod) {
+      // ✅ 즉시 전환: 서버가 "현재 기간"의 periodStart를 계산
+      if (data.periodType === "MONTHLY") {
+        periodStart = getMonthlyPeriodStartUTC_local(timeZone);
+      } else {
+        // BIWEEKLY
+        const anchorUTC = isoToUTCDate(data.periodAnchorISO!);
+        periodStart = getBiweeklyPeriodStartUTC_local(timeZone, anchorUTC);
+      }
     } else {
+      // client-provided periodStartISO
       periodStart = isoToUTCDate(data.periodStartISO!);
     }
 
@@ -273,28 +354,34 @@ export async function PATCH(request: NextRequest) {
       },
     });
 
-    // ✅ activePlanId 복구/초기화:
-    // - 유저에 activePlanId가 비어있으면 방금 upsert한 plan을 active로 지정
-    // - 또는 activePlanId가 가리키는 plan이 삭제/꼬임이면 복구
+    // ✅ Active handling
+    // - setActive=true: always switch the user's active plan to this plan
+    // - otherwise: only initialize/repair activePlanId when missing or broken
 
-    let shouldSetActive = false;
-
-    if (!user.activePlanId) {
-      shouldSetActive = true;
-    } else {
-      // activePlanId가 가리키는 plan이 실제로 존재하는지 확인 (데이터 꼬임 복구)
-      const activeExists = await prisma.plan.findUnique({
-        where: { id: user.activePlanId },
-        select: { id: true },
-      });
-      if (!activeExists) shouldSetActive = true;
-    }
-
-    if (shouldSetActive) {
+    if (setActive) {
       await prisma.user.update({
         where: { id: userId },
         data: { activePlanId: plan.id },
       });
+    } else {
+      let shouldSetActive = false;
+
+      if (!user.activePlanId) {
+        shouldSetActive = true;
+      } else {
+        const activeExists = await prisma.plan.findUnique({
+          where: { id: user.activePlanId },
+          select: { id: true },
+        });
+        if (!activeExists) shouldSetActive = true;
+      }
+
+      if (shouldSetActive) {
+        await prisma.user.update({
+          where: { id: userId },
+          data: { activePlanId: plan.id },
+        });
+      }
     }
 
     return NextResponse.json(plan);

@@ -63,9 +63,13 @@ export type Plan = {
 type Store = {
   plan: Plan;
   setPeriodType: (type: PeriodType) => void;
+  // Switch period type on the server and set the returned plan as active.
+  // Returns true on success.
+  switchPeriodType: (type: PeriodType) => Promise<boolean>;
   refreshPeriodIfNeeded: () => void;
   homeCurrency: Currency;
   displayCurrency: Currency;
+  switchPlanCurrency: (currency: Currency) => Promise<boolean>;
   advancedCurrencyMode: boolean;
   language: UILanguage;
   setHomeCurrency: (c: Currency) => void;
@@ -87,6 +91,10 @@ type Store = {
 
     // totals are in minor units
     totalBudgetLimitMinor?: number | null;
+
+    currency?: Currency;
+    homeCurrency?: Currency;
+    displayCurrency?: Currency;
 
     // goals use minor units
     budgetGoals?:
@@ -262,7 +270,7 @@ function sumBudgetLimits(goals: BudgetGoal[]) {
 }
 
 export function PlanProvider({ children }: { children: React.ReactNode }) {
-  const DEFAULT_PERIOD_TYPE: PeriodType = "WEEKLY";
+  const DEFAULT_PERIOD_TYPE: PeriodType = "MONTHLY";
   const DEFAULT_BIWEEKLY_ANCHOR_ISO = "2025-01-06"; // Monday anchor (YYYY-MM-DD)
 
   const DEFAULT_HOME_CURRENCY: Currency = "USD";
@@ -344,7 +352,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   };
 
   const setPeriodType: Store["setPeriodType"] = (type) => {
-    const nextType: PeriodType = type ?? "WEEKLY";
+    const nextType: PeriodType = type ?? DEFAULT_PERIOD_TYPE;
     setPlan((p) => {
       const periodStartISO = periodStartFrom(
         nextType,
@@ -361,26 +369,6 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
-  const refreshPeriodIfNeeded: Store["refreshPeriodIfNeeded"] =
-    useCallback(() => {
-      setPlan((p) => {
-        const expectedStartISO = periodStartFrom(
-          p.periodType,
-          new Date(),
-          p.periodAnchorISO ?? DEFAULT_BIWEEKLY_ANCHOR_ISO
-        );
-        // If the computed period start matches, no change.
-        if (p.periodStartISO === expectedStartISO) return p;
-        return {
-          ...p,
-          periodStartISO: expectedStartISO,
-          // Keep legacy field aligned for WEEKLY
-          weekStartISO:
-            p.periodType === "WEEKLY" ? expectedStartISO : p.weekStartISO,
-        };
-      });
-    }, []);
-
   /**
    * ✅ applyServerPlan을 먼저 정의 (refreshPlan에서 참조하므로 순서 중요)
    * - deps는 []: setPlan(updater)만 사용하므로 stale problem 없음
@@ -388,7 +376,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   const applyServerPlan: Store["applyServerPlan"] = useCallback(
     (serverPlan) => {
       const periodType: PeriodType = (serverPlan?.periodType ??
-        "MONTHLY") as PeriodType;
+        DEFAULT_PERIOD_TYPE) as PeriodType;
 
       const rawStart = (
         serverPlan?.periodStartUTC ??
@@ -433,6 +421,12 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
           weekStartISO:
             periodType === "WEEKLY" ? nextPeriodStartISO : p.weekStartISO,
           totalBudgetLimitMinor,
+          homeCurrency:
+            serverPlan.homeCurrency ?? serverPlan.currency ?? p.homeCurrency,
+          displayCurrency:
+            serverPlan.displayCurrency ??
+            serverPlan.currency ??
+            p.displayCurrency,
           budgetGoals: nextBudgetGoals,
           savingsGoals: nextSavingsGoals,
         };
@@ -441,11 +435,208 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  const switchPlanCurrency = useCallback(
+    async (nextCurrency: "USD" | "KRW") => {
+      const endpoint = `${API_BASE_URL}/api/plans`;
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "x-dev-user-id": DEV_USER_ID,
+      };
+
+      const currentType: PeriodType = (plan.periodType ??
+        DEFAULT_PERIOD_TYPE) as PeriodType;
+      const anchorISO = plan.periodAnchorISO ?? DEFAULT_BIWEEKLY_ANCHOR_ISO;
+
+      const body: any = {
+        periodType: currentType,
+        setActive: true,
+        useCurrentPeriod: true,
+        currency: nextCurrency,
+        language: plan.language ?? "en",
+        totalBudgetLimitMinor: plan.totalBudgetLimitMinor ?? 0,
+      };
+
+      if (currentType === "BIWEEKLY") {
+        body.periodAnchorISO = anchorISO;
+      }
+
+      try {
+        const res = await fetch(endpoint, {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify(body),
+        });
+
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          console.warn(
+            "[planStore] switchPlanCurrency failed",
+            res.status,
+            text
+          );
+          return false;
+        }
+
+        const raw = await res.json();
+
+        applyServerPlan({
+          periodType: raw?.periodType,
+          periodStartUTC: raw?.periodStartUTC ?? raw?.periodStart,
+          totalBudgetLimitMinor: raw?.totalBudgetLimitMinor ?? null,
+          currency: raw?.currency,
+          budgetGoals: Array.isArray(raw?.budgetGoals)
+            ? raw.budgetGoals.map((g: any) => ({
+                category: g.category,
+                limitMinor:
+                  typeof g.limitMinor === "number" ? g.limitMinor : null,
+              }))
+            : null,
+          savingsGoals: Array.isArray(raw?.savingsGoals)
+            ? raw.savingsGoals.map((g: any) => ({
+                name: g.name,
+                targetMinor:
+                  typeof g.targetMinor === "number" ? g.targetMinor : null,
+              }))
+            : null,
+        } as any);
+
+        return true;
+      } catch (err) {
+        console.error("[planStore] switchPlanCurrency error", err);
+        return false;
+      }
+    },
+    [plan, applyServerPlan]
+  );
+
+  const switchPeriodType: Store["switchPeriodType"] = useCallback(
+    async (type) => {
+      const nextType: PeriodType = (type ?? DEFAULT_PERIOD_TYPE) as PeriodType;
+
+      const endpoint = `${API_BASE_URL}/api/plans`;
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "x-dev-user-id": DEV_USER_ID,
+      };
+
+      // BIWEEKLY requires an anchor.
+      const anchorISO = plan.periodAnchorISO ?? DEFAULT_BIWEEKLY_ANCHOR_ISO;
+
+      const body: any = {
+        periodType: nextType,
+        setActive: true,
+        useCurrentPeriod: true,
+        // keep user preferences when switching
+        // currency: plan.homeCurrency,
+        language: plan.language ?? "en",
+        totalBudgetLimitMinor: plan.totalBudgetLimitMinor ?? 0,
+      };
+
+      if (nextType === "BIWEEKLY") {
+        body.periodAnchorISO = anchorISO;
+      }
+
+      try {
+        const res = await fetch(endpoint, {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify(body),
+        });
+
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          console.warn(
+            "[planStore] Failed to switch period type",
+            res.status,
+            text
+          );
+          return false;
+        }
+
+        const raw = await res.json();
+
+        // Apply server plan (source of truth)
+        applyServerPlan({
+          periodType: raw?.periodType,
+          periodStartUTC: raw?.periodStartUTC ?? raw?.periodStart,
+          totalBudgetLimitMinor: raw?.totalBudgetLimitMinor ?? null,
+          // ✅ 새 플랜의 통화로 UI도 자동 동기화
+          currency: raw?.currency,
+          budgetGoals: Array.isArray(raw?.budgetGoals)
+            ? raw.budgetGoals.map((g: any) => ({
+                category: g.category,
+                limitMinor:
+                  typeof g.limitMinor === "number" ? g.limitMinor : null,
+              }))
+            : null,
+          savingsGoals: Array.isArray(raw?.savingsGoals)
+            ? raw.savingsGoals.map((g: any) => ({
+                name: g.name,
+                targetMinor:
+                  typeof g.targetMinor === "number" ? g.targetMinor : null,
+              }))
+            : null,
+        });
+
+        return true;
+      } catch (err) {
+        console.error("[planStore] Error while switching period type", err);
+        return false;
+      }
+    },
+    [plan, applyServerPlan]
+  );
+
+  const refreshPeriodIfNeeded: Store["refreshPeriodIfNeeded"] =
+    useCallback(() => {
+      setPlan((p) => {
+        const expectedStartISO = periodStartFrom(
+          p.periodType,
+          new Date(),
+          p.periodAnchorISO ?? DEFAULT_BIWEEKLY_ANCHOR_ISO
+        );
+        // If the computed period start matches, no change.
+        if (p.periodStartISO === expectedStartISO) return p;
+        return {
+          ...p,
+          periodStartISO: expectedStartISO,
+          // Keep legacy field aligned for WEEKLY
+          weekStartISO:
+            p.periodType === "WEEKLY" ? expectedStartISO : p.weekStartISO,
+        };
+      });
+    }, []);
+
   const refreshPlan: Store["refreshPlan"] = useCallback(async () => {
     const endpoint = `${API_BASE_URL}/api/plans`;
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       "x-dev-user-id": DEV_USER_ID,
+    };
+
+    // Helper to map raw server plan to applyServerPlan
+    const applyRawPlan = (raw: any) => {
+      applyServerPlan({
+        periodType: raw?.periodType,
+        // server may send DateTime ISO under either key
+        periodStartUTC: raw?.periodStartUTC ?? raw?.periodStart,
+        totalBudgetLimitMinor: raw?.totalBudgetLimitMinor ?? null,
+        currency: raw?.currency,
+        budgetGoals: Array.isArray(raw?.budgetGoals)
+          ? raw.budgetGoals.map((g: any) => ({
+              category: g.category,
+              limitMinor:
+                typeof g.limitMinor === "number" ? g.limitMinor : null,
+            }))
+          : null,
+        savingsGoals: Array.isArray(raw?.savingsGoals)
+          ? raw.savingsGoals.map((g: any) => ({
+              name: g.name,
+              targetMinor:
+                typeof g.targetMinor === "number" ? g.targetMinor : null,
+            }))
+          : null,
+      });
     };
 
     try {
@@ -457,25 +648,26 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
       // 404면 최초 생성 흐름으로 넘어감
       if (res.status === 404) {
-        console.log("[planStore] No plan found. Creating weekly plan...");
+        console.log("[planStore] No plan found. Creating monthly plan...");
 
         const createRes = await fetch(endpoint, {
           method: "PATCH",
           headers,
           body: JSON.stringify({
-            periodType: "WEEKLY",
-            // WEEKLY는 서버가 periodStart를 계산하므로 periodStartISO 불필요
+            periodType: DEFAULT_PERIOD_TYPE,
+            // 기본값=MONTHLY+ 즉시 active로 전환
+            setActive: true,
+            useCurrentPeriod: true,
             currency: "USD",
             language: "en",
             totalBudgetLimitMinor: 0,
-            // biweekly 전용 anchor는 안 보내도 됨 (검증 로직이 BIWEEKLY에만 걸리게 했으니까)
           }),
         });
 
         if (!createRes.ok) {
           const text = await createRes.text().catch(() => "");
           console.warn(
-            "[planStore] Failed to create weekly plan",
+            "[planStore] Failed to create monthly plan",
             createRes.status,
             text
           );
@@ -483,27 +675,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         }
 
         const raw = await createRes.json();
-
-        applyServerPlan({
-          periodType: raw.periodType,
-          periodStartUTC: raw.periodStart,
-          totalBudgetLimitMinor: raw.totalBudgetLimitMinor ?? null,
-          budgetGoals: Array.isArray(raw.budgetGoals)
-            ? raw.budgetGoals.map((g: any) => ({
-                category: g.category,
-                limitMinor:
-                  typeof g.limitMinor === "number" ? g.limitMinor : null,
-              }))
-            : null,
-          savingsGoals: Array.isArray(raw.savingsGoals)
-            ? raw.savingsGoals.map((g: any) => ({
-                name: g.name,
-                targetMinor:
-                  typeof g.targetMinor === "number" ? g.targetMinor : null,
-              }))
-            : null,
-        });
-
+        applyRawPlan(raw);
         return true;
       }
 
@@ -520,27 +692,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
       // 2) 정상 조회면 plan 적용
       const raw = await res.json();
-
-      applyServerPlan({
-        periodType: raw.periodType,
-        periodStartUTC: raw.periodStart,
-        totalBudgetLimitMinor: raw.totalBudgetLimitMinor ?? null,
-        budgetGoals: Array.isArray(raw.budgetGoals)
-          ? raw.budgetGoals.map((g: any) => ({
-              category: g.category,
-              limitMinor:
-                typeof g.limitMinor === "number" ? g.limitMinor : null,
-            }))
-          : null,
-        savingsGoals: Array.isArray(raw.savingsGoals)
-          ? raw.savingsGoals.map((g: any) => ({
-              name: g.name,
-              targetMinor:
-                typeof g.targetMinor === "number" ? g.targetMinor : null,
-            }))
-          : null,
-      });
-
+      applyRawPlan(raw);
       return true;
     } catch (err) {
       console.error("[planStore] Error while refreshing plan", err);
@@ -665,6 +817,8 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       plan,
       refreshPlan,
       setPeriodType,
+      switchPeriodType,
+      switchPlanCurrency,
       refreshPeriodIfNeeded,
       homeCurrency: plan.homeCurrency,
       displayCurrency: plan.displayCurrency,
@@ -688,9 +842,11 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       plan,
       refreshPlan, // ✅ deps 추가 (중요)
       setPeriodType,
+      switchPeriodType,
       refreshPeriodIfNeeded,
       setHomeCurrency,
       setDisplayCurrency,
+      switchPlanCurrency,
       setAdvancedCurrencyMode,
       setLanguage,
       setTotalBudgetLimitMinor,
