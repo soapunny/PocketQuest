@@ -1,61 +1,85 @@
 # PocketQuest 🧭💰
 
-**PocketQuest is a mobile-first budgeting app that turns financial planning into a clear, structured monthly system.**
+**PocketQuest is a mobile-first budgeting app that turns financial planning into a clear, structured, period-based system.**
 
-It focuses on:
+PocketQuest focuses on:
 
-- Monthly budget & savings planning
+- Period-based budget & savings planning (Monthly / Weekly / Bi-weekly)
 - Clear visibility into spending vs income
-- A foundation for future gamification (character system planned later)
+- Server-first consistency (API → DB → UI)
+- A solid foundation for future gamification
 
-This repository contains a **monorepo** with:
+This repository is a **monorepo** containing:
 
 - A React Native (Expo) mobile app
-- A Next.js API server
+- A Next.js API-only server
 - PostgreSQL database via Prisma
 
 ---
 
-## ✨ Current Status (What’s Implemented)
+## ✨ Current Status
 
-### ✅ Completed
+### ✅ Implemented
 
-- Monthly plan lifecycle (create → update → reload)
-- Server-backed budget goals & savings goals
-- Timezone-aware monthly periods
-- React Native UI fully wired to backend
-- PostgreSQL + Prisma integration
-- End-to-end flow: **Mobile → API → DB → Mobile**
+#### 📅 Plan System
 
-### ⏸️ Planned / Deferred
+- **Monthly / Weekly / Bi-weekly plans**
+- One plan per `(userId, periodType, periodStart)` (DB-enforced uniqueness)
+- Switching periods instantly activates the correct plan
+- Plans persist independently per period type
+- Automatic plan creation when switching periods (idempotent upsert)
 
-- Adding brand-new goals not previously saved
-- Weekly / bi-weekly plans
-- Character / XP system (intentionally postponed)
-- Authentication & multi-user flows
+#### 🔄 Active Plan Management
+
+- `User.activePlanId` is the single source of truth
+- No `isActive` flag on Plan (simpler and safer)
+- Switching period updates `activePlanId` only
+- Historical plans are preserved
+
+#### 💱 Currency Handling
+
+- Currency is stored **per Plan** (`Plan.currency`)
+- Switching periods **does not overwrite currency**
+- Each plan retains its own currency  
+  (e.g. weekly = USD, bi-weekly = KRW)
+- Currency changes persist to DB via PATCH
+- UI automatically syncs to the active plan’s currency
+
+#### 🌍 Timezone Correctness
+
+- Each user has an IANA timezone (e.g. `America/New_York`)
+- Period boundaries are calculated in the user’s local timezone
+- Stored in UTC for consistency
+- Weekly plans start on **Monday**
+- Bi-weekly plans use a fixed anchor date
+
+#### 📱 Mobile ↔ Server Sync
+
+- Server is the source of truth
+- Mobile hydrates state exclusively from server responses
+- Optimistic UI updates with server confirmation
+- Safe fallbacks for dev / offline scenarios
 
 ---
 
-## 🧠 Core Concept (Current)
+## 🧠 Core Concept
 
-PocketQuest is built around **monthly plans**.
+PocketQuest is built around **period-based plans**.
 
-Each month has **at most one plan per user**.
+Each plan is uniquely identified by:
+(userId, periodType, periodStart)
 
-A monthly plan contains:
+A plan contains:
 
 - Total budget limit
 - Budget goals (by category)
 - Savings goals
-- Currency & language
-- Timezone-aware period start
+- Currency
+- Language
+- Timezone-aware period boundaries
 
-### Why monthly?
-
-- Predictable income & expenses
-- Simpler mental model
-- Easier server-side consistency
-- Scales naturally to weekly/bi-weekly later
+Plans are immutable by period.  
+Switching periods activates a different plan instead of mutating the existing one.
 
 ---
 
@@ -64,25 +88,26 @@ A monthly plan contains:
 ### 📱 Mobile App (React Native + Expo)
 
 - Dashboard overview
-- Monthly plan editor
-- Budget goals by category
-- Savings goals
-- Transactions list & filters
+- Period selector (Monthly / Weekly / Bi-weekly)
+- Budget goals editor
+- Savings goals editor
+- Transaction list & filters
+- Currency switching (USD / KRW)
 - English / Korean support
 
-### 🗄️ Backend API
+### 🗄️ Backend API (Next.js App Router)
 
-- Next.js App Router (API-only)
-- Monthly plan upsert (idempotent)
-- Plan update via PATCH
+- Period-aware plan upsert (POST / PATCH)
+- Active plan switching
+- Currency persistence per plan
 - Transaction CRUD
-- Health check endpoint
+- Timezone-safe period calculations
 
-### 🗃️ Database
+### 🗃️ Database (PostgreSQL + Prisma)
 
-- PostgreSQL
-- Prisma ORM
-- Strict uniqueness:
+- Strict uniqueness constraints
+- Idempotent plan creation
+- Clear separation of user vs plan state
 
 ---
 
@@ -106,7 +131,7 @@ A monthly plan contains:
 ### Tooling
 
 - pnpm (monorepo)
-- VS Code / Cursor
+- Cursor / VS Code
 - Git + GitHub
 - Jira (Kanban)
 
@@ -117,146 +142,32 @@ A monthly plan contains:
 ```text
 pocketquest/
 ├── apps/
-│ ├── mobile/ # React Native (Expo)
+│ ├── mobile/
 │ │ └── src/app/
-│ │ ├── screens/ # Dashboard, Plan, Transactions, Settings
-│ │ ├── components/ # Shared UI (ScreenHeader, Layout, Cards)
-│ │ ├── lib/ # planStore, api clients, helpers
-│ │ ├── i18n/ # EN / KO translations
-│ │ └── theme/ # Typography, spacing, tokens
+│ │   ├── screens/        # Dashboard, Plan, Transactions, Settings
+│ │   ├── components/     # Shared UI components
+│ │   ├── lib/            # planStore, API clients, helpers
+│ │   ├── i18n/           # EN / KO translations
+│ │   └── theme/          # Design tokens
 │ │
-│ └── server/ # Next.js API-only server
-│ └── src/app/api/
-│ ├── health/
-│ ├── plans/
-│ │ └── monthly/
-│ ├── transactions/
-│ └── auth/ # Placeholder
+│ └── server/
+│   └── src/app/api/
+│     ├── plans/          # Unified plan endpoints
+│     │ └── rollover/     # Period rollover logic
+│     ├── transactions/
+│     └── health/
 │
 ├── prisma/
 │ ├── schema.prisma
 │ └── migrations/
 │
 ├── packages/
-│ └── shared/ # (planned) shared types & schemas
+│ └── shared/             # (planned) shared types & schemas
 │
 ├── pnpm-workspace.yaml
 ├── package.json
 └── README.md
 ```
-
----
-
-## 🧭 Monthly Plan Lifecycle
-
-PocketQuest operates around a **MONTHLY plan model**.
-
-Each user can have **at most one plan per month**, enforced at the database level using a unique constraint on:
-
-(userId, periodType, periodStart)
-
-This guarantees idempotent behavior and prevents duplicate plans for the same month.
-
----
-
-### 1) Create or Get Monthly Plan (Upsert)
-
-POST /api/plans/monthly
-
-- The client sends a userId and optionally an at parameter (e.g. 2026-01).
-- The server calculates the correct periodStart based on the user’s timeZone.
-- If a plan for (userId, MONTHLY, periodStart) already exists, it is returned.
-- Otherwise, a new plan is created and returned.
-- This operation is safe to call repeatedly.
-
----
-
-### 2) Update Monthly Plan (Budget & Savings Goals)
-
-PATCH /api/plans/monthly
-
-This endpoint updates:
-
-- Total monthly budget limit
-- Budget goals (by category)
-- Savings goals
-
-The server replaces the goal sets when provided, ensuring consistency.
-
-The API accepts both naming styles for compatibility:
-
-- limitMinor / targetMinor (server & database standard)
-- limitCents / targetCents (mobile UI naming)
-
-Internally, all values are stored as minor currency units.
-
----
-
-### 3) Reload & Hydrate on App Start
-
-When the mobile app launches or the Plan screen mounts:
-
-1. The app calls POST /api/plans/monthly
-2. The server returns the current monthly plan
-3. The response is applied via applyServerPlan() in planStore
-4. The UI re-renders using persisted server data
-
-This completes the full loop:
-
-Mobile UI → API → Database → Mobile UI
-
----
-
-## 🕒 Timezone Handling
-
-Timezone correctness is a first-class concern.
-
-- Each user has a timeZone field (IANA format, e.g. America/New_York)
-- Monthly periodStart is calculated using the user’s local timezone
-- The computed value is stored in UTC for consistency
-- This prevents duplicate or shifted plans across timezones
-
----
-
-## 💾 Data Model (Simplified)
-
-Plan
-
-- userId
-- periodType (MONTHLY)
-- periodStart (UTC)
-- totalBudgetLimitMinor
-- budgetGoals[]
-- savingsGoals[]
-- currency
-- language
-
-Transaction
-
-- userId
-- type (EXPENSE | INCOME | SAVING)
-- amountMinor
-- currency
-- category
-- occurredAt
-
----
-
-## 🚀 Running Locally
-
-Backend:
-cd apps/server
-pnpm install
-pnpm dev
-
-Mobile:
-cd apps/mobile
-pnpm install
-pnpm start
-
-Make sure PostgreSQL is running and DATABASE_URL is configured.
-
----
 
 ## 📌 Design Philosophy
 
@@ -265,14 +176,14 @@ Make sure PostgreSQL is running and DATABASE_URL is configured.
 - Timezone correctness before analytics
 - Clear UX before gamification
 
-PocketQuest prioritizes correctness and clarity over speed of feature delivery.
-
----
+PocketQuest prioritizes correctness, clarity, and long-term extensibility.
 
 ## 🛣️ Next Steps
 
-- Fix edge case: adding new goals not previously saved
-- Introduce weekly / bi-weekly plans
+- Refine advanced currency mode (home vs display)
+- Automated rollover (cron-based)
 - Authentication & multi-user support
 - Analytics and insights
 - Optional gamification layer
+
+---
