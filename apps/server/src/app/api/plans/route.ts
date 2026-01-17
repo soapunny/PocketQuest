@@ -18,7 +18,7 @@ const patchPlanSchema = z.object({
   periodType: periodTypeSchema,
   // client uses periodAnchorISO (YYYY-MM-DD) for BIWEEKLY; db field is periodAnchor
   periodAnchorISO: z.string().min(1).optional(),
-  // client uses periodStartISO (YYYY-MM-DD)
+  // client uses periodStartISO (YYYY-MM-DD) as a local-day identifier (user timezone)
   periodStartISO: z.string().min(1).optional(),
   // DB uses a single `currency` field (CurrencyCode). We still accept legacy client fields.
   currency: currencySchema.optional(),
@@ -59,10 +59,18 @@ function getDevUserId(request: NextRequest, body?: unknown): string | null {
 }
 
 function isoToUTCDate(iso: unknown): Date {
-  // Interpret YYYY-MM-DD as UTC midnight
+  // Interpret YYYY-MM-DD as UTC midnight (ONLY use when the date is truly UTC-based)
   const s = String(iso || "");
   const [y, m, d] = s.split("-").map((n) => Number(n));
   return new Date(Date.UTC(y, (m || 1) - 1, d || 1, 0, 0, 0));
+}
+
+function isoLocalDayToUTCDate(timeZone: string, iso: unknown): Date {
+  // Interpret YYYY-MM-DD as *local* midnight in `timeZone`, then convert to UTC.
+  const s = String(iso || "");
+  const [y, m, d] = s.split("-").map((n) => Number(n));
+  const localMidnight = new Date(y, (m || 1) - 1, d || 1, 0, 0, 0, 0);
+  return fromZonedTime(localMidnight, timeZone);
 }
 
 function getMonthlyPeriodStartUTC_local(
@@ -157,12 +165,19 @@ export async function GET(request: NextRequest) {
 
     // 1) caller가 periodType + periodStartISO를 주면 해당 플랜 정확히 조회
     if (periodType && periodStartISO) {
+      // periodStartISO is a local-day identifier; convert using the user's timezone.
+      const userTzRow = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { timeZone: true },
+      });
+      const timeZone = userTzRow?.timeZone ?? "America/New_York";
+
       const plan = await prisma.plan.findUnique({
         where: {
           userId_periodType_periodStart: {
             userId,
             periodType,
-            periodStart: isoToUTCDate(periodStartISO),
+            periodStart: isoLocalDayToUTCDate(timeZone, periodStartISO),
           },
         },
         include,
@@ -298,18 +313,18 @@ export async function PATCH(request: NextRequest) {
         periodStart = getMonthlyPeriodStartUTC_local(timeZone);
       } else {
         // BIWEEKLY
-        const anchorUTC = isoToUTCDate(data.periodAnchorISO!);
+        const anchorUTC = isoLocalDayToUTCDate(timeZone, data.periodAnchorISO!);
         periodStart = getBiweeklyPeriodStartUTC_local(timeZone, anchorUTC);
       }
     } else {
-      // client-provided periodStartISO
-      periodStart = isoToUTCDate(data.periodStartISO!);
+      // client-provided periodStartISO is a local-day identifier
+      periodStart = isoLocalDayToUTCDate(timeZone, data.periodStartISO!);
     }
 
     const periodEnd = calcNextPeriodEnd(periodStart, data.periodType, timeZone);
 
     const periodAnchor = data.periodAnchorISO
-      ? isoToUTCDate(data.periodAnchorISO)
+      ? isoLocalDayToUTCDate(timeZone, data.periodAnchorISO)
       : undefined;
 
     const currency =

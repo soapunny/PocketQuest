@@ -1,5 +1,5 @@
 import React, { useMemo, useState, useCallback } from "react";
-import { View, Text, ScrollView, Pressable, StyleSheet } from "react-native";
+import { View, Text, StyleSheet } from "react-native";
 import { usePlan } from "../lib/planStore";
 import { useFocusEffect } from "@react-navigation/native";
 import { fetchTransactions, TransactionDTO } from "../lib/transactionsApi";
@@ -12,7 +12,6 @@ import { CardSpacing } from "../components/Typography";
 import { getPlanPeriodRange, isISOInRange } from "../lib/planProgress";
 import type { Currency } from "../lib/currency";
 import { convertMinor, formatMoney } from "../lib/currency";
-import { postRollover } from "../lib/planApi"; // 네가 만든 파일 경로 맞춰
 
 function isIncomeTx(tx: any) {
   const t = String(tx?.type || "").toUpperCase();
@@ -123,20 +122,7 @@ export default function DashboardScreen() {
         try {
           setIsLoading(true);
 
-          // 1) rollover 먼저 (실패해도 대시보드는 뜨게)
-          try {
-            const r = await postRollover();
-            if (r?.rolled) {
-              // 2) active plan 재조회해서 planStore 갱신
-              if (typeof refreshPlan === "function") {
-                await refreshPlan();
-              }
-            }
-          } catch (e) {
-            console.warn("[DashboardScreen] rollover failed/skipped", e);
-          }
-
-          // 3) transactions 로드
+          // 2) transactions 로드
           const { transactions } = await fetchTransactions({
             range: "ALL",
             includeSummary: false,

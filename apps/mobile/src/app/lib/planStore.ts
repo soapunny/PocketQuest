@@ -5,7 +5,9 @@ import React, {
   useEffect,
   useMemo,
   useState,
+  useRef,
 } from "react";
+import { AppState, AppStateStatus } from "react-native";
 
 import { API_BASE_URL, DEV_USER_ID } from "./config";
 import { EXPENSE_CATEGORIES } from "./categories";
@@ -39,6 +41,12 @@ export type Plan = {
 
   // Start of the current period (week / 2-week block / calendar month) as YYYY-MM-DD.
   periodStartISO: string;
+
+  // End of the current period as an ISO string (UTC). Set from server responses.
+  periodEndUTC?: string;
+
+  // Optional timezone (IANA). If not provided by server, device timezone is used.
+  timeZone?: string;
 
   // Back-compat (legacy). For WEEKLY this equals periodStartISO (YYYY-MM-DD).
   weekStartISO?: string;
@@ -88,6 +96,13 @@ type Store = {
     // server may send DateTime ISO under either key
     periodStartUTC?: string;
     periodStart?: string;
+
+    // server may send period end under either key
+    periodEndUTC?: string;
+    periodEnd?: string;
+
+    // optional user timezone
+    timeZone?: string;
 
     // totals are in minor units
     totalBudgetLimitMinor?: number | null;
@@ -385,6 +400,17 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       ).toString();
       const periodStartISO = rawStart ? rawStart.slice(0, 10) : "";
 
+      const rawEnd = (
+        (serverPlan as any)?.periodEndUTC ??
+        (serverPlan as any)?.periodEnd ??
+        ""
+      ).toString();
+      const periodEndUTC = rawEnd || undefined;
+
+      const timeZone = (serverPlan as any)?.timeZone
+        ? String((serverPlan as any).timeZone)
+        : undefined;
+
       const serverBudgetGoals = Array.isArray(serverPlan?.budgetGoals)
         ? serverPlan.budgetGoals
         : [];
@@ -418,6 +444,8 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
           ...p,
           periodType,
           periodStartISO: nextPeriodStartISO,
+          periodEndUTC: periodEndUTC ?? p.periodEndUTC,
+          timeZone: timeZone ?? p.timeZone,
           weekStartISO:
             periodType === "WEEKLY" ? nextPeriodStartISO : p.weekStartISO,
           totalBudgetLimitMinor,
@@ -435,178 +463,6 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
-  const switchPlanCurrency = useCallback(
-    async (nextCurrency: "USD" | "KRW") => {
-      const endpoint = `${API_BASE_URL}/api/plans`;
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        "x-dev-user-id": DEV_USER_ID,
-      };
-
-      const currentType: PeriodType = (plan.periodType ??
-        DEFAULT_PERIOD_TYPE) as PeriodType;
-      const anchorISO = plan.periodAnchorISO ?? DEFAULT_BIWEEKLY_ANCHOR_ISO;
-
-      const body: any = {
-        periodType: currentType,
-        setActive: true,
-        useCurrentPeriod: true,
-        currency: nextCurrency,
-        language: plan.language ?? "en",
-        totalBudgetLimitMinor: plan.totalBudgetLimitMinor ?? 0,
-      };
-
-      if (currentType === "BIWEEKLY") {
-        body.periodAnchorISO = anchorISO;
-      }
-
-      try {
-        const res = await fetch(endpoint, {
-          method: "PATCH",
-          headers,
-          body: JSON.stringify(body),
-        });
-
-        if (!res.ok) {
-          const text = await res.text().catch(() => "");
-          console.warn(
-            "[planStore] switchPlanCurrency failed",
-            res.status,
-            text
-          );
-          return false;
-        }
-
-        const raw = await res.json();
-
-        applyServerPlan({
-          periodType: raw?.periodType,
-          periodStartUTC: raw?.periodStartUTC ?? raw?.periodStart,
-          totalBudgetLimitMinor: raw?.totalBudgetLimitMinor ?? null,
-          currency: raw?.currency,
-          budgetGoals: Array.isArray(raw?.budgetGoals)
-            ? raw.budgetGoals.map((g: any) => ({
-                category: g.category,
-                limitMinor:
-                  typeof g.limitMinor === "number" ? g.limitMinor : null,
-              }))
-            : null,
-          savingsGoals: Array.isArray(raw?.savingsGoals)
-            ? raw.savingsGoals.map((g: any) => ({
-                name: g.name,
-                targetMinor:
-                  typeof g.targetMinor === "number" ? g.targetMinor : null,
-              }))
-            : null,
-        } as any);
-
-        return true;
-      } catch (err) {
-        console.error("[planStore] switchPlanCurrency error", err);
-        return false;
-      }
-    },
-    [plan, applyServerPlan]
-  );
-
-  const switchPeriodType: Store["switchPeriodType"] = useCallback(
-    async (type) => {
-      const nextType: PeriodType = (type ?? DEFAULT_PERIOD_TYPE) as PeriodType;
-
-      const endpoint = `${API_BASE_URL}/api/plans`;
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        "x-dev-user-id": DEV_USER_ID,
-      };
-
-      // BIWEEKLY requires an anchor.
-      const anchorISO = plan.periodAnchorISO ?? DEFAULT_BIWEEKLY_ANCHOR_ISO;
-
-      const body: any = {
-        periodType: nextType,
-        setActive: true,
-        useCurrentPeriod: true,
-        // keep user preferences when switching
-        // currency: plan.homeCurrency,
-        language: plan.language ?? "en",
-        totalBudgetLimitMinor: plan.totalBudgetLimitMinor ?? 0,
-      };
-
-      if (nextType === "BIWEEKLY") {
-        body.periodAnchorISO = anchorISO;
-      }
-
-      try {
-        const res = await fetch(endpoint, {
-          method: "PATCH",
-          headers,
-          body: JSON.stringify(body),
-        });
-
-        if (!res.ok) {
-          const text = await res.text().catch(() => "");
-          console.warn(
-            "[planStore] Failed to switch period type",
-            res.status,
-            text
-          );
-          return false;
-        }
-
-        const raw = await res.json();
-
-        // Apply server plan (source of truth)
-        applyServerPlan({
-          periodType: raw?.periodType,
-          periodStartUTC: raw?.periodStartUTC ?? raw?.periodStart,
-          totalBudgetLimitMinor: raw?.totalBudgetLimitMinor ?? null,
-          // ✅ 새 플랜의 통화로 UI도 자동 동기화
-          currency: raw?.currency,
-          budgetGoals: Array.isArray(raw?.budgetGoals)
-            ? raw.budgetGoals.map((g: any) => ({
-                category: g.category,
-                limitMinor:
-                  typeof g.limitMinor === "number" ? g.limitMinor : null,
-              }))
-            : null,
-          savingsGoals: Array.isArray(raw?.savingsGoals)
-            ? raw.savingsGoals.map((g: any) => ({
-                name: g.name,
-                targetMinor:
-                  typeof g.targetMinor === "number" ? g.targetMinor : null,
-              }))
-            : null,
-        });
-
-        return true;
-      } catch (err) {
-        console.error("[planStore] Error while switching period type", err);
-        return false;
-      }
-    },
-    [plan, applyServerPlan]
-  );
-
-  const refreshPeriodIfNeeded: Store["refreshPeriodIfNeeded"] =
-    useCallback(() => {
-      setPlan((p) => {
-        const expectedStartISO = periodStartFrom(
-          p.periodType,
-          new Date(),
-          p.periodAnchorISO ?? DEFAULT_BIWEEKLY_ANCHOR_ISO
-        );
-        // If the computed period start matches, no change.
-        if (p.periodStartISO === expectedStartISO) return p;
-        return {
-          ...p,
-          periodStartISO: expectedStartISO,
-          // Keep legacy field aligned for WEEKLY
-          weekStartISO:
-            p.periodType === "WEEKLY" ? expectedStartISO : p.weekStartISO,
-        };
-      });
-    }, []);
-
   const refreshPlan: Store["refreshPlan"] = useCallback(async () => {
     const endpoint = `${API_BASE_URL}/api/plans`;
     const headers: Record<string, string> = {
@@ -620,6 +476,8 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         periodType: raw?.periodType,
         // server may send DateTime ISO under either key
         periodStartUTC: raw?.periodStartUTC ?? raw?.periodStart,
+        periodEndUTC: raw?.periodEndUTC ?? raw?.periodEnd,
+        timeZone: raw?.timeZone,
         totalBudgetLimitMinor: raw?.totalBudgetLimitMinor ?? null,
         currency: raw?.currency,
         budgetGoals: Array.isArray(raw?.budgetGoals)
@@ -700,6 +558,330 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     }
   }, [applyServerPlan]);
 
+  // ---------------------------------------------------------------------------
+  // Global rollover orchestration (works from any screen)
+  // Triggers:
+  // - app launch (after first refreshPlan)
+  // - foreground resume (AppState)
+  // - period switch (after switchPeriodType applies new plan)
+  // - optional: single timer when plan ends "today" (local day)
+  // ---------------------------------------------------------------------------
+
+  const rolloverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastRolloverAttemptAtRef = useRef<number>(0);
+
+  const clearRolloverTimer = useCallback(() => {
+    if (rolloverTimerRef.current) {
+      clearTimeout(rolloverTimerRef.current);
+      rolloverTimerRef.current = null;
+    }
+  }, []);
+
+  const postRollover = useCallback(async () => {
+    const endpoint = `${API_BASE_URL}/api/plans/rollover`;
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "x-dev-user-id": DEV_USER_ID,
+    };
+
+    const res = await fetch(endpoint, { method: "POST", headers });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`rollover failed: ${res.status} ${text}`);
+    }
+    return res.json();
+  }, []);
+
+  const getUserTimeZone = useCallback((): string => {
+    return (
+      plan.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+    );
+  }, [plan.timeZone]);
+
+  const isSameLocalDay = useCallback((a: Date, b: Date, timeZone: string) => {
+    // Compare YYYY-MM-DD in the given IANA timezone
+    const fmt = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    return fmt.format(a) === fmt.format(b);
+  }, []);
+
+  const tryRolloverIfNeeded = useCallback(
+    async (reason: "launch" | "resume" | "period-switch" | "timer") => {
+      // Need server plan info first
+      // initialize 중(isLoading=true)에도 launch 체크는 허용
+      if (!isInitialized && !isLoading) return;
+
+      // Cooldown (avoid spamming rollover calls)
+      const nowMs = Date.now();
+      if (nowMs - lastRolloverAttemptAtRef.current < 2 * 60 * 1000) return;
+      lastRolloverAttemptAtRef.current = nowMs;
+
+      const endISO = plan.periodEndUTC;
+      if (!endISO) return;
+
+      const endMs = Date.parse(endISO);
+      if (!Number.isFinite(endMs)) return;
+
+      // Only rollover after the plan has actually ended
+      if (Date.now() < endMs) return;
+
+      try {
+        const r = await postRollover();
+        if (r?.rolled) {
+          await refreshPlan();
+        }
+      } catch (e) {
+        console.warn(`[planStore] rollover failed (${reason})`, e);
+      }
+    },
+    [isInitialized, isLoading, plan.periodEndUTC, postRollover, refreshPlan]
+  );
+
+  const scheduleRolloverTimerIfNeeded = useCallback(() => {
+    clearRolloverTimer();
+
+    if (!isInitialized) return;
+
+    const endISO = plan.periodEndUTC;
+    if (!endISO) return;
+
+    const endMs = Date.parse(endISO);
+    if (!Number.isFinite(endMs)) return;
+
+    const nowMs = Date.now();
+    if (nowMs >= endMs) return; // already ended; resume/launch will catch it
+
+    // Schedule only if it ends "today" (local day) AND app is foreground
+    const tz = getUserTimeZone();
+    const now = new Date(nowMs);
+    const end = new Date(endMs);
+
+    if (!isSameLocalDay(now, end, tz)) return;
+    if (AppState.currentState !== "active") return;
+
+    const delay = Math.max(0, endMs - nowMs);
+    const jitter = 2000;
+
+    rolloverTimerRef.current = setTimeout(() => {
+      tryRolloverIfNeeded("timer");
+    }, delay + jitter);
+  }, [
+    clearRolloverTimer,
+    getUserTimeZone,
+    isInitialized,
+    isSameLocalDay,
+    plan.periodEndUTC,
+    tryRolloverIfNeeded,
+  ]);
+
+  // Foreground resume trigger
+  useEffect(() => {
+    const onChange = (state: AppStateStatus) => {
+      if (state === "active") {
+        tryRolloverIfNeeded("resume");
+        scheduleRolloverTimerIfNeeded();
+      } else {
+        clearRolloverTimer();
+      }
+    };
+
+    const sub = AppState.addEventListener("change", onChange);
+    return () => {
+      sub.remove();
+      clearRolloverTimer();
+    };
+  }, [clearRolloverTimer, scheduleRolloverTimerIfNeeded, tryRolloverIfNeeded]);
+
+  // Reschedule timer whenever active plan changes
+  useEffect(() => {
+    scheduleRolloverTimerIfNeeded();
+  }, [
+    plan.periodType,
+    plan.periodStartISO,
+    plan.periodEndUTC,
+    scheduleRolloverTimerIfNeeded,
+  ]);
+
+  const switchPlanCurrency = useCallback(
+    async (nextCurrency: "USD" | "KRW") => {
+      const endpoint = `${API_BASE_URL}/api/plans`;
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "x-dev-user-id": DEV_USER_ID,
+      };
+
+      const currentType: PeriodType = (plan.periodType ??
+        DEFAULT_PERIOD_TYPE) as PeriodType;
+      const anchorISO = plan.periodAnchorISO ?? DEFAULT_BIWEEKLY_ANCHOR_ISO;
+
+      const body: any = {
+        periodType: currentType,
+        setActive: true,
+        useCurrentPeriod: true,
+        currency: nextCurrency,
+        language: plan.language ?? "en",
+        totalBudgetLimitMinor: plan.totalBudgetLimitMinor ?? 0,
+      };
+
+      if (currentType === "BIWEEKLY") {
+        body.periodAnchorISO = anchorISO;
+      }
+
+      try {
+        const res = await fetch(endpoint, {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify(body),
+        });
+
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          console.warn(
+            "[planStore] switchPlanCurrency failed",
+            res.status,
+            text
+          );
+          return false;
+        }
+
+        const raw = await res.json();
+
+        applyServerPlan({
+          periodType: raw?.periodType,
+          periodStartUTC: raw?.periodStartUTC ?? raw?.periodStart,
+          periodEndUTC: raw?.periodEndUTC ?? raw?.periodEnd,
+          timeZone: raw?.timeZone,
+          totalBudgetLimitMinor: raw?.totalBudgetLimitMinor ?? null,
+          currency: raw?.currency,
+          budgetGoals: Array.isArray(raw?.budgetGoals)
+            ? raw.budgetGoals.map((g: any) => ({
+                category: g.category,
+                limitMinor:
+                  typeof g.limitMinor === "number" ? g.limitMinor : null,
+              }))
+            : null,
+          savingsGoals: Array.isArray(raw?.savingsGoals)
+            ? raw.savingsGoals.map((g: any) => ({
+                name: g.name,
+                targetMinor:
+                  typeof g.targetMinor === "number" ? g.targetMinor : null,
+              }))
+            : null,
+        } as any);
+
+        return true;
+      } catch (err) {
+        console.error("[planStore] switchPlanCurrency error", err);
+        return false;
+      }
+    },
+    [plan, applyServerPlan]
+  );
+
+  const switchPeriodType: Store["switchPeriodType"] = useCallback(
+    async (type) => {
+      const nextType: PeriodType = (type ?? DEFAULT_PERIOD_TYPE) as PeriodType;
+
+      const endpoint = `${API_BASE_URL}/api/plans`;
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "x-dev-user-id": DEV_USER_ID,
+      };
+
+      // BIWEEKLY requires an anchor.
+      const anchorISO = plan.periodAnchorISO ?? DEFAULT_BIWEEKLY_ANCHOR_ISO;
+
+      const body: any = {
+        periodType: nextType,
+        setActive: true,
+        useCurrentPeriod: true,
+        // keep user preferences when switching
+        // currency: plan.homeCurrency,
+        language: plan.language ?? "en",
+        totalBudgetLimitMinor: plan.totalBudgetLimitMinor ?? 0,
+      };
+
+      if (nextType === "BIWEEKLY") {
+        body.periodAnchorISO = anchorISO;
+      }
+
+      try {
+        const res = await fetch(endpoint, {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify(body),
+        });
+
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          console.warn(
+            "[planStore] Failed to switch period type",
+            res.status,
+            text
+          );
+          return false;
+        }
+
+        const raw = await res.json();
+
+        // Apply server plan (source of truth)
+        applyServerPlan({
+          periodType: raw?.periodType,
+          periodStartUTC: raw?.periodStartUTC ?? raw?.periodStart,
+          periodEndUTC: raw?.periodEndUTC ?? raw?.periodEnd,
+          timeZone: raw?.timeZone,
+          totalBudgetLimitMinor: raw?.totalBudgetLimitMinor ?? null,
+          // ✅ 새 플랜의 통화로 UI도 자동 동기화
+          currency: raw?.currency,
+          budgetGoals: Array.isArray(raw?.budgetGoals)
+            ? raw.budgetGoals.map((g: any) => ({
+                category: g.category,
+                limitMinor:
+                  typeof g.limitMinor === "number" ? g.limitMinor : null,
+              }))
+            : null,
+          savingsGoals: Array.isArray(raw?.savingsGoals)
+            ? raw.savingsGoals.map((g: any) => ({
+                name: g.name,
+                targetMinor:
+                  typeof g.targetMinor === "number" ? g.targetMinor : null,
+              }))
+            : null,
+        });
+
+        return true;
+      } catch (err) {
+        console.error("[planStore] Error while switching period type", err);
+        return false;
+      }
+    },
+    [plan, applyServerPlan]
+  );
+
+  const refreshPeriodIfNeeded: Store["refreshPeriodIfNeeded"] =
+    useCallback(() => {
+      setPlan((p) => {
+        const expectedStartISO = periodStartFrom(
+          p.periodType,
+          new Date(),
+          p.periodAnchorISO ?? DEFAULT_BIWEEKLY_ANCHOR_ISO
+        );
+        // If the computed period start matches, no change.
+        if (p.periodStartISO === expectedStartISO) return p;
+        return {
+          ...p,
+          periodStartISO: expectedStartISO,
+          // Keep legacy field aligned for WEEKLY
+          weekStartISO:
+            p.periodType === "WEEKLY" ? expectedStartISO : p.weekStartISO,
+        };
+      });
+    }, []);
+
   const initialize: Store["initialize"] = useCallback(async () => {
     if (isInitialized || isLoading) return;
     setIsLoading(true);
@@ -709,18 +891,23 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
       // 2) 서버 plan 로드 (중복 fetch 제거)
       await refreshPlan();
+
+      // 3) 이미 기간이 끝났으면 즉시 rollover (앱 진입 시)
+      await tryRolloverIfNeeded("launch");
     } finally {
       setIsLoading(false);
       setIsInitialized(true);
     }
-  }, [isInitialized, isLoading, refreshPeriodIfNeeded, refreshPlan]);
+  }, [
+    isInitialized,
+    isLoading,
+    refreshPeriodIfNeeded,
+    refreshPlan,
+    tryRolloverIfNeeded,
+  ]);
 
   useEffect(() => {
     refreshPeriodIfNeeded();
-    const id = setInterval(() => {
-      refreshPeriodIfNeeded();
-    }, 60 * 1000);
-    return () => clearInterval(id);
   }, [refreshPeriodIfNeeded]);
 
   const upsertBudgetGoalLimit: Store["upsertBudgetGoalLimit"] = (
