@@ -71,11 +71,11 @@ function txToHomeMinor(tx: any, homeCurrency: Currency): number {
 
   // Prefer new field; fallback to legacy amountMinor
   const rawAmount =
-    typeof tx?.amountMinor === "number"
-      ? tx.amountMinor
-      : typeof tx?.amountMinor === "number"
-      ? tx.amountMinor
-      : 0;
+  typeof tx?.amountMinor === "number"
+    ? tx.amountMinor
+    : typeof (tx as any)?.amountHomeMinor === "number"
+    ? (tx as any).amountHomeMinor
+    : 0;
 
   if (!Number.isFinite(rawAmount) || rawAmount === 0) return 0;
 
@@ -103,7 +103,7 @@ function moneyHome(amountHomeMinor: number, homeCurrency: Currency) {
 }
 
 export default function DashboardScreen() {
-  const { plan, homeCurrency, displayCurrency, language, refreshPlan } =
+  const { plan, homeCurrency, displayCurrency, language } =
     usePlan();
   const isKo = language === "ko";
 
@@ -142,13 +142,10 @@ export default function DashboardScreen() {
       return () => {
         isActive = false;
       };
-    }, [refreshPlan])
+    }, [])
   );
 
-  const { startISO, endISO, type } = useMemo(
-    () => getPlanPeriodRange(plan as any),
-    [plan]
-  );
+  const { startISO, endISO, type } = useMemo(() => getPlanPeriodRange(plan), [plan]);
 
   const periodLabel =
     type === "MONTHLY"

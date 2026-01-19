@@ -6,6 +6,28 @@ function toISODate(d: Date) {
   return d.toISOString().slice(0, 10);
 }
 
+function toISODateInTimeZone(d: Date, timeZone: string) {
+  // YYYY-MM-DD in a specific IANA timezone
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  return fmt.format(d);
+}
+
+function getPlanUtcBounds(plan: any): { startMs: number; endMs: number } | null {
+  const startRaw = plan?.periodStartUTC ?? plan?.periodStart;
+  const endRaw = plan?.periodEndUTC ?? plan?.periodEnd;
+
+  const startMs = typeof startRaw === "string" ? Date.parse(startRaw) : startRaw instanceof Date ? startRaw.getTime() : NaN;
+  const endMs = typeof endRaw === "string" ? Date.parse(endRaw) : endRaw instanceof Date ? endRaw.getTime() : NaN;
+
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return null;
+  return { startMs, endMs };
+}
+
 function parseISODateLocal(isoDate: string) {
   const [y, m, d] = String(isoDate || "")
     .split("-")
@@ -36,12 +58,12 @@ function absMinor(n: any) {
 function txToHomeMinor(tx: any, homeCurrency: Currency): number {
   const currency: Currency = tx?.currency === "KRW" ? "KRW" : "USD";
 
-  // Prefer new field; fallback to legacy amountMinor
+  // Prefer new field; fallback to legacy amountHomeMinor
   const amountMinor =
     typeof tx?.amountMinor === "number"
       ? tx.amountMinor
-      : typeof tx?.amountMinor === "number"
-      ? tx.amountMinor
+      : typeof (tx as any)?.amountHomeMinor === "number"
+      ? (tx as any).amountHomeMinor
       : 0;
 
   const absAmount = absMinor(amountMinor);
@@ -82,7 +104,20 @@ export function getPlanPeriodRange(plan: Plan): {
 } {
   const type = (plan.periodType ?? "WEEKLY") as PeriodType;
 
-  // Back-compat fallback: older code may still rely on weekStartISO.
+  const tz =
+    (plan as any).timeZone ||
+    Intl.DateTimeFormat().resolvedOptions().timeZone ||
+    "UTC";
+
+  // Preferred: server is the source of truth for period boundaries.
+  const bounds = getPlanUtcBounds(plan as any);
+  if (bounds) {
+    const startISO = toISODateInTimeZone(new Date(bounds.startMs), tz);
+    const endISO = toISODateInTimeZone(new Date(bounds.endMs), tz);
+    return { type, startISO, endISO };
+  }
+
+  // Fallback: older code may still rely on date-only fields.
   const startISO = (plan.periodStartISO ??
     (plan as any).weekStartISO ??
     toISODate(new Date())) as string;
@@ -100,12 +135,19 @@ export function getPlanPeriodRange(plan: Plan): {
 }
 
 export function isISOInRange(iso: string, startISO: string, endISO: string) {
-  const t = new Date(iso).getTime();
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return false;
 
-  // startISO/endISO are date-only (YYYY-MM-DD) boundaries in LOCAL time.
+  // If the caller passed full ISO instants, compare directly.
+  const startInstant = Date.parse(startISO);
+  const endInstant = Date.parse(endISO);
+  if (Number.isFinite(startInstant) && Number.isFinite(endInstant)) {
+    return t >= startInstant && t < endInstant;
+  }
+
+  // Fallback: startISO/endISO are date-only (YYYY-MM-DD) boundaries in LOCAL time.
   const startMs = startOfLocalDayMs(startISO);
   const endMs = startOfLocalDayMs(endISO);
-
   return t >= startMs && t < endMs;
 }
 
@@ -116,6 +158,10 @@ export function isISOInRange(iso: string, startISO: string, endISO: string) {
  */
 export function computePlanProgressPercent(plan: Plan, transactions: any[]) {
   const { startISO, endISO } = getPlanPeriodRange(plan);
+
+  const bounds = getPlanUtcBounds(plan as any);
+  const startMs = bounds?.startMs;
+  const endMs = bounds?.endMs;
 
   const homeCurrency: Currency = ((plan as any).homeCurrency ??
     "USD") as Currency;
@@ -132,7 +178,14 @@ export function computePlanProgressPercent(plan: Plan, transactions: any[]) {
       tx.dateISO ?? tx.occurredAtISO ?? tx.createdAtISO ?? tx.createdAt ?? ""
     );
     if (!iso) continue;
-    if (!isISOInRange(iso, startISO, endISO)) continue;
+
+    if (Number.isFinite(startMs as any) && Number.isFinite(endMs as any)) {
+      const t = Date.parse(iso);
+      if (!Number.isFinite(t)) continue;
+      if (t < (startMs as number) || t >= (endMs as number)) continue;
+    } else {
+      if (!isISOInRange(iso, startISO, endISO)) continue;
+    }
 
     if (tx.type === "EXPENSE") {
       const spent = txToHomeMinor(tx, homeCurrency);
@@ -236,7 +289,7 @@ export function computeAllTimePlanProgressPercent(
     budgetSum += ratio > 1 ? 0 : Math.max(0, 1 - ratio);
   }
 
-  const totalLimit = absMinor((plan as any).totalBudgetlimitMinor);
+  const totalLimit = absMinor((plan as any).totalBudgetLimitMinor);
   if (totalLimit > 0) {
     budgetGoalsCount += 1;
     const ratio = totalSpentHomeMinor / Math.max(1, totalLimit);

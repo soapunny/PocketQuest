@@ -55,8 +55,8 @@ model User {
   provider   AuthProvider //auth provider type(GOOGLE, KAKAO, etc.)
   providerId String //auth provider id(google id, kakao id, etc. external id)
 
-  createdAt DateTime @default(now()) //default value: current timestamp
-  updatedAt DateTime @updatedAt //auto-update updated at
+  createdAt DateTime @default(now()) @db.Timestamptz(6) //default value: current timestamp
+  updatedAt DateTime @updatedAt @db.Timestamptz(6) //auto-update updated at
 
   transactions Transaction[] //relations: one to many(one user can have many transactions)
   plans        Plan[] //relations: one to many(one user can have many plans)
@@ -80,12 +80,12 @@ model Transaction {
   fxUsdKrw Float?
 
   category   String //category(groceries, gift, Emergency Fund, etc.)
-  occurredAt DateTime //occurred at(date and time)
+  occurredAt DateTime @db.Timestamptz(6) //occurred at(date and time)
 
   note String? //note(optional)
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
 
   @@index([userId, occurredAt]) //index for querying transactions by user id and occurred at
   @@index([userId, type]) //index for querying transactions by user id and type
@@ -104,11 +104,11 @@ model Plan {
 
   periodType PeriodType //period type(WEEKLY, BIWEEKLY, MONTHLY)
   // For BIWEEKLY: optional anchor date (e.g., Monday) used to compute biweekly boundaries.
-  periodAnchor DateTime? //optional anchor date(e.g., Monday) used to compute biweekly boundaries.
+  periodAnchor DateTime? @db.Timestamptz(6) //optional anchor date(e.g., Monday) used to compute biweekly boundaries.
   // Start of the plan period (e.g., first day of month/week)
-  periodStart DateTime //start of the plan period(e.g., first day of month/week)
+  periodStart DateTime @db.Timestamptz(6) //start of the plan period(e.g., first day of month/week)
   // Optional end of the period (can be derived, but keeping it helps querying/ranges)
-  periodEnd DateTime?
+  periodEnd DateTime? @db.Timestamptz(6)
 
   // Single app currency preference (your UX decision to keep it simple)
   currency CurrencyCode @default(USD)
@@ -116,8 +116,8 @@ model Plan {
   // 0 = disabled
   totalBudgetLimitMinor Int @default(0)
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
 
   // Relations
   budgetGoals  BudgetGoal[]
@@ -139,8 +139,8 @@ model BudgetGoal {
   category   String
   limitMinor Int
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
 
   @@unique([planId, category])
   @@index([planId])
@@ -154,8 +154,8 @@ model SavingsGoal {
   name        String
   targetMinor Int
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)
 
   @@unique([planId, name])
   @@index([planId])

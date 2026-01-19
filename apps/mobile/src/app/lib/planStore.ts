@@ -41,10 +41,12 @@ export type Plan = {
 
   // Start of the current period (week / 2-week block / calendar month) as YYYY-MM-DD.
   periodStartISO: string;
-
-  // End of the current period as an ISO string (UTC). Set from server responses.
+  // Server-source-of-truth period boundaries (UTC instants as ISO strings)
+  periodStartUTC?: string;
   periodEndUTC?: string;
 
+  // For BIWEEKLY, server may provide an anchor instant (UTC ISO)
+  periodAnchorUTC?: string;
   // Optional timezone (IANA). If not provided by server, device timezone is used.
   timeZone?: string;
 
@@ -101,6 +103,9 @@ type Store = {
     periodEndUTC?: string;
     periodEnd?: string;
 
+    periodAnchorUTC?: string;
+    periodAnchor?: string;
+
     // optional user timezone
     timeZone?: string;
 
@@ -134,6 +139,9 @@ type Store = {
 
 const PlanContext = createContext<Store | null>(null);
 
+// BIWEEKLY 기준일(로컬 날짜, 월요일 시작). 서버/클라이언트 공통 기본값.
+export const DEFAULT_BIWEEKLY_ANCHOR_ISO = "2025-01-06";
+
 function uid() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
@@ -141,6 +149,22 @@ function uid() {
 function toISODate(d: Date) {
   // Date-only ISO (YYYY-MM-DD)
   return d.toISOString().slice(0, 10);
+}
+
+function toISODateInTimeZone(d: Date, timeZone: string) {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  return fmt.format(d);
+}
+
+function safeParseISODateTime(iso: any): Date | null {
+  if (!iso) return null;
+  const d = new Date(String(iso));
+  return Number.isFinite(d.getTime()) ? d : null;
 }
 
 function parseISODateLocal(isoDate: string) {
@@ -259,7 +283,7 @@ function mergeSavingsGoals(
   const byName = new Map<string, number>();
   serverGoals.forEach((g) => {
     const name = normalizeCategory(g.name);
-    const raw = g.targetMinor ?? g.targetMinor;
+    const raw = g.targetMinor ?? 0;
     byName.set(name, normalizePositiveInt(raw));
   });
 
@@ -286,7 +310,6 @@ function sumBudgetLimits(goals: BudgetGoal[]) {
 
 export function PlanProvider({ children }: { children: React.ReactNode }) {
   const DEFAULT_PERIOD_TYPE: PeriodType = "MONTHLY";
-  const DEFAULT_BIWEEKLY_ANCHOR_ISO = "2025-01-06"; // Monday anchor (YYYY-MM-DD)
 
   const DEFAULT_HOME_CURRENCY: Currency = "USD";
   const DEFAULT_DISPLAY_CURRENCY: Currency = "USD";
@@ -393,23 +416,36 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       const periodType: PeriodType = (serverPlan?.periodType ??
         DEFAULT_PERIOD_TYPE) as PeriodType;
 
-      const rawStart = (
-        serverPlan?.periodStartUTC ??
-        serverPlan?.periodStart ??
-        ""
-      ).toString();
-      const periodStartISO = rawStart ? rawStart.slice(0, 10) : "";
-
-      const rawEnd = (
-        (serverPlan as any)?.periodEndUTC ??
-        (serverPlan as any)?.periodEnd ??
-        ""
-      ).toString();
-      const periodEndUTC = rawEnd || undefined;
-
       const timeZone = (serverPlan as any)?.timeZone
-        ? String((serverPlan as any).timeZone)
-        : undefined;
+      ? String((serverPlan as any).timeZone)
+      : undefined;
+
+      const periodStartUTC = (
+        serverPlan?.periodStartUTC ?? (serverPlan as any)?.periodStart ?? ""
+      ).toString();
+
+      const periodEndUTC = (
+        (serverPlan as any)?.periodEndUTC ?? (serverPlan as any)?.periodEnd ?? ""
+      ).toString();
+
+      const periodAnchorUTC = (
+        (serverPlan as any)?.periodAnchorUTC ??
+        (serverPlan as any)?.periodAnchor ??
+        ""
+      ).toString();
+
+      // Derive YYYY-MM-DD strings for UI from UTC instants when possible
+      const tzForDerive =
+        timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+
+      const startDt = safeParseISODateTime(periodStartUTC);
+      const derivedStartISO = startDt ? toISODateInTimeZone(startDt, tzForDerive) : "";
+
+      const anchorDt = safeParseISODateTime(periodAnchorUTC);
+      const derivedAnchorISO = anchorDt ? toISODateInTimeZone(anchorDt, tzForDerive) : "";
+
+      const periodStartISO =
+        derivedStartISO || (periodStartUTC ? periodStartUTC.slice(0, 10) : "");
 
       const serverBudgetGoals = Array.isArray(serverPlan?.budgetGoals)
         ? serverPlan.budgetGoals
@@ -440,24 +476,38 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
         const nextPeriodStartISO = periodStartISO || p.periodStartISO;
 
-        return {
+        const next = {
           ...p,
           periodType,
+          periodAnchorISO:
+            periodType === "BIWEEKLY" && derivedAnchorISO
+              ? derivedAnchorISO
+              : p.periodAnchorISO,
           periodStartISO: nextPeriodStartISO,
-          periodEndUTC: periodEndUTC ?? p.periodEndUTC,
+          periodStartUTC: periodStartUTC || p.periodStartUTC,
+          periodEndUTC: periodEndUTC || p.periodEndUTC,
+          periodAnchorUTC: periodAnchorUTC || p.periodAnchorUTC,
           timeZone: timeZone ?? p.timeZone,
-          weekStartISO:
-            periodType === "WEEKLY" ? nextPeriodStartISO : p.weekStartISO,
+          weekStartISO: periodType === "WEEKLY" ? nextPeriodStartISO : p.weekStartISO,
           totalBudgetLimitMinor,
-          homeCurrency:
-            serverPlan.homeCurrency ?? serverPlan.currency ?? p.homeCurrency,
+          homeCurrency: serverPlan.homeCurrency ?? serverPlan.currency ?? p.homeCurrency,
           displayCurrency:
-            serverPlan.displayCurrency ??
-            serverPlan.currency ??
-            p.displayCurrency,
+            serverPlan.displayCurrency ?? serverPlan.currency ?? p.displayCurrency,
           budgetGoals: nextBudgetGoals,
           savingsGoals: nextSavingsGoals,
         };
+        
+        console.log("[applyServerPlan] applied:", {
+          periodType: next.periodType,
+          currencyFromServer: serverPlan.currency,
+          homeCurrency: next.homeCurrency,
+          displayCurrency: next.displayCurrency,
+          periodStartUTC: next.periodStartUTC,
+          periodEndUTC: next.periodEndUTC,
+          timeZone: next.timeZone,
+        });
+        
+        return next;
       });
     },
     []
@@ -477,6 +527,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         // server may send DateTime ISO under either key
         periodStartUTC: raw?.periodStartUTC ?? raw?.periodStart,
         periodEndUTC: raw?.periodEndUTC ?? raw?.periodEnd,
+        periodAnchorUTC: raw?.periodAnchorUTC ?? raw?.periodAnchor,
         timeZone: raw?.timeZone,
         totalBudgetLimitMinor: raw?.totalBudgetLimitMinor ?? null,
         currency: raw?.currency,
@@ -550,6 +601,15 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
       // 2) 정상 조회면 plan 적용
       const raw = await res.json();
+
+      console.log("[switchPeriodType] server raw:", {
+        periodType: raw?.periodType,
+        currency: raw?.currency,
+        periodStartUTC: raw?.periodStartUTC ?? raw?.periodStart,
+        periodEndUTC: raw?.periodEndUTC ?? raw?.periodEnd,
+        timeZone: raw?.timeZone,
+        periodAnchorUTC: raw?.periodAnchorUTC ?? raw?.periodAnchor,
+      });
       applyRawPlan(raw);
       return true;
     } catch (err) {
@@ -754,6 +814,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
           periodType: raw?.periodType,
           periodStartUTC: raw?.periodStartUTC ?? raw?.periodStart,
           periodEndUTC: raw?.periodEndUTC ?? raw?.periodEnd,
+          periodAnchorUTC: raw?.periodAnchorUTC ?? raw?.periodAnchor,
           timeZone: raw?.timeZone,
           totalBudgetLimitMinor: raw?.totalBudgetLimitMinor ?? null,
           currency: raw?.currency,
@@ -833,6 +894,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
           periodType: raw?.periodType,
           periodStartUTC: raw?.periodStartUTC ?? raw?.periodStart,
           periodEndUTC: raw?.periodEndUTC ?? raw?.periodEnd,
+          periodAnchorUTC: raw?.periodAnchorUTC ?? raw?.periodAnchor,
           timeZone: raw?.timeZone,
           totalBudgetLimitMinor: raw?.totalBudgetLimitMinor ?? null,
           // ✅ 새 플랜의 통화로 UI도 자동 동기화
@@ -862,25 +924,51 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     [plan, applyServerPlan]
   );
 
-  const refreshPeriodIfNeeded: Store["refreshPeriodIfNeeded"] =
-    useCallback(() => {
-      setPlan((p) => {
-        const expectedStartISO = periodStartFrom(
-          p.periodType,
-          new Date(),
-          p.periodAnchorISO ?? DEFAULT_BIWEEKLY_ANCHOR_ISO
-        );
-        // If the computed period start matches, no change.
-        if (p.periodStartISO === expectedStartISO) return p;
+  const refreshPeriodIfNeeded: Store["refreshPeriodIfNeeded"] = useCallback(() => {
+    setPlan((p) => {
+      // If server provided precise UTC bounds, don't "recompute" locally.
+      // We only keep UI date-only fields in sync with the server boundaries.
+      const tz = p.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+
+      // If plan already ended, do nothing here. Rollover logic will create/apply next plan.
+      if (p.periodEndUTC) {
+        const endMs = Date.parse(p.periodEndUTC);
+        if (Number.isFinite(endMs) && Date.now() >= endMs) {
+          return p;
+        }
+      }
+
+      if (p.periodStartUTC) {
+        const startDt = safeParseISODateTime(p.periodStartUTC);
+        if (!startDt) return p;
+
+        const expectedStartISO = toISODateInTimeZone(startDt, tz);
+        if (!expectedStartISO || p.periodStartISO === expectedStartISO) return p;
+
         return {
           ...p,
           periodStartISO: expectedStartISO,
           // Keep legacy field aligned for WEEKLY
-          weekStartISO:
-            p.periodType === "WEEKLY" ? expectedStartISO : p.weekStartISO,
+          weekStartISO: p.periodType === "WEEKLY" ? expectedStartISO : p.weekStartISO,
         };
-      });
-    }, []);
+      }
+
+      // Fallback: older flows before server boundaries were standardized.
+      const expectedStartISO = periodStartFrom(
+        p.periodType,
+        new Date(),
+        p.periodAnchorISO ?? DEFAULT_BIWEEKLY_ANCHOR_ISO
+      );
+
+      if (p.periodStartISO === expectedStartISO) return p;
+
+      return {
+        ...p,
+        periodStartISO: expectedStartISO,
+        weekStartISO: p.periodType === "WEEKLY" ? expectedStartISO : p.weekStartISO,
+      };
+    });
+  }, []);
 
   const initialize: Store["initialize"] = useCallback(async () => {
     if (isInitialized || isLoading) return;

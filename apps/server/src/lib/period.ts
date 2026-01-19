@@ -159,6 +159,81 @@ export function getWeeklyPeriodStartUTC(
   }
 }
 
+
+/**
+ * Biweekly periodStart (UTC)를 반환
+ *
+ * 핵심 아이디어(중요):
+ * - BIWEEKLY는 "2주 단위"이므로, 어떤 "기준이 되는 주"(anchor)를 하나 정해두면
+ *   (anchor가 속한 주 = A주기), 그 다음 주는 B주기, 그 다음은 다시 A주기... 처럼 번갈아갑니다.
+ * - 그래서 "이번 주 시작(월요일 00:00, 로컬)"이 anchor와 같은 그룹(A)인지 / 반대 그룹(B)인지
+ *   weekDiff(주 차이)의 짝/홀(even/odd)로 판정합니다.
+ *   - weekDiff가 짝수(even)면: 이번 주가 BIWEEKLY 시작 주
+ *   - weekDiff가 홀수(odd)면: 지난 주가 BIWEEKLY 시작 주 (즉, 1주 뒤집어서 2주 블록의 시작으로 맞춤)
+ *
+ * 주의:
+ * - DST(서머타임) 때문에 UTC 기준 시간 차이가 7일(168h)에서 1시간 정도 흔들릴 수 있어요.
+ *   그래서 ms 차이로 weekDiff를 계산하지 않고, "로컬 날짜(YYYY-MM-DD)"를 기준으로 dayDiff를 만든 뒤
+ *   weekDiff = floor(dayDiff / 7)로 계산합니다.
+ */
+export function getBiweeklyPeriodStartUTC(
+  timeZone: string,
+  anchorUTC: Date,
+  now: Date = new Date(),
+  weekStartsOn: 0 | 1 | 2 | 3 | 4 | 5 | 6 = 1 // ✅ Monday
+): Date {
+  const tz = normalizeTimeZone(timeZone);
+  const baseNow = isValidDate(now) ? now : new Date();
+  const baseAnchor = isValidDate(anchorUTC) ? anchorUTC : new Date(Date.UTC(2025, 0, 6, 0, 0, 0, 0));
+
+  try {
+    // 1) "이번 주 시작"(로컬 월요일 00:00) → UTC
+    const thisWeekStartUTC = getWeeklyPeriodStartUTC(tz, baseNow, weekStartsOn);
+
+    // 2) anchor도 "그 주의 시작"으로 정규화(로컬 월요일 00:00) → UTC
+    const anchorWeekStartUTC = getWeeklyPeriodStartUTC(tz, baseAnchor, weekStartsOn);
+
+    // 3) DST 영향을 피하기 위해 "로컬 날짜"(YYYY-MM-DD)를 day number로 변환해서 차이를 계산
+    const thisWeekDayNum = zonedDayNumber(thisWeekStartUTC, tz);
+    const anchorWeekDayNum = zonedDayNumber(anchorWeekStartUTC, tz);
+
+    const dayDiff = thisWeekDayNum - anchorWeekDayNum;
+    const weekDiff = Math.floor(dayDiff / 7);
+
+    // 4) 짝수(even)=이번 주가 시작, 홀수(odd)=지난 주가 시작
+    if (weekDiff % 2 === 0) {
+      return thisWeekStartUTC;
+    }
+
+    // 지난 주(로컬 -7일)로 이동 후 UTC로 변환
+    const zonedThisWeekStart = toZonedTime(thisWeekStartUTC, tz);
+    const prevZonedWeekStart = addDays(zonedThisWeekStart, -7);
+    const prevUTC = fromZonedTime(prevZonedWeekStart, tz);
+
+    if (!isValidDate(prevUTC) || !assertReasonableYear(prevUTC)) {
+      return thisWeekStartUTC;
+    }
+
+    return prevUTC;
+  } catch {
+    // 계산 실패 시에는 일단 "이번 주 시작"으로 반환 (극히 드묾)
+    return getWeeklyPeriodStartUTC(tz, baseNow, weekStartsOn);
+  }
+}
+
+/**
+ * 주어진 UTC Date를 "유저 timezone의 로컬 날짜"로 바꾼 뒤,
+ * 그 날짜의 day number(1970-01-01로부터 며칠째인지)를 반환합니다.
+ * - DST로 인한 23/25시간짜리 날에도 안전하게 "달력 기준" 차이를 계산하려고 사용합니다.
+ */
+function zonedDayNumber(utcDate: Date, timeZone: string): number {
+  const zoned = toZonedTime(utcDate, timeZone);
+  const y = zoned.getFullYear();
+  const m = zoned.getMonth();
+  const d = zoned.getDate();
+  return Math.floor(Date.UTC(y, m, d) / 86400000);
+}
+
 export type PeriodType = "WEEKLY" | "BIWEEKLY" | "MONTHLY";
 
 function legacyNextPeriodEnd(base: Date, periodType: PeriodType): Date {

@@ -1,7 +1,6 @@
 import React, { useMemo } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
-import { usePlan } from "../lib/planStore";
-import { type PeriodType, type UILanguage } from "../lib/planStore";
+import { usePlan, DEFAULT_BIWEEKLY_ANCHOR_ISO, type PeriodType, type UILanguage  } from "../lib/planStore";
 import type { Currency } from "../lib/currency";
 import ScreenHeader from "../components/layout/ScreenHeader";
 import ScreenLayout from "../components/layout/ScreenLayout";
@@ -50,8 +49,9 @@ export default function SettingsScreen() {
   const isAdvanced = !!advancedCurrencyMode;
 
   const combinedCurrency = useMemo<Currency>(() => {
-    return (displayCurrency ?? homeCurrency ?? "USD") as Currency;
-  }, [displayCurrency, homeCurrency]);
+    const planCurrency = (plan as any)?.currency as Currency | undefined;
+    return (planCurrency ?? displayCurrency ?? homeCurrency ?? "USD") as Currency;
+  }, [plan, displayCurrency, homeCurrency]);
 
   const lang = (language ?? "en") as UILanguage;
   const isKo = lang === "ko";
@@ -160,7 +160,7 @@ export default function SettingsScreen() {
           <Text style={styles.help}>
             {isKo ? "기준일:" : "Anchor:"}{" "}
             <Text style={{ fontWeight: "900" }}>
-              {plan.periodAnchorISO ?? "2025-01-06"}
+              {plan.periodAnchorISO ?? DEFAULT_BIWEEKLY_ANCHOR_ISO}
             </Text>
           </Text>
         ) : null}

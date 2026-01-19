@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthUser } from "@/lib/auth";
-import { getWeeklyPeriodStartUTC, calcNextPeriodEnd } from "@/lib/period";
+import {
+  getWeeklyPeriodStartUTC,
+  getBiweeklyPeriodStartUTC,
+  calcNextPeriodEnd,
+} from "@/lib/period";
 import { z } from "zod";
 import { toZonedTime, fromZonedTime } from "date-fns-tz";
-import { addDays } from "date-fns";
 
 const periodTypeSchema = z.enum(["WEEKLY", "BIWEEKLY", "MONTHLY"]);
 
@@ -90,44 +93,20 @@ function getMonthlyPeriodStartUTC_local(
   return fromZonedTime(zonedStart, timeZone);
 }
 
-function getBiweeklyPeriodStartUTC_local(
-  timeZone: string,
-  anchorUTC: Date,
-  now: Date = new Date(),
-  blockDays: number = 14
-): Date {
-  const zonedNow = toZonedTime(now, timeZone);
-  const nowMidnight = new Date(
-    zonedNow.getFullYear(),
-    zonedNow.getMonth(),
-    zonedNow.getDate(),
-    0,
-    0,
-    0,
-    0
-  );
+function withPlanUtcFields(plan: any, timeZone: string) {
+  // Prisma DateTime fields arrive as JS Date objects. Provide stable ISO strings for clients.
+  const periodStartUTC = plan?.periodStart instanceof Date ? plan.periodStart.toISOString() : null;
+  const periodEndUTC = plan?.periodEnd instanceof Date ? plan.periodEnd.toISOString() : null;
+  const periodAnchorUTC = plan?.periodAnchor instanceof Date ? plan.periodAnchor.toISOString() : null;
 
-  const zonedAnchor = toZonedTime(anchorUTC, timeZone);
-  const anchorMidnight = new Date(
-    zonedAnchor.getFullYear(),
-    zonedAnchor.getMonth(),
-    zonedAnchor.getDate(),
-    0,
-    0,
-    0,
-    0
-  );
-
-  const msPerDay = 24 * 60 * 60 * 1000;
-  const diffDays = Math.floor(
-    (nowMidnight.getTime() - anchorMidnight.getTime()) / msPerDay
-  );
-
-  // Proper modulo for negative values
-  const offset = ((diffDays % blockDays) + blockDays) % blockDays;
-  const blockStart = addDays(nowMidnight, -offset);
-
-  return fromZonedTime(blockStart, timeZone);
+  return {
+    ...plan,
+    // Server-source-of-truth fields (stable for clients)
+    timeZone,
+    periodStartUTC,
+    periodEndUTC,
+    periodAnchorUTC,
+  };
 }
 
 export async function GET(request: NextRequest) {
@@ -187,14 +166,15 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: "Plan not found" }, { status: 404 });
       }
 
-      return NextResponse.json(plan);
+      return NextResponse.json(withPlanUtcFields(plan, timeZone));
     }
 
     // 2) 기본 동작: User.activePlanId(=activePlan) 반환
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { activePlanId: true },
+      select: { activePlanId: true, timeZone: true },
     });
+    const timeZone = user?.timeZone ?? "America/New_York";
 
     if (user?.activePlanId) {
       const activePlan = await prisma.plan.findUnique({
@@ -203,7 +183,7 @@ export async function GET(request: NextRequest) {
       });
 
       if (activePlan) {
-        return NextResponse.json(activePlan);
+        return NextResponse.json(withPlanUtcFields(activePlan, timeZone));
       }
       // activePlanId가 가리키는 plan이 없으면 아래 fallback으로 복구
     }
@@ -225,7 +205,7 @@ export async function GET(request: NextRequest) {
       data: { activePlanId: plan.id },
     });
 
-    return NextResponse.json(plan);
+    return NextResponse.json(withPlanUtcFields(plan, timeZone));
   } catch (error) {
     console.error("Get plan error:", error);
     return NextResponse.json(
@@ -312,9 +292,9 @@ export async function PATCH(request: NextRequest) {
       if (data.periodType === "MONTHLY") {
         periodStart = getMonthlyPeriodStartUTC_local(timeZone);
       } else {
-        // BIWEEKLY
+        // BIWEEKLY (anchor 기반 2주 주기 시작점 계산)
         const anchorUTC = isoLocalDayToUTCDate(timeZone, data.periodAnchorISO!);
-        periodStart = getBiweeklyPeriodStartUTC_local(timeZone, anchorUTC);
+        periodStart = getBiweeklyPeriodStartUTC(timeZone, anchorUTC, new Date(), 1);
       }
     } else {
       // client-provided periodStartISO is a local-day identifier
@@ -399,7 +379,7 @@ export async function PATCH(request: NextRequest) {
       }
     }
 
-    return NextResponse.json(plan);
+    return NextResponse.json(withPlanUtcFields(plan, timeZone));
   } catch (error) {
     console.error("Update plan error:", error);
     return NextResponse.json(
