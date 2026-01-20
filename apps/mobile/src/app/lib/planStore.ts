@@ -338,6 +338,12 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
   const [isInitialized, setIsInitialized] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  // `applyServerPlan` is memoized with [], so anything it calls can become stale.
+  // Keep a ref to the latest rollover callback so we can trigger rollover right after
+  // applying a server plan without stale-closure issues.
+  const tryRolloverIfNeededRef = useRef<
+    (reason: "launch" | "resume" | "period-switch" | "timer") => Promise<void>
+  >(async () => {});
 
   const setTotalBudgetLimitMinor: Store["setTotalBudgetLimitMinor"] = (
     minor
@@ -507,6 +513,13 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
           timeZone: next.timeZone,
         });
         
+        console.log("[planStore] post-apply rollover check queued");
+
+        setTimeout(() => {
+          console.log("[planStore] post-apply rollover check running");
+          void tryRolloverIfNeededRef.current("resume");
+        }, 0);
+        
         return next;
       });
     },
@@ -629,6 +642,8 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
   const rolloverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastRolloverAttemptAtRef = useRef<number>(0);
+  // Prevent duplicate rollover attempts for the same period end within a single app session
+  const lastRolloverKeyRef = useRef<string | null>(null);
 
   const clearRolloverTimer = useCallback(() => {
     if (rolloverTimerRef.current) {
@@ -673,33 +688,99 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     async (reason: "launch" | "resume" | "period-switch" | "timer") => {
       // Need server plan info first
       // initialize 중(isLoading=true)에도 launch 체크는 허용
-      if (!isInitialized && !isLoading) return;
-
-      // Cooldown (avoid spamming rollover calls)
-      const nowMs = Date.now();
-      if (nowMs - lastRolloverAttemptAtRef.current < 2 * 60 * 1000) return;
-      lastRolloverAttemptAtRef.current = nowMs;
+      if (!isInitialized && !isLoading && reason !== "launch") {
+        console.log("[planStore] rollover skip (not ready)", {
+          reason,
+          isInitialized,
+          isLoading,
+        });
+        return;
+      }
 
       const endISO = plan.periodEndUTC;
-      if (!endISO) return;
+      if (!endISO) {
+        console.log("[planStore] rollover skip (no periodEndUTC)", { reason });
+        return;
+      }
+
+      // Session-level de-dupe key (prevents repeated attempts for the same server period)
+      const key = `${plan.periodType}|${plan.periodStartUTC ?? ""}|${endISO}`;
+      if (lastRolloverKeyRef.current === key) {
+        console.log("[planStore] rollover skip (same key)", { reason, key });
+        return;
+      }
+
+      // Cooldown (avoid spamming rollover calls)
+      // For `timer`, allow it to proceed even if a recent resume check happened.
+      // Same-key de-dupe still prevents double-rollover for the same period.
+      const nowMs = Date.now();
+      if (
+        reason !== "timer" &&
+        nowMs - lastRolloverAttemptAtRef.current < 2 * 60 * 1000
+      ) {
+        console.log("[planStore] rollover skip (cooldown)", {
+          reason,
+          msSinceLast: nowMs - lastRolloverAttemptAtRef.current,
+        });
+        return;
+      }
+      lastRolloverAttemptAtRef.current = nowMs;
 
       const endMs = Date.parse(endISO);
-      if (!Number.isFinite(endMs)) return;
+      if (!Number.isFinite(endMs)) {
+        console.log("[planStore] rollover skip (bad endMs)", {
+          reason,
+          endISO,
+        });
+        return;
+      }
 
       // Only rollover after the plan has actually ended
-      if (Date.now() < endMs) return;
+      const now = Date.now();
+      if (now < endMs) {
+        console.log("[planStore] rollover skip (not ended yet)", {
+          reason,
+          endISO,
+          msUntilEnd: endMs - now,
+        });
+        return;
+      }
+
+      // Mark key as in-flight for this session (prevents back-to-back double calls)
+      lastRolloverKeyRef.current = key;
+
+      console.log("[planStore] rollover attempt", {
+        reason,
+        key,
+        endISO,
+      });
 
       try {
         const r = await postRollover();
+        console.log("[planStore] rollover response", {
+          reason,
+          key,
+          rolled: !!r?.rolled,
+        });
+
         if (r?.rolled) {
           await refreshPlan();
+        } else {
+          // If server says nothing rolled, allow a future attempt (e.g., if clocks differ)
+          if (lastRolloverKeyRef.current === key) lastRolloverKeyRef.current = null;
         }
       } catch (e) {
+        // On failure, release the key so a later resume/timer can retry
+        if (lastRolloverKeyRef.current === key) lastRolloverKeyRef.current = null;
         console.warn(`[planStore] rollover failed (${reason})`, e);
       }
     },
-    [isInitialized, isLoading, plan.periodEndUTC, postRollover, refreshPlan]
+    [isInitialized, isLoading, plan.periodType, plan.periodStartUTC, plan.periodEndUTC, postRollover, refreshPlan]
   );
+
+  useEffect(() => {
+    tryRolloverIfNeededRef.current = tryRolloverIfNeeded;
+  }, [tryRolloverIfNeeded]);
 
   const scheduleRolloverTimerIfNeeded = useCallback(() => {
     clearRolloverTimer();
@@ -724,6 +805,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     if (AppState.currentState !== "active") return;
 
     const delay = Math.max(0, endMs - nowMs);
+    // Small jitter helps avoid edge timing issues at the exact boundary
     const jitter = 2000;
 
     rolloverTimerRef.current = setTimeout(() => {

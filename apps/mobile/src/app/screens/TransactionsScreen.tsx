@@ -122,6 +122,12 @@ export default function TransactionsScreen() {
     useCallback(() => {
       let isActive = true;
 
+      // DEBUG: confirm which period filter is active whenever the screen focuses
+      console.log("[TX] focus", {
+        periodFilter,
+        ts: new Date().toISOString(),
+      });
+
       // periodFilter 값에 따라 서버 range 파라미터를 결정
       // THIS_YEAR 는 서버 range에 없으므로 ALL 로 받아온 뒤, 클라이언트에서 연도 필터를 적용.
       const rangeParam: "ALL" | "THIS_MONTH" | "LAST_MONTH" =
@@ -131,12 +137,42 @@ export default function TransactionsScreen() {
           ? "LAST_MONTH"
           : "ALL";
 
+      // DEBUG: confirm what we actually send to the server
+      console.log("[TX] request params", {
+        periodFilter,
+        rangeParam,
+      });
+
       (async () => {
         try {
           setIsLoading(true);
+          const t0 = Date.now();
+
+          console.log("[TX] fetchTransactions:start", {
+            range: rangeParam,
+            includeSummary: true,
+          });
+
           const { transactions } = await fetchTransactions({
             range: rangeParam,
             includeSummary: true,
+          });
+
+          console.log("[TX] fetchTransactions:done", {
+            range: rangeParam,
+            ms: Date.now() - t0,
+            count: Array.isArray(transactions) ? transactions.length : -1,
+            sample: Array.isArray(transactions)
+              ? transactions.slice(0, 3).map((tx: any) => ({
+                  id: tx.id,
+                  type: tx.type,
+                  category: tx.category,
+                  currency: tx.currency,
+                  amountMinor: tx.amountMinor,
+                  occurredAt: tx.occurredAt ?? tx.occurredAtISO,
+                  createdAt: tx.createdAt ?? tx.createdAtISO,
+                }))
+              : [],
           });
 
           if (isActive) {
@@ -265,15 +301,44 @@ export default function TransactionsScreen() {
   const filteredTransactions = useMemo(() => {
     const q = searchText.trim().toLowerCase();
 
-    return transactions.filter((tx) => {
-      if (filterType !== "ALL" && tx.type !== filterType) return false;
-      if (!isInSelectedPeriod(tx)) return false;
+    // DEBUG: confirm client-side filters used for rendering
+    console.log("[TX] client filters", {
+      periodFilter,
+      filterType,
+      searchText: q,
+      inputCount: transactions.length,
+    });
+
+    let rejectedByType = 0;
+    let rejectedByPeriod = 0;
+    let rejectedBySearch = 0;
+
+    const out = transactions.filter((tx) => {
+      if (filterType !== "ALL" && tx.type !== filterType) {
+        rejectedByType += 1;
+        return false;
+      }
+      if (!isInSelectedPeriod(tx)) {
+        rejectedByPeriod += 1;
+        return false;
+      }
 
       if (!q) return true;
 
       const hay = `${tx.type} ${tx.category} ${tx.note ?? ""}`.toLowerCase();
-      return hay.includes(q);
+      const ok = hay.includes(q);
+      if (!ok) rejectedBySearch += 1;
+      return ok;
     });
+
+    console.log("[TX] client filters result", {
+      outputCount: out.length,
+      rejectedByType,
+      rejectedByPeriod,
+      rejectedBySearch,
+    });
+
+    return out;
   }, [transactions, filterType, periodFilter, searchText]);
 
   const chipStyle = (active: boolean) => [

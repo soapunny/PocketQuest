@@ -6,6 +6,7 @@ import {
   getBiweeklyPeriodStartUTC,
   calcNextPeriodEnd,
 } from "@/lib/period";
+import type { PeriodType } from "@/lib/period";
 import { z } from "zod";
 import { toZonedTime, fromZonedTime } from "date-fns-tz";
 
@@ -109,6 +110,55 @@ function withPlanUtcFields(plan: any, timeZone: string) {
   };
 }
 
+async function ensureDefaultActivePlan(userId: string, timeZone: string) {
+  // Default behavior for MVP: if the user has no plans yet, create a current MONTHLY plan
+  // (can be changed later to WEEKLY/BIWEEKLY based on onboarding).
+  const include = { budgetGoals: true, savingsGoals: true } as const;
+
+  const periodType: PeriodType = "MONTHLY";
+  const periodStart = getMonthlyPeriodStartUTC_local(timeZone);
+  const periodEnd = calcNextPeriodEnd(periodStart, periodType, timeZone);
+
+  const plan = await prisma.plan.upsert({
+    where: {
+      userId_periodType_periodStart: {
+        userId,
+        periodType,
+        periodStart,
+      },
+    },
+    create: {
+      userId,
+      periodType,
+      periodStart,
+      periodEnd,
+      // Safe defaults; user can update via PATCH later
+      totalBudgetLimitMinor: 0,
+    },
+    update: {
+      // Repair periodEnd if rules changed
+      periodEnd,
+    },
+    include,
+  });
+
+  await prisma.user.update({
+    where: { id: userId },
+    data: { activePlanId: plan.id },
+  });
+
+  console.log("[plans] auto-created default plan", {
+    userId,
+    timeZone,
+    periodType,
+    periodStartUTC: periodStart.toISOString(),
+    periodEndUTC: periodEnd.toISOString(),
+    planId: plan.id,
+  });
+
+  return plan;
+}
+
 export async function GET(request: NextRequest) {
   const authed = getAuthUser(request);
   const devUserId = !authed ? getDevUserId(request) : null;
@@ -196,7 +246,9 @@ export async function GET(request: NextRequest) {
     });
 
     if (!plan) {
-      return NextResponse.json({ error: "Plan not found" }, { status: 404 });
+      // ✅ Edge-case: no plans exist yet -> auto-create a default active plan
+      const created = await ensureDefaultActivePlan(userId, timeZone);
+      return NextResponse.json(withPlanUtcFields(created, timeZone));
     }
 
     // ✅ 복구: 최신 플랜을 activePlanId로 세팅

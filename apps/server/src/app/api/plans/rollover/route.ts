@@ -83,26 +83,39 @@ export async function POST() {
           where: { userId_periodType_periodStart: key },
         });
 
-        const created = !plan;
-        if (!plan) {
-          plan = await tx.plan.create({
-            data: {
-              userId: user.id,
-              periodType: current.periodType,
-              periodAnchor: nextStart,
-              periodStart: nextStart,
-              periodEnd: nextEnd,
-              currency: current.currency,
-              language: current.language,
-              totalBudgetLimitMinor: current.totalBudgetLimitMinor,
-            },
-          });
+        let created = false;
 
-          createdCount += 1;
+        if (!plan) {
+          try {
+            plan = await tx.plan.create({
+              data: {
+                userId: user.id,
+                periodType: current.periodType,
+                periodAnchor: nextStart,
+                periodStart: nextStart,
+                periodEnd: nextEnd,
+                currency: current.currency,
+                language: current.language,
+                totalBudgetLimitMinor: current.totalBudgetLimitMinor,
+              },
+            });
+
+            created = true;
+            createdCount += 1;
+          } catch (e: any) {
+            // If another request created it first, refetch and continue.
+            if (e?.code === "P2002") {
+              plan = await tx.plan.findUnique({
+                where: { userId_periodType_periodStart: key },
+              });
+              created = false;
+            }
+            if (!plan) throw e;
+          }
         }
 
         // ✅ 생성된 경우에만 goals 복사
-        if (created) {
+        if (created && plan) {
           if (budgetGoals.length) {
             await tx.budgetGoal.createMany({
               data: budgetGoals.map((g) => ({

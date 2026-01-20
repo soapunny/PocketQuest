@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useCallback } from "react";
+import React, { useMemo, useState, useCallback, useEffect } from "react";
 import { View, Text, StyleSheet } from "react-native";
 import { usePlan } from "../lib/planStore";
 import { useFocusEffect } from "@react-navigation/native";
@@ -227,6 +227,12 @@ export default function DashboardScreen() {
     return map;
   }, [periodTransactions, homeCurrency]);
 
+  const categorySpentSumHomeMinor = useMemo(() => {
+    let sum = 0;
+    for (const v of spentByCategoryHomeMinor.values()) sum += v;
+    return sum;
+  }, [spentByCategoryHomeMinor]);
+
   const budgetStatusRows = useMemo(() => {
     const goals: any = (plan as any).budgetGoals;
 
@@ -326,6 +332,72 @@ export default function DashboardScreen() {
 
     return rows;
   }, [plan, savedByGoalHomeMinor]);
+
+  useEffect(() => {
+    // DEBUG: Dashboard consistency checks (period + totals)
+    const totalBudget = Number((plan as any).totalBudgetLimitMinor ?? 0);
+
+    console.log("[DASH] period", {
+      type,
+      startISO,
+      endISO,
+      homeCurrency,
+      displayCurrency,
+      txAll: transactions.length,
+      txInPeriod: periodTransactions.length,
+    });
+
+    console.log("[DASH] totals", {
+      totalIncomeHomeMinor,
+      totalSpentHomeMinor,
+      categorySpentSumHomeMinor,
+      totalBudget,
+      budgetRemaining: totalBudget > 0 ? totalBudget - totalSpentHomeMinor : null,
+      totalsMatch:
+        totalSpentHomeMinor === categorySpentSumHomeMinor ? "OK" : "MISMATCH",
+    });
+
+    if (totalSpentHomeMinor !== categorySpentSumHomeMinor) {
+      console.log("[DASH] mismatch details", {
+        diff: totalSpentHomeMinor - categorySpentSumHomeMinor,
+        categories: Array.from(spentByCategoryHomeMinor.entries())
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 10)
+          .map(([category, spentHomeMinor]) => ({ category, spentHomeMinor })),
+      });
+    }
+
+    // Print a small sample to confirm the date field used for period filtering
+    console.log(
+      "[DASH] sample tx (periodTransactions)",
+      periodTransactions.slice(0, 3).map((t: any) => ({
+        id: t.id,
+        type: t.type,
+        category: t.category,
+        currency: t.currency,
+        amountMinor: t.amountMinor,
+        amountHomeMinor: (t as any).amountHomeMinor,
+        fxUsdKrw: (t as any).fxUsdKrw,
+        occurredAtISO: (t as any).occurredAtISO,
+        occurredAt: (t as any).occurredAt,
+        createdAtISO: (t as any).createdAtISO,
+        createdAt: (t as any).createdAt,
+      }))
+    );
+  }, [
+    type,
+    startISO,
+    endISO,
+    homeCurrency,
+    displayCurrency,
+    transactions.length,
+    periodTransactions.length,
+    totalIncomeHomeMinor,
+    totalSpentHomeMinor,
+    categorySpentSumHomeMinor,
+    spentByCategoryHomeMinor,
+    plan,
+  ]);
 
   return (
     <ScreenLayout
