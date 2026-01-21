@@ -22,8 +22,12 @@ const patchPlanSchema = z.object({
   periodType: periodTypeSchema,
   // client uses periodAnchorISO (YYYY-MM-DD) for BIWEEKLY; db field is periodAnchor
   periodAnchorISO: z.string().min(1).optional(),
+  // alternative: client can send UTC instant ISO (e.g. 2026-01-19T05:00:00.000Z)
+  periodAnchorUTC: z.string().min(1).optional(),
   // client uses periodStartISO (YYYY-MM-DD) as a local-day identifier (user timezone)
   periodStartISO: z.string().min(1).optional(),
+  // alternative: client can send UTC instant ISO (e.g. 2026-01-19T05:00:00.000Z)
+  periodStartUTC: z.string().min(1).optional(),
   // DB uses a single `currency` field (CurrencyCode). We still accept legacy client fields.
   currency: currencySchema.optional(),
   homeCurrency: z.string().min(1).optional(),
@@ -31,6 +35,27 @@ const patchPlanSchema = z.object({
   advancedCurrencyMode: z.boolean().optional(),
   language: z.string().min(1).optional(),
   totalBudgetLimitMinor: z.number().int().nonnegative().optional(),
+  // New: Accept arrays of goals for upsert
+  budgetGoals: z
+    .array(
+      z.object({
+        // Optional: allow client to send id (server ignores it for upsert)
+        id: z.string().min(1).optional(),
+        category: z.string().min(1),
+        limitMinor: z.number().int().nonnegative(),
+      })
+    )
+    .optional(),
+  savingsGoals: z
+    .array(
+      z.object({
+        // Optional: allow client to send id (server ignores it for upsert)
+        id: z.string().min(1).optional(),
+        name: z.string().min(1),
+        targetMinor: z.number().int().nonnegative(),
+      })
+    )
+    .optional(),
   // If true, set this plan as the user's active plan (updates User.activePlanId)
   setActive: z.boolean().optional(),
   // If true, server will compute the current periodStart for the given periodType when periodStartISO is omitted
@@ -267,6 +292,253 @@ export async function GET(request: NextRequest) {
   }
 }
 
+export async function POST(request: NextRequest) {
+  const authed = getAuthUser(request);
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  const parsed = patchPlanSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Invalid body", details: parsed.error.flatten() },
+      { status: 400 }
+    );
+  }
+
+  const devUserId = !authed ? getDevUserId(request, body) : null;
+  const userId = authed?.userId ?? devUserId;
+
+  if (!userId) {
+    return NextResponse.json(
+      {
+        error: "Unauthorized",
+        hint: "DEV: set DEV_USER_ID or pass x-dev-user-id / ?userId / body.userId",
+      },
+      { status: 401 }
+    );
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { timeZone: true, id: true, activePlanId: true },
+    });
+
+    if (!user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+    const timeZone = user.timeZone ?? "America/New_York";
+    const data = parsed.data;
+
+    const setActive = data.setActive === true;
+    const useCurrentPeriod = data.useCurrentPeriod === true;
+
+    // ✅ biweekly는 anchor가 필수 (2주 단위 기준점)
+    if (data.periodType === "BIWEEKLY" && !data.periodAnchorISO && !data.periodAnchorUTC) {
+      return NextResponse.json(
+        { error: "periodAnchorISO or periodAnchorUTC is required for biweekly plans" },
+        { status: 400 }
+      );
+    }
+
+    // ✅ non-weekly는 기본적으로 periodStart가 필요하지만,
+    // setActive+useCurrentPeriod 조합이면 서버가 현재 기간의 periodStart를 계산한다.
+    if (
+      data.periodType !== "WEEKLY" &&
+      !data.periodStartISO &&
+      !data.periodStartUTC &&
+      !(setActive && useCurrentPeriod)
+    ) {
+      return NextResponse.json(
+        { error: "periodStartISO or periodStartUTC is required for non-weekly plans" },
+        { status: 400 }
+      );
+    }
+
+    let periodStart: Date;
+
+    if (data.periodType === "WEEKLY") {
+      // ✅ Weekly는 서버가 월요일 기준으로 계산 (유저 타임존 기준)
+      periodStart = getWeeklyPeriodStartUTC(timeZone);
+    } else if (setActive && useCurrentPeriod) {
+      // ✅ 즉시 전환: 서버가 "현재 기간"의 periodStart를 계산
+      if (data.periodType === "MONTHLY") {
+        periodStart = getMonthlyPeriodStartUTC_local(timeZone);
+      } else {
+        // BIWEEKLY (anchor 기반 2주 주기 시작점 계산)
+        const anchorUTC = data.periodAnchorUTC
+          ? new Date(data.periodAnchorUTC)
+          : isoLocalDayToUTCDate(timeZone, data.periodAnchorISO!);
+        periodStart = getBiweeklyPeriodStartUTC(timeZone, anchorUTC, new Date(), 1);
+      }
+    } else {
+      // Prefer explicit UTC instant when provided; otherwise interpret periodStartISO as a local-day identifier.
+      if (data.periodStartUTC) {
+        periodStart = new Date(data.periodStartUTC);
+      } else {
+        periodStart = isoLocalDayToUTCDate(timeZone, data.periodStartISO!);
+      }
+    }
+
+    const periodEnd = calcNextPeriodEnd(periodStart, data.periodType, timeZone);
+
+    const periodAnchor = data.periodAnchorUTC
+      ? new Date(data.periodAnchorUTC)
+      : data.periodAnchorISO
+      ? isoLocalDayToUTCDate(timeZone, data.periodAnchorISO)
+      : undefined;
+
+    const currency =
+      typeof (data.currency ?? data.homeCurrency ?? data.displayCurrency) === "string"
+        ? String(data.currency ?? data.homeCurrency ?? data.displayCurrency)
+            .trim()
+            .toUpperCase()
+        : undefined;
+
+    const language = typeof data.language === "string" ? data.language : undefined;
+
+    const plan = await prisma.$transaction(async (tx) => {
+      const upserted = await tx.plan.upsert({
+        where: {
+          userId_periodType_periodStart: {
+            userId,
+            periodType: data.periodType,
+            periodStart,
+          },
+        },
+        create: {
+          userId,
+          periodType: data.periodType,
+          periodStart,
+          periodEnd,
+          periodAnchor,
+          ...(currency ? { currency: currency as any } : {}),
+          ...(language ? { language: language as any } : {}),
+          totalBudgetLimitMinor: data.totalBudgetLimitMinor ?? 0,
+        },
+        update: {
+          periodEnd,
+          periodAnchor,
+          ...(currency ? { currency: currency as any } : {}),
+          ...(language ? { language: language as any } : {}),
+          totalBudgetLimitMinor: data.totalBudgetLimitMinor,
+        },
+        include: {
+          budgetGoals: true,
+          savingsGoals: true,
+        },
+      });
+
+      // Patch semantics: only modify categories provided by the client.
+      if (data.budgetGoals) {
+        for (const g of data.budgetGoals) {
+          const category = String(g.category).trim();
+          const limitMinor = Number(g.limitMinor);
+
+          if (!category) continue;
+
+          if (!Number.isFinite(limitMinor) || limitMinor <= 0) {
+            await tx.budgetGoal.deleteMany({
+              where: { planId: upserted.id, category },
+            });
+            continue;
+          }
+
+          await tx.budgetGoal.upsert({
+            where: {
+              planId_category: {
+                planId: upserted.id,
+                category,
+              },
+            },
+            create: { planId: upserted.id, category, limitMinor },
+            update: { limitMinor },
+          });
+        }
+      }
+
+      // Patch semantics: only modify savings goals provided by the client.
+      if (data.savingsGoals) {
+        for (const g of data.savingsGoals) {
+          const name = String(g.name).trim();
+          const targetMinor = Number(g.targetMinor);
+
+          if (!name) continue;
+
+          if (!Number.isFinite(targetMinor) || targetMinor <= 0) {
+            await tx.savingsGoal.deleteMany({
+              where: { planId: upserted.id, name },
+            });
+            continue;
+          }
+
+          await tx.savingsGoal.upsert({
+            where: {
+              planId_name: {
+                planId: upserted.id,
+                name,
+              },
+            },
+            create: { planId: upserted.id, name, targetMinor },
+            update: { targetMinor },
+          });
+        }
+      }
+
+      // Re-fetch with relations if we modified any goals.
+      if (data.budgetGoals || data.savingsGoals) {
+        const fresh = await tx.plan.findUnique({
+          where: { id: upserted.id },
+          include: { budgetGoals: true, savingsGoals: true },
+        });
+        return fresh ?? upserted;
+      }
+
+      return upserted;
+    });
+
+    // Active handling
+    if (setActive) {
+      await prisma.user.update({
+        where: { id: userId },
+        data: { activePlanId: plan.id },
+      });
+    } else {
+      let shouldSetActive = false;
+
+      if (!user.activePlanId) {
+        shouldSetActive = true;
+      } else {
+        const activeExists = await prisma.plan.findUnique({
+          where: { id: user.activePlanId },
+          select: { id: true },
+        });
+        if (!activeExists) shouldSetActive = true;
+      }
+
+      if (shouldSetActive) {
+        await prisma.user.update({
+          where: { id: userId },
+          data: { activePlanId: plan.id },
+        });
+      }
+    }
+
+    return NextResponse.json(withPlanUtcFields(plan, timeZone));
+  } catch (error) {
+    console.error("Create/get plan error:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
+  }
+}
+
 export async function PATCH(request: NextRequest) {
   const authed = getAuthUser(request);
 
@@ -313,23 +585,24 @@ export async function PATCH(request: NextRequest) {
     const setActive = data.setActive === true;
     const useCurrentPeriod = data.useCurrentPeriod === true;
 
-    // ✅ biweekly는 periodAnchorISO가 필수 (2주 단위 기준점)
-    if (data.periodType === "BIWEEKLY" && !data.periodAnchorISO) {
+    // ✅ biweekly는 anchor가 필수 (2주 단위 기준점)
+    if (data.periodType === "BIWEEKLY" && !data.periodAnchorISO && !data.periodAnchorUTC) {
       return NextResponse.json(
-        { error: "periodAnchorISO is required for biweekly plans" },
+        { error: "periodAnchorISO or periodAnchorUTC is required for biweekly plans" },
         { status: 400 }
       );
     }
 
-    // ✅ non-weekly는 기본적으로 periodStartISO가 필요하지만,
+    // ✅ non-weekly는 기본적으로 periodStart가 필요하지만,
     // setActive+useCurrentPeriod 조합이면 서버가 현재 기간의 periodStart를 계산한다.
     if (
       data.periodType !== "WEEKLY" &&
       !data.periodStartISO &&
+      !data.periodStartUTC &&
       !(setActive && useCurrentPeriod)
     ) {
       return NextResponse.json(
-        { error: "periodStartISO is required for non-weekly plans" },
+        { error: "periodStartISO or periodStartUTC is required for non-weekly plans" },
         { status: 400 }
       );
     }
@@ -345,60 +618,135 @@ export async function PATCH(request: NextRequest) {
         periodStart = getMonthlyPeriodStartUTC_local(timeZone);
       } else {
         // BIWEEKLY (anchor 기반 2주 주기 시작점 계산)
-        const anchorUTC = isoLocalDayToUTCDate(timeZone, data.periodAnchorISO!);
+        const anchorUTC = data.periodAnchorUTC
+          ? new Date(data.periodAnchorUTC)
+          : isoLocalDayToUTCDate(timeZone, data.periodAnchorISO!);
         periodStart = getBiweeklyPeriodStartUTC(timeZone, anchorUTC, new Date(), 1);
       }
     } else {
-      // client-provided periodStartISO is a local-day identifier
-      periodStart = isoLocalDayToUTCDate(timeZone, data.periodStartISO!);
+      // Prefer explicit UTC instant when provided; otherwise interpret periodStartISO as a local-day identifier.
+      if (data.periodStartUTC) {
+        periodStart = new Date(data.periodStartUTC);
+      } else {
+        periodStart = isoLocalDayToUTCDate(timeZone, data.periodStartISO!);
+      }
     }
 
     const periodEnd = calcNextPeriodEnd(periodStart, data.periodType, timeZone);
 
-    const periodAnchor = data.periodAnchorISO
+    const periodAnchor = data.periodAnchorUTC
+      ? new Date(data.periodAnchorUTC)
+      : data.periodAnchorISO
       ? isoLocalDayToUTCDate(timeZone, data.periodAnchorISO)
       : undefined;
 
     const currency =
-      typeof (data.currency ?? data.homeCurrency ?? data.displayCurrency) ===
-      "string"
+      typeof (data.currency ?? data.homeCurrency ?? data.displayCurrency) === "string"
         ? String(data.currency ?? data.homeCurrency ?? data.displayCurrency)
             .trim()
             .toUpperCase()
         : undefined;
 
-    const language =
-      typeof data.language === "string" ? data.language : undefined;
+    const language = typeof data.language === "string" ? data.language : undefined;
 
-    const plan = await prisma.plan.upsert({
-      where: {
-        userId_periodType_periodStart: {
+    const plan = await prisma.$transaction(async (tx) => {
+      const upserted = await tx.plan.upsert({
+        where: {
+          userId_periodType_periodStart: {
+            userId,
+            periodType: data.periodType,
+            periodStart,
+          },
+        },
+        create: {
           userId,
           periodType: data.periodType,
           periodStart,
+          periodEnd,
+          periodAnchor,
+          ...(currency ? { currency: currency as any } : {}),
+          ...(language ? { language: language as any } : {}),
+          totalBudgetLimitMinor: data.totalBudgetLimitMinor ?? 0,
         },
-      },
-      create: {
-        userId,
-        periodType: data.periodType,
-        periodStart,
-        periodEnd,
-        periodAnchor,
-        ...(currency ? { currency: currency as any } : {}),
-        ...(language ? { language: language as any } : {}),
-        totalBudgetLimitMinor: data.totalBudgetLimitMinor ?? 0,
-      },
-      update: {
-        periodEnd, // ✅ periodEnd는 항상 최신 규칙으로 채우기(특히 null 복구)
-        periodAnchor,
-        ...(currency ? { currency: currency as any } : {}),
-        ...(language ? { language: language as any } : {}),
-        totalBudgetLimitMinor: data.totalBudgetLimitMinor,
-      },
-      include: {
-        budgetGoals: true,
-        savingsGoals: true,
-      },
+        update: {
+          periodEnd, // ✅ periodEnd는 항상 최신 규칙으로 채우기(특히 null 복구)
+          periodAnchor,
+          ...(currency ? { currency: currency as any } : {}),
+          ...(language ? { language: language as any } : {}),
+          totalBudgetLimitMinor: data.totalBudgetLimitMinor,
+        },
+        include: {
+          budgetGoals: true,
+          savingsGoals: true,
+        },
+      });
+
+      // Patch semantics: only modify categories provided by the client.
+      if (data.budgetGoals) {
+        for (const g of data.budgetGoals) {
+          const category = String(g.category).trim();
+          const limitMinor = Number(g.limitMinor);
+
+          if (!category) continue;
+
+          if (!Number.isFinite(limitMinor) || limitMinor <= 0) {
+            await tx.budgetGoal.deleteMany({
+              where: { planId: upserted.id, category },
+            });
+            continue;
+          }
+
+          await tx.budgetGoal.upsert({
+            where: {
+              planId_category: {
+                planId: upserted.id,
+                category,
+              },
+            },
+            create: { planId: upserted.id, category, limitMinor },
+            update: { limitMinor },
+          });
+        }
+      }
+
+      // Patch semantics: only modify savings goals provided by the client.
+      if (data.savingsGoals) {
+        for (const g of data.savingsGoals) {
+          const name = String(g.name).trim();
+          const targetMinor = Number(g.targetMinor);
+
+          if (!name) continue;
+
+          if (!Number.isFinite(targetMinor) || targetMinor <= 0) {
+            await tx.savingsGoal.deleteMany({
+              where: { planId: upserted.id, name },
+            });
+            continue;
+          }
+
+          await tx.savingsGoal.upsert({
+            where: {
+              planId_name: {
+                planId: upserted.id,
+                name,
+              },
+            },
+            create: { planId: upserted.id, name, targetMinor },
+            update: { targetMinor },
+          });
+        }
+      }
+
+      // Re-fetch with relations if we modified any goals.
+      if (data.budgetGoals || data.savingsGoals) {
+        const fresh = await tx.plan.findUnique({
+          where: { id: upserted.id },
+          include: { budgetGoals: true, savingsGoals: true },
+        });
+        return fresh ?? upserted;
+      }
+
+      return upserted;
     });
 
     // ✅ Active handling

@@ -3,6 +3,7 @@ import {
   View,
   Text,
   TextInput,
+  Alert,
   Pressable,
   Platform,
   StyleSheet,
@@ -10,8 +11,7 @@ import {
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 
-import { TxType } from "../lib/transactionsApi";
-import { createTransaction } from "../lib/transactionsApi";
+import { createTransaction, TxType } from "../lib/transactionsApi";
 import {
   EXPENSE_CATEGORIES,
   INCOME_CATEGORIES,
@@ -50,6 +50,7 @@ export default function AddTransactionModal() {
   const [note, setNote] = useState<string>("");
 
   const [fxUsdKrwText, setFxUsdKrwText] = useState<string>("");
+  const [isSaving, setIsSaving] = useState(false);
 
   const currency: Currency = (displayCurrency ??
     homeCurrency ??
@@ -81,7 +82,7 @@ export default function AddTransactionModal() {
 
   const precision = currency === "USD" ? 2 : 0;
 
-  const fxNeeded = currency !== homeCurrency;
+  const fxNeeded = !!homeCurrency && currency !== homeCurrency;
   const fxUsdKrw = Number((fxUsdKrwText || "").replace(/[^0-9.]/g, ""));
   const fxValid = !fxNeeded || (Number.isFinite(fxUsdKrw) && fxUsdKrw > 0);
 
@@ -89,6 +90,7 @@ export default function AddTransactionModal() {
 
   const onSave = async () => {
     if (!canSave) return;
+    if (isSaving) return;
 
     // 항상 양수(또는 0 이상)로 minor 단위를 저장하고,
     // EXPENSE/INCOME/SAVING 구분은 type으로 처리합니다.
@@ -97,7 +99,11 @@ export default function AddTransactionModal() {
     );
     const amountMinor = absMinor;
 
+    const noteTrimmed = note.trim();
+
     try {
+      setIsSaving(true);
+
       await createTransaction({
         type,
         amountMinor,
@@ -105,16 +111,22 @@ export default function AddTransactionModal() {
         fxUsdKrw: fxNeeded ? fxUsdKrw : undefined,
         category,
         occurredAtISO: new Date().toISOString(),
-        note: note.trim() || undefined,
+        // Use null to explicitly clear note when empty
+        note: noteTrimmed ? noteTrimmed : null,
       });
 
       navigation.goBack();
     } catch (error) {
-      console.error(
-        "[AddTransactionModal] failed to create transaction",
-        error
+      console.error("[AddTransactionModal] failed to create transaction", error);
+      Alert.alert(
+        tr("Save failed", "저장 실패"),
+        tr(
+          "Could not save this transaction. Please try again.",
+          "거래를 저장하지 못했어요. 다시 시도해 주세요."
+        )
       );
-      // TODO: 필요하면 여기서 Alert 등으로 에러 표시 가능
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -268,7 +280,8 @@ export default function AddTransactionModal() {
         <View style={styles.actionsRow}>
           <Pressable
             onPress={() => navigation.goBack()}
-            style={styles.secondaryButton}
+            disabled={isSaving}
+            style={[styles.secondaryButton, isSaving && { opacity: 0.6 }]}
           >
             <Text style={styles.secondaryButtonText}>
               {tr("Cancel", "취소")}
@@ -277,10 +290,10 @@ export default function AddTransactionModal() {
 
           <Pressable
             onPress={onSave}
-            disabled={!canSave}
+            disabled={!canSave || isSaving}
             style={[
               styles.primaryButton,
-              !canSave && styles.primaryButtonDisabled,
+              (!canSave || isSaving) && styles.primaryButtonDisabled,
             ]}
           >
             <Text style={styles.primaryButtonText}>{tr("Save", "저장")}</Text>
@@ -292,13 +305,6 @@ export default function AddTransactionModal() {
 }
 
 const styles = StyleSheet.create({
-  page: {
-    flex: 1,
-    backgroundColor: "#f7f7f7",
-  },
-  container: {
-    paddingBottom: 24,
-  },
   card: {
     marginBottom: 10,
   },

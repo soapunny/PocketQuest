@@ -2,7 +2,6 @@ import { useCallback, useMemo, useState } from "react";
 import { useFocusEffect } from "@react-navigation/native";
 import {
   Alert,
-  FlatList,
   Modal,
   Pressable,
   StyleSheet,
@@ -19,11 +18,21 @@ import {
   INCOME_CATEGORIES,
   SAVINGS_GOALS,
 } from "../lib/categories";
-import { fetchTransactions, TransactionDTO } from "../lib/transactionsApi";
+import {
+  deleteTransactionById,
+  fetchTransactions,
+  patchTransaction,
+  TransactionDTO,
+} from "../lib/transactionsApi";
 import { usePlan } from "../lib/planStore";
 import type { Currency } from "../lib/currency";
 import { formatMoney } from "../lib/currency";
 import ScreenLayout from "../components/layout/ScreenLayout";
+
+const DEBUG_TX = __DEV__;
+const dlog = (...args: any[]) => {
+  if (DEBUG_TX) console.log(...args);
+};
 
 type TxType = "EXPENSE" | "INCOME" | "SAVING";
 
@@ -123,7 +132,7 @@ export default function TransactionsScreen() {
       let isActive = true;
 
       // DEBUG: confirm which period filter is active whenever the screen focuses
-      console.log("[TX] focus", {
+      dlog("[TX] focus", {
         periodFilter,
         ts: new Date().toISOString(),
       });
@@ -138,17 +147,17 @@ export default function TransactionsScreen() {
           : "ALL";
 
       // DEBUG: confirm what we actually send to the server
-      console.log("[TX] request params", {
+      dlog("[TX] request params", {
         periodFilter,
         rangeParam,
       });
 
       (async () => {
         try {
-          setIsLoading(true);
+          if (isActive) setIsLoading(true);
           const t0 = Date.now();
 
-          console.log("[TX] fetchTransactions:start", {
+          dlog("[TX] fetchTransactions:start", {
             range: rangeParam,
             includeSummary: true,
           });
@@ -158,7 +167,7 @@ export default function TransactionsScreen() {
             includeSummary: true,
           });
 
-          console.log("[TX] fetchTransactions:done", {
+          dlog("[TX] fetchTransactions:done", {
             range: rangeParam,
             ms: Date.now() - t0,
             count: Array.isArray(transactions) ? transactions.length : -1,
@@ -193,23 +202,11 @@ export default function TransactionsScreen() {
       // cleanup: 포커스가 풀리면 이후 setState 호출 방지
       return () => {
         isActive = false;
+        // If a request is in-flight, ensure loading doesn't stay stuck when we leave the screen.
+        setIsLoading(false);
       };
     }, [periodFilter])
   );
-
-  // 로컬 상태에서만 업데이트/삭제 반영
-  // (나중에 서버 PATCH/DELETE API와 연결 가능)
-  function updateTransaction(id: string, patch: Partial<TransactionDTO>) {
-    setTransactions((prev) =>
-      prev.map((tx) => (tx.id === id ? { ...tx, ...patch } : tx))
-    );
-  }
-
-  function deleteTransaction(id: string) {
-    setTransactions((prev) =>
-      prev.filter((tx) => (tx.id === id ? false : true))
-    );
-  }
 
   const { homeCurrency, language } = usePlan();
   const isKo = language === "ko";
@@ -302,7 +299,7 @@ export default function TransactionsScreen() {
     const q = searchText.trim().toLowerCase();
 
     // DEBUG: confirm client-side filters used for rendering
-    console.log("[TX] client filters", {
+    dlog("[TX] client filters", {
       periodFilter,
       filterType,
       searchText: q,
@@ -331,7 +328,7 @@ export default function TransactionsScreen() {
       return ok;
     });
 
-    console.log("[TX] client filters result", {
+    dlog("[TX] client filters result", {
       outputCount: out.length,
       rejectedByType,
       rejectedByPeriod,
@@ -371,11 +368,13 @@ export default function TransactionsScreen() {
   }
 
   function closeEdit() {
+    if (isLoading) return;
     setEditingId(null);
   }
 
-  function onSave() {
+  async function onSave() {
     if (!editingTx) return;
+    if (isLoading) return;
 
     const absMinor = Math.abs(
       parseAmountTextToMinor(amountText, editingCurrency)
@@ -392,24 +391,69 @@ export default function TransactionsScreen() {
     // EXPENSE / INCOME / SAVING은 type으로 구분합니다.
     const nextAmountMinor = absMinor;
 
-    // Preserve fxUsdKrw if it exists (so historical conversion still works)
-    const existing: any = editingTx as any;
-
-    updateTransaction(existing.id, {
+    const noteTrimmed = note.trim();
+    const patch = {
       type,
       category,
       currency: editingCurrency,
       amountMinor: nextAmountMinor,
-      fxUsdKrw:
-        typeof existing.fxUsdKrw === "number" ? existing.fxUsdKrw : undefined,
-      note: note.trim() ? note.trim() : undefined,
-    });
+      // Use null to explicitly clear the note on the server
+      note: noteTrimmed ? noteTrimmed : null,
+    } as const;
 
-    closeEdit();
+    try {
+      setIsLoading(true);
+
+      const { transaction } = await patchTransaction(editingTx.id, patch);
+
+      // 서버 응답으로 로컬 리스트 동기화
+      setTransactions((prev) =>
+        prev.map((tx) => (tx.id === transaction.id ? transaction : tx))
+      );
+
+      closeEdit();
+    } catch (e) {
+      console.error("[TransactionsScreen] failed to patch transaction", e);
+      Alert.alert(
+        tr("Update failed", "수정 실패"),
+        tr(
+          "Could not save changes. Please try again.",
+          "저장에 실패했어요. 다시 시도해 주세요."
+        )
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function deleteEditingTransaction() {
+    if (!editingTx) return;
+
+    try {
+      setIsLoading(true);
+
+      await deleteTransactionById(editingTx.id);
+
+      setTransactions((prev) => prev.filter((tx) => tx.id !== editingTx.id));
+
+      closeEdit();
+    } catch (e) {
+      console.error("[TransactionsScreen] failed to delete transaction", e);
+      Alert.alert(
+        tr("Delete failed", "삭제 실패"),
+        tr(
+          "Could not delete. Please try again.",
+          "삭제에 실패했어요. 다시 시도해 주세요."
+        )
+      );
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   function onDelete() {
     if (!editingTx) return;
+    if (isLoading) return;
 
     Alert.alert(
       tr("Delete transaction?", "거래를 삭제할까요?"),
@@ -420,8 +464,7 @@ export default function TransactionsScreen() {
           text: tr("Delete", "삭제"),
           style: "destructive",
           onPress: () => {
-            deleteTransaction((editingTx as any).id);
-            closeEdit();
+            void deleteEditingTransaction();
           },
         },
       ]
@@ -780,6 +823,7 @@ export default function TransactionsScreen() {
                     borderWidth: 1,
                     borderColor: "#f0caca",
                   }}
+                  disabled={isLoading}
                 >
                   <Text style={{ fontWeight: "900", color: "#c00" }}>
                     {tr("Delete", "삭제")}
@@ -795,6 +839,7 @@ export default function TransactionsScreen() {
                     paddingVertical: 12,
                     alignItems: "center",
                   }}
+                  disabled={isLoading}
                 >
                   <Text style={{ fontWeight: "900", color: "white" }}>
                     {tr("Save", "저장")}
@@ -822,14 +867,6 @@ export default function TransactionsScreen() {
 }
 
 const styles = StyleSheet.create({
-  page: {
-    flex: 1,
-    backgroundColor: "#f7f7f7",
-  },
-  content: {
-    padding: 16,
-    paddingBottom: 28,
-  },
   resultPill: {
     paddingHorizontal: 10,
     paddingVertical: 6,

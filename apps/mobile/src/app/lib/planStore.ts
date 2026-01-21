@@ -1,3 +1,7 @@
+const DEBUG_PLAN = __DEV__;
+const dlog = (...args: any[]) => {
+  if (DEBUG_PLAN) console.log(...args);
+};
 import React, {
   createContext,
   useCallback,
@@ -119,12 +123,14 @@ type Store = {
     // goals use minor units
     budgetGoals?:
       | {
+          id?: string | null;
           category: string;
           limitMinor?: number | null;
         }[]
       | null;
     savingsGoals?:
       | {
+          id?: string | null;
           name: string;
           targetMinor?: number | null;
         }[]
@@ -137,7 +143,16 @@ type Store = {
   initialize: () => Promise<void>;
 };
 
+
 const PlanContext = createContext<Store | null>(null);
+
+// Latest plan snapshot (module-level) for non-hook callers.
+// This avoids stale closures in helper functions (e.g., merge after server responses).
+let _latestPlanSnapshot: { plan: Plan } | null = null;
+
+export function getPlanState() {
+  return _latestPlanSnapshot;
+}
 
 // BIWEEKLY 기준일(로컬 날짜, 월요일 시작). 서버/클라이언트 공통 기본값.
 export const DEFAULT_BIWEEKLY_ANCHOR_ISO = "2025-01-06";
@@ -239,33 +254,43 @@ function normalizePositiveInt(n: any): number {
 function mergeBudgetGoalsWithDefaults(
   defaults: BudgetGoal[],
   serverGoals: {
+    id?: string | null;
     category: string;
     limitMinor?: number | null;
   }[]
 ): BudgetGoal[] {
-  const byCat = new Map<string, number>();
+  // Map by normalized category: { limit, id? }
+  const byCat = new Map<string, { limit: number; id?: string }>();
   serverGoals.forEach((g) => {
     const cat = normalizeCategory(g.category);
     const raw = g.limitMinor ?? 0;
-    byCat.set(cat, normalizePositiveInt(raw));
+    const limit = normalizePositiveInt(raw);
+    const id = g.id ? String(g.id) : undefined;
+    byCat.set(cat, { limit, id });
   });
 
-  // Start with defaults (keeps ordering + stable IDs)
-  const merged: BudgetGoal[] = defaults.map((d) => ({
-    ...d,
-    limitMinor: byCat.has(String(d.category))
-      ? (byCat.get(String(d.category)) as number)
-      : d.limitMinor,
-  }));
+  // Start with defaults (keeps ordering + stable IDs), but if server provides an id for
+  // a default category we accept it.
+  const merged: BudgetGoal[] = defaults.map((d) => {
+    const key = String(d.category);
+    const hit = byCat.get(key);
+    if (!hit) return d;
+
+    return {
+      ...d,
+      id: hit.id || d.id,
+      limitMinor: hit.limit,
+    };
+  });
 
   // Append any server categories not in defaults
-  byCat.forEach((limit, cat) => {
+  byCat.forEach((val, cat) => {
     const exists = merged.some((m) => String(m.category) === cat);
     if (!exists) {
       merged.push({
-        id: stableIdForKey("budget", cat),
+        id: val.id || stableIdForKey("budget", cat),
         category: cat,
-        limitMinor: limit,
+        limitMinor: val.limit,
       });
     }
   });
@@ -276,25 +301,28 @@ function mergeBudgetGoalsWithDefaults(
 function mergeSavingsGoals(
   current: SavingsGoal[],
   serverGoals: {
+    id?: string | null;
     name: string;
     targetMinor?: number | null;
   }[]
 ): SavingsGoal[] {
-  const byName = new Map<string, number>();
+  const byName = new Map<string, { target: number; id?: string }>();
   serverGoals.forEach((g) => {
     const name = normalizeCategory(g.name);
     const raw = g.targetMinor ?? 0;
-    byName.set(name, normalizePositiveInt(raw));
+    const target = normalizePositiveInt(raw);
+    const id = g.id ? String(g.id) : undefined;
+    byName.set(name, { target, id });
   });
 
-  // Keep existing IDs when possible
+  // Keep existing IDs when possible, otherwise accept server id, otherwise stable id.
   const merged: SavingsGoal[] = [];
-  byName.forEach((target, name) => {
+  byName.forEach((val, name) => {
     const existing = current.find((x) => x.name === name);
     merged.push({
-      id: existing?.id ?? stableIdForKey("savings", name),
+      id: existing?.id ?? val.id ?? stableIdForKey("savings", name),
       name,
-      targetMinor: target,
+      targetMinor: val.target,
     });
   });
 
@@ -335,6 +363,11 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       savingsGoals: [],
     };
   });
+
+  // Keep module-level snapshot in sync for non-hook reads.
+  useEffect(() => {
+    _latestPlanSnapshot = { plan };
+  }, [plan]);
 
   const [isInitialized, setIsInitialized] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -449,6 +482,8 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
       const anchorDt = safeParseISODateTime(periodAnchorUTC);
       const derivedAnchorISO = anchorDt ? toISODateInTimeZone(anchorDt, tzForDerive) : "";
+      const fallbackAnchorISO =
+        periodAnchorUTC && !derivedAnchorISO ? periodAnchorUTC.slice(0, 10) : "";
 
       const periodStartISO =
         derivedStartISO || (periodStartUTC ? periodStartUTC.slice(0, 10) : "");
@@ -486,8 +521,8 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
           ...p,
           periodType,
           periodAnchorISO:
-            periodType === "BIWEEKLY" && derivedAnchorISO
-              ? derivedAnchorISO
+            periodType === "BIWEEKLY"
+              ? (derivedAnchorISO || fallbackAnchorISO || p.periodAnchorISO)
               : p.periodAnchorISO,
           periodStartISO: nextPeriodStartISO,
           periodStartUTC: periodStartUTC || p.periodStartUTC,
@@ -502,21 +537,24 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
           budgetGoals: nextBudgetGoals,
           savingsGoals: nextSavingsGoals,
         };
-        
-        console.log("[applyServerPlan] applied:", {
+
+        dlog("[applyServerPlan] applied:", {
           periodType: next.periodType,
           currencyFromServer: serverPlan.currency,
           homeCurrency: next.homeCurrency,
           displayCurrency: next.displayCurrency,
+          periodStartISO: next.periodStartISO,
           periodStartUTC: next.periodStartUTC,
           periodEndUTC: next.periodEndUTC,
+          periodAnchorISO: next.periodAnchorISO,
+          periodAnchorUTC: next.periodAnchorUTC,
           timeZone: next.timeZone,
         });
-        
-        console.log("[planStore] post-apply rollover check queued");
+
+        dlog("[planStore] post-apply rollover check queued");
 
         setTimeout(() => {
-          console.log("[planStore] post-apply rollover check running");
+          dlog("[planStore] post-apply rollover check running");
           void tryRolloverIfNeededRef.current("resume");
         }, 0);
         
@@ -534,32 +572,34 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     };
 
     // Helper to map raw server plan to applyServerPlan
-    const applyRawPlan = (raw: any) => {
-      applyServerPlan({
-        periodType: raw?.periodType,
-        // server may send DateTime ISO under either key
-        periodStartUTC: raw?.periodStartUTC ?? raw?.periodStart,
-        periodEndUTC: raw?.periodEndUTC ?? raw?.periodEnd,
-        periodAnchorUTC: raw?.periodAnchorUTC ?? raw?.periodAnchor,
-        timeZone: raw?.timeZone,
-        totalBudgetLimitMinor: raw?.totalBudgetLimitMinor ?? null,
-        currency: raw?.currency,
-        budgetGoals: Array.isArray(raw?.budgetGoals)
-          ? raw.budgetGoals.map((g: any) => ({
-              category: g.category,
-              limitMinor:
-                typeof g.limitMinor === "number" ? g.limitMinor : null,
-            }))
-          : null,
-        savingsGoals: Array.isArray(raw?.savingsGoals)
-          ? raw.savingsGoals.map((g: any) => ({
-              name: g.name,
-              targetMinor:
-                typeof g.targetMinor === "number" ? g.targetMinor : null,
-            }))
-          : null,
-      });
-    };
+      const applyRawPlan = (raw: any) => {
+        applyServerPlan({
+          periodType: raw?.periodType,
+          // server may send DateTime ISO under either key
+          periodStartUTC: raw?.periodStartUTC ?? raw?.periodStart,
+          periodEndUTC: raw?.periodEndUTC ?? raw?.periodEnd,
+          periodAnchorUTC: raw?.periodAnchorUTC ?? raw?.periodAnchor,
+          timeZone: raw?.timeZone,
+          totalBudgetLimitMinor: raw?.totalBudgetLimitMinor ?? null,
+          currency: raw?.currency,
+          budgetGoals: Array.isArray(raw?.budgetGoals)
+            ? raw.budgetGoals.map((g: any) => ({
+                id: g.id ?? null,
+                category: g.category,
+                limitMinor:
+                  typeof g.limitMinor === "number" ? g.limitMinor : null,
+              }))
+            : null,
+          savingsGoals: Array.isArray(raw?.savingsGoals)
+            ? raw.savingsGoals.map((g: any) => ({
+                id: g.id ?? null,
+                name: g.name,
+                targetMinor:
+                  typeof g.targetMinor === "number" ? g.targetMinor : null,
+              }))
+            : null,
+        });
+      };
 
     try {
       // 1) active plan 조회
@@ -615,7 +655,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       // 2) 정상 조회면 plan 적용
       const raw = await res.json();
 
-      console.log("[switchPeriodType] server raw:", {
+      dlog("[switchPeriodType] server raw:", {
         periodType: raw?.periodType,
         currency: raw?.currency,
         periodStartUTC: raw?.periodStartUTC ?? raw?.periodStart,
@@ -689,7 +729,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       // Need server plan info first
       // initialize 중(isLoading=true)에도 launch 체크는 허용
       if (!isInitialized && !isLoading && reason !== "launch") {
-        console.log("[planStore] rollover skip (not ready)", {
+        dlog("[planStore] rollover skip (not ready)", {
           reason,
           isInitialized,
           isLoading,
@@ -699,57 +739,59 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
       const endISO = plan.periodEndUTC;
       if (!endISO) {
-        console.log("[planStore] rollover skip (no periodEndUTC)", { reason });
+        dlog("[planStore] rollover skip (no periodEndUTC)", { reason });
         return;
       }
 
       // Session-level de-dupe key (prevents repeated attempts for the same server period)
       const key = `${plan.periodType}|${plan.periodStartUTC ?? ""}|${endISO}`;
       if (lastRolloverKeyRef.current === key) {
-        console.log("[planStore] rollover skip (same key)", { reason, key });
+        dlog("[planStore] rollover skip (same key)", { reason, key });
+        return;
+      }
+
+      const endMs = Date.parse(endISO);
+      if (!Number.isFinite(endMs)) {
+        dlog("[planStore] rollover skip (bad endMs)", {
+          reason,
+          endISO,
+        });
+        return;
+      }
+
+      const nowMs = Date.now();
+
+      // Only rollover after the plan has actually ended
+      if (nowMs < endMs) {
+        dlog("[planStore] rollover skip (not ended yet)", {
+          reason,
+          endISO,
+          msUntilEnd: endMs - nowMs,
+        });
         return;
       }
 
       // Cooldown (avoid spamming rollover calls)
       // For `timer`, allow it to proceed even if a recent resume check happened.
       // Same-key de-dupe still prevents double-rollover for the same period.
-      const nowMs = Date.now();
       if (
         reason !== "timer" &&
         nowMs - lastRolloverAttemptAtRef.current < 2 * 60 * 1000
       ) {
-        console.log("[planStore] rollover skip (cooldown)", {
+        dlog("[planStore] rollover skip (cooldown)", {
           reason,
           msSinceLast: nowMs - lastRolloverAttemptAtRef.current,
         });
         return;
       }
+
+      // Record this attempt only when we are actually eligible to rollover.
       lastRolloverAttemptAtRef.current = nowMs;
-
-      const endMs = Date.parse(endISO);
-      if (!Number.isFinite(endMs)) {
-        console.log("[planStore] rollover skip (bad endMs)", {
-          reason,
-          endISO,
-        });
-        return;
-      }
-
-      // Only rollover after the plan has actually ended
-      const now = Date.now();
-      if (now < endMs) {
-        console.log("[planStore] rollover skip (not ended yet)", {
-          reason,
-          endISO,
-          msUntilEnd: endMs - now,
-        });
-        return;
-      }
 
       // Mark key as in-flight for this session (prevents back-to-back double calls)
       lastRolloverKeyRef.current = key;
 
-      console.log("[planStore] rollover attempt", {
+      dlog("[planStore] rollover attempt", {
         reason,
         key,
         endISO,
@@ -757,7 +799,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
       try {
         const r = await postRollover();
-        console.log("[planStore] rollover response", {
+        dlog("[planStore] rollover response", {
           reason,
           key,
           rolled: !!r?.rolled,
@@ -902,6 +944,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
           currency: raw?.currency,
           budgetGoals: Array.isArray(raw?.budgetGoals)
             ? raw.budgetGoals.map((g: any) => ({
+                id: g.id ?? null,
                 category: g.category,
                 limitMinor:
                   typeof g.limitMinor === "number" ? g.limitMinor : null,
@@ -909,12 +952,13 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
             : null,
           savingsGoals: Array.isArray(raw?.savingsGoals)
             ? raw.savingsGoals.map((g: any) => ({
+                id: g.id ?? null,
                 name: g.name,
                 targetMinor:
                   typeof g.targetMinor === "number" ? g.targetMinor : null,
               }))
             : null,
-        } as any);
+        });
 
         return true;
       } catch (err) {
@@ -983,6 +1027,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
           currency: raw?.currency,
           budgetGoals: Array.isArray(raw?.budgetGoals)
             ? raw.budgetGoals.map((g: any) => ({
+                id: g.id ?? null,
                 category: g.category,
                 limitMinor:
                   typeof g.limitMinor === "number" ? g.limitMinor : null,
@@ -990,6 +1035,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
             : null,
           savingsGoals: Array.isArray(raw?.savingsGoals)
             ? raw.savingsGoals.map((g: any) => ({
+                id: g.id ?? null,
                 name: g.name,
                 targetMinor:
                   typeof g.targetMinor === "number" ? g.targetMinor : null,

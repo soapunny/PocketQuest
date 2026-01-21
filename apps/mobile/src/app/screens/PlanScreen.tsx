@@ -9,8 +9,8 @@ import {
   Alert,
 } from "react-native";
 
-import { usePlan } from "../lib/planStore";
-import { patchMonthlyPlan, upsertMonthlyPlan } from "../lib/api/plans";
+import { usePlan, getPlanState } from "../lib/planStore";
+import { patchPlan, upsertPlan } from "../lib/api/plans";
 import { useTransactions } from "../lib/transactionsStore";
 import { EXPENSE_CATEGORIES, SAVINGS_GOALS } from "../lib/categories";
 
@@ -25,6 +25,20 @@ import { convertMinor, formatMoney, parseInputToMinor } from "../lib/currency";
 import { CardSpacing } from "../components/Typography";
 import ScreenHeader from "../components/layout/ScreenHeader";
 import ScreenLayout from "../components/layout/ScreenLayout";
+
+// DEV logging and warning helpers
+const DEBUG_PLAN = __DEV__;
+const dlog = (...args: any[]) => {
+  if (DEBUG_PLAN) console.log(...args);
+};
+
+let __warnedPlanDev = false;
+function warnPlanDevOnce(msg: string) {
+  if (__DEV__ && !__warnedPlanDev) {
+    __warnedPlanDev = true;
+    console.warn(msg);
+  }
+}
 
 function absMinor(n: any) {
   const v = typeof n === "number" ? n : Number(n);
@@ -87,27 +101,58 @@ export default function PlanScreen() {
   const DEV_USER_ID = process.env.EXPO_PUBLIC_DEV_USER_ID;
   const [serverHydrating, setServerHydrating] = useState(true);
 
-  const didHydrateRef = useRef(false);
+  const lastHydrateKeyRef = useRef<string>("");
 
-  // Initial server sync (monthly only for now)
+  const { startISO, endISO, type } = useMemo(
+    () => getPlanPeriodRange(plan as any),
+    [plan]
+  );
+
+  const periodStartUTC = useMemo(() => {
+    const fromPlan = String((plan as any)?.periodStartUTC || "");
+    if (fromPlan) return fromPlan;
+    return new Date(String(startISO || new Date().toISOString())).toISOString();
+  }, [plan, startISO]);
+
+  const periodAnchorUTC = useMemo(() => {
+    const fromPlan = String((plan as any)?.periodAnchorUTC || "");
+    if (fromPlan) return fromPlan;
+  
+    // For biweekly, if no anchor is present yet, use the current period start as the anchor.
+    if (type === "BIWEEKLY") return periodStartUTC;
+  
+    return "";
+  }, [plan, type, periodStartUTC]);
+
+  // Initial server sync (period-aware)
   useEffect(() => {
     let mounted = true;
-    if (didHydrateRef.current) return;
-    didHydrateRef.current = true;
+    const hydrateKey = `${type}|${startISO || ""}`;
+    if (lastHydrateKeyRef.current === hydrateKey) return;
+    lastHydrateKeyRef.current = hydrateKey;
 
     const load = async () => {
       try {
         setServerHydrating(true);
+        // Hydrate the server plan that matches the currently selected period
+        if (__DEV__ && !DEV_USER_ID) {
+          warnPlanDevOnce(
+            "[PlanScreen] Missing EXPO_PUBLIC_DEV_USER_ID. Skipping server hydration in DEV."
+          );
+          return;
+        }
 
-        // Use the plan's current period month for hydration (YYYY-MM)
-        // This keeps hydration aligned with the period shown in the UI.
-        const range = getPlanPeriodRange(plan as any);
-        const at = String(range?.startISO || new Date().toISOString()).slice(
-          0,
-          7
-        );
-
-        const res: any = await upsertMonthlyPlan({ userId: DEV_USER_ID, at });
+        const res: any = await upsertPlan({
+          userId: DEV_USER_ID,
+          periodType: type as any,
+          periodStartUTC,
+          ...(type === "BIWEEKLY"
+            ? {
+                // Server requires an anchor for biweekly boundaries.
+                periodAnchorUTC: periodAnchorUTC || periodStartUTC,
+              }
+            : {}),
+        });
         if (!mounted) return;
 
         const sp = res?.plan;
@@ -126,27 +171,28 @@ export default function PlanScreen() {
           ? sp.savingsGoals.map((g: any) => ({
               name: String(g.name ?? "Other"),
               // server uses targetMinor
-              targetMinor: Number(g.targetMinor ?? g.targetMinor ?? 0),
+              targetMinor: Number(g.targetMinor ?? 0),
             }))
           : [];
 
         applyServerPlan({
           periodType: sp.periodType,
-          periodStartUTC: sp.periodStart,
+          periodStartUTC: sp.periodStartUTC ?? sp.periodStart,
+          periodAnchorUTC: sp.periodAnchorUTC ?? sp.periodAnchor ?? null,
           totalBudgetLimitMinor: sp.totalBudgetLimitMinor,
           budgetGoals,
           savingsGoals,
         });
 
-        console.log("[PlanScreen] server response raw", sp);
-        console.log(
+        dlog("[PlanScreen] server response raw", sp);
+        dlog(
           "[PlanScreen] server response goals",
           sp?.budgetGoals,
           sp?.savingsGoals
         );
       } catch (e) {
         // OK to fail quietly when server is offline
-        console.log("[Plan] initial load failed", e);
+        dlog("[Plan] initial load failed", e);
       } finally {
         if (mounted) setServerHydrating(false);
       }
@@ -156,12 +202,7 @@ export default function PlanScreen() {
     return () => {
       mounted = false;
     };
-  }, [applyServerPlan, plan]);
-
-  const { startISO, endISO, type } = useMemo(
-    () => getPlanPeriodRange(plan as any),
-    [plan]
-  );
+  }, [applyServerPlan, plan, startISO, type, periodStartUTC, periodAnchorUTC]);
 
   const periodLabel =
     type === "MONTHLY"
@@ -264,11 +305,12 @@ export default function PlanScreen() {
     if (!sp) return;
 
     // 서버에서 내려온 "부분 goals"을 기존 plan과 merge
-    const currentBudget = Array.isArray(plan?.budgetGoals)
-      ? plan.budgetGoals
+    const latest = getPlanState();
+    const currentBudget = Array.isArray(latest?.plan?.budgetGoals)
+      ? latest.plan.budgetGoals
       : [];
-    const currentSavings = Array.isArray(plan?.savingsGoals)
-      ? plan.savingsGoals
+    const currentSavings = Array.isArray(latest?.plan?.savingsGoals)
+      ? latest.plan.savingsGoals
       : [];
 
     const incomingBudget = Array.isArray(sp?.budgetGoals)
@@ -306,18 +348,14 @@ export default function PlanScreen() {
 
     applyServerPlan({
       periodType: sp.periodType,
-      periodStartUTC: sp.periodStart,
+      periodStartUTC: sp.periodStartUTC ?? sp.periodStart,
+      periodAnchorUTC: sp.periodAnchorUTC ?? sp.periodAnchor ?? null,
       totalBudgetLimitMinor: sp.totalBudgetLimitMinor,
       budgetGoals: Array.from(budgetMap.values()),
       savingsGoals: Array.from(savingsMap.values()),
     });
   };
 
-  // monthly-only key (YYYY-MM)
-  const at =
-    type === "MONTHLY"
-      ? String(startISO || new Date().toISOString()).slice(0, 7)
-      : undefined;
 
   const saveSelectedCategoryLimit = async () => {
     try {
@@ -330,20 +368,22 @@ export default function PlanScreen() {
         setSelectedLimit("");
         upsertBudgetGoalLimit(selectedCategory, 0);
 
-        if (!at) {
+        if (__DEV__ && !DEV_USER_ID) {
           Alert.alert(
             tr("Save failed", "저장 실패"),
             tr(
-              "Server sync is monthly-only for now.",
-              "서버 저장은 현재 월간만 지원해요."
+              "Missing DEV user id. Set EXPO_PUBLIC_DEV_USER_ID in your Expo env.",
+              "DEV 유저 ID가 없어요. EXPO_PUBLIC_DEV_USER_ID를 설정해 주세요."
             )
           );
           return;
         }
 
-        const res = await patchMonthlyPlan({
+        const res = await patchPlan({
           userId: DEV_USER_ID,
-          at,
+          periodType: type as any,
+          periodStartUTC,
+          ...(type === "BIWEEKLY" ? { periodAnchorUTC } : {}),
           budgetGoals: [{ category: selectedCategory, limitMinor: 0 }],
         });
 
@@ -354,20 +394,22 @@ export default function PlanScreen() {
       // optimistic local update
       upsertBudgetGoalLimit(selectedCategory, v);
 
-      if (!at) {
+      if (__DEV__ && !DEV_USER_ID) {
         Alert.alert(
           tr("Save failed", "저장 실패"),
           tr(
-            "Server sync is monthly-only for now.",
-            "서버 저장은 현재 월간만 지원해요."
+            "Missing DEV user id. Set EXPO_PUBLIC_DEV_USER_ID in your Expo env.",
+            "DEV 유저 ID가 없어요. EXPO_PUBLIC_DEV_USER_ID를 설정해 주세요."
           )
         );
         return;
       }
 
-      const res = await patchMonthlyPlan({
+      const res = await patchPlan({
         userId: DEV_USER_ID,
-        at,
+        periodType: type as any,
+        periodStartUTC,
+        ...(type === "BIWEEKLY" ? { periodAnchorUTC } : {}),
         budgetGoals: [{ category: selectedCategory, limitMinor: v }],
       });
 
@@ -391,20 +433,22 @@ export default function PlanScreen() {
       // optimistic local update
       upsertBudgetGoalLimit(selectedCategory, 0);
 
-      if (!at) {
+      if (__DEV__ && !DEV_USER_ID) {
         Alert.alert(
           tr("Save failed", "저장 실패"),
           tr(
-            "Server sync is monthly-only for now.",
-            "서버 저장은 현재 월간만 지원해요."
+            "Missing DEV user id. Set EXPO_PUBLIC_DEV_USER_ID in your Expo env.",
+            "DEV 유저 ID가 없어요. EXPO_PUBLIC_DEV_USER_ID를 설정해 주세요."
           )
         );
         return;
       }
 
-      const res = await patchMonthlyPlan({
+      const res = await patchPlan({
         userId: DEV_USER_ID,
-        at,
+        periodType: type as any,
+        periodStartUTC,
+        ...(type === "BIWEEKLY" ? { periodAnchorUTC } : {}),
         budgetGoals: [{ category: selectedCategory, limitMinor: 0 }],
       });
 
@@ -570,20 +614,22 @@ export default function PlanScreen() {
         setSelectedSavingsTarget("");
         upsertSavingsGoalTarget(selectedSavingsGoal, 0);
 
-        if (!at) {
+        if (__DEV__ && !DEV_USER_ID) {
           Alert.alert(
             tr("Save failed", "저장 실패"),
             tr(
-              "Server sync is monthly-only for now.",
-              "서버 저장은 현재 월간만 지원해요."
+              "Missing DEV user id. Set EXPO_PUBLIC_DEV_USER_ID in your Expo env.",
+              "DEV 유저 ID가 없어요. EXPO_PUBLIC_DEV_USER_ID를 설정해 주세요."
             )
           );
           return;
         }
 
-        const res = await patchMonthlyPlan({
+        const res = await patchPlan({
           userId: DEV_USER_ID,
-          at,
+          periodType: type as any,
+          periodStartUTC,
+          ...(type === "BIWEEKLY" ? { periodAnchorUTC } : {}),
           savingsGoals: [{ name: selectedSavingsGoal, targetMinor: 0 }],
         });
 
@@ -594,20 +640,22 @@ export default function PlanScreen() {
       // optimistic local update
       upsertSavingsGoalTarget(selectedSavingsGoal, v);
 
-      if (!at) {
+      if (__DEV__ && !DEV_USER_ID) {
         Alert.alert(
           tr("Save failed", "저장 실패"),
           tr(
-            "Server sync is monthly-only for now.",
-            "서버 저장은 현재 월간만 지원해요."
+            "Missing DEV user id. Set EXPO_PUBLIC_DEV_USER_ID in your Expo env.",
+            "DEV 유저 ID가 없어요. EXPO_PUBLIC_DEV_USER_ID를 설정해 주세요."
           )
         );
         return;
       }
 
-      const res = await patchMonthlyPlan({
+      const res = await patchPlan({
         userId: DEV_USER_ID,
-        at,
+        periodType: type as any,
+        periodStartUTC,
+        ...(type === "BIWEEKLY" ? { periodAnchorUTC } : {}),
         savingsGoals: [{ name: selectedSavingsGoal, targetMinor: v }],
       });
 
@@ -631,20 +679,22 @@ export default function PlanScreen() {
       // optimistic local update
       upsertSavingsGoalTarget(selectedSavingsGoal, 0);
 
-      if (!at) {
+      if (__DEV__ && !DEV_USER_ID) {
         Alert.alert(
           tr("Save failed", "저장 실패"),
           tr(
-            "Server sync is monthly-only for now.",
-            "서버 저장은 현재 월간만 지원해요."
+            "Missing DEV user id. Set EXPO_PUBLIC_DEV_USER_ID in your Expo env.",
+            "DEV 유저 ID가 없어요. EXPO_PUBLIC_DEV_USER_ID를 설정해 주세요."
           )
         );
         return;
       }
 
-      const res = await patchMonthlyPlan({
+      const res = await patchPlan({
         userId: DEV_USER_ID,
-        at,
+        periodType: type as any,
+        periodStartUTC,
+        ...(type === "BIWEEKLY" ? { periodAnchorUTC } : {}),
         savingsGoals: [{ name: selectedSavingsGoal, targetMinor: 0 }],
       });
 
@@ -659,14 +709,15 @@ export default function PlanScreen() {
     }
   };
 
-  console.log(
-    "[PlanScreen] render",
-    plan.budgetGoals.length,
-    plan.savingsGoals.length
-  );
-
-  console.log("[PlanScreen] goals sample", plan.budgetGoals?.[0]);
-  console.log("[PlanScreen] selectedCategory", selectedCategory);
+  // DEV-only: log render key values on change, not every render
+  useEffect(() => {
+    dlog("[PlanScreen] render", {
+      budgetGoals: plan.budgetGoals.length,
+      savingsGoals: plan.savingsGoals.length,
+      selectedCategory,
+      period: { startISO, endISO, type },
+    });
+  }, [plan.budgetGoals.length, plan.savingsGoals.length, selectedCategory, startISO, endISO, type]);
 
   return (
     <ScreenLayout

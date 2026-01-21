@@ -6,6 +6,15 @@
 const API_BASE_URL =
   process.env.EXPO_PUBLIC_API_BASE_URL ?? "http://localhost:3001";
 
+let __warnedDevConfig = false;
+
+function warnDevConfigOnce(message: string) {
+  if (typeof __DEV__ !== "undefined" && __DEV__ && !__warnedDevConfig) {
+    __warnedDevConfig = true;
+    console.warn(message);
+  }
+}
+
 // 서버와 공유하는 기본 타입들.
 // (필요에 따라 나중에 서버 측 타입 선언과 공유하도록 리팩터링할 수 있습니다.)
 export type TxType = "EXPENSE" | "INCOME" | "SAVING";
@@ -70,7 +79,7 @@ export interface CreateTransactionInput {
   fxUsdKrw?: number;
   category: string;
   occurredAtISO: string; // 클라이언트에서 ISO 문자열로 보냄
-  note?: string;
+  note?: string | null;
 }
 
 /**
@@ -93,6 +102,7 @@ export async function createTransaction(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      ...buildDevHeaders(),
     },
     body: JSON.stringify(input),
   });
@@ -136,12 +146,43 @@ function buildQuery(params: FetchTransactionsParams = {}): string {
   // 실제 로그인/인증이 붙으면 이 부분은 제거하거나 토큰 기반으로 교체해야 합니다.
   const DEV_USER_ID = process.env.EXPO_PUBLIC_DEV_USER_ID;
 
+  if (typeof __DEV__ !== "undefined" && __DEV__ && !DEV_USER_ID) {
+    warnDevConfigOnce(
+      "[transactionsApi] Missing EXPO_PUBLIC_DEV_USER_ID. GET requests may be unauthorized in DEV. Set EXPO_PUBLIC_DEV_USER_ID in your Expo env."
+    );
+  }
+
   if (typeof __DEV__ !== "undefined" && __DEV__ && DEV_USER_ID) {
     search.set("userId", DEV_USER_ID);
   }
 
   const s = search.toString();
   return s ? `?${s}` : "";
+}
+
+function buildDevHeaders(): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const DEV_USER_ID = process.env.EXPO_PUBLIC_DEV_USER_ID;
+
+  if (typeof __DEV__ !== "undefined" && __DEV__ && !DEV_USER_ID) {
+    warnDevConfigOnce(
+      "[transactionsApi] Missing EXPO_PUBLIC_DEV_USER_ID. PATCH/DELETE/POST will be unauthorized in DEV unless you set EXPO_PUBLIC_DEV_USER_ID (used for x-dev-user-id header)."
+    );
+  }
+
+  if (typeof __DEV__ !== "undefined" && __DEV__ && DEV_USER_ID) {
+    headers["x-dev-user-id"] = DEV_USER_ID;
+  }
+
+  return headers;
+}
+
+if (typeof __DEV__ !== "undefined" && __DEV__) {
+  if (API_BASE_URL.includes("localhost") || API_BASE_URL.includes("127.0.0.1")) {
+    warnDevConfigOnce(
+      `[transactionsApi] API_BASE_URL is set to ${API_BASE_URL}. This works on iOS Simulator but will fail on a real device. Set EXPO_PUBLIC_API_BASE_URL to your machine's LAN IP (e.g. http://192.168.x.x:3001).`
+    );
+  }
 }
 
 /**
@@ -184,4 +225,47 @@ export async function fetchTransactions(
     summary: (json.summary as TransactionSummary | null) ?? null,
     filter: json.filter ?? null,
   };
+}
+
+export async function patchTransaction(
+  id: string,
+  patch: {
+    type?: "EXPENSE" | "INCOME" | "SAVING";
+    category?: string;
+    currency?: "USD" | "KRW";
+    amountMinor?: number;
+    note?: string | null;
+  }
+) {
+  const res = await fetch(`${API_BASE_URL}/api/transactions/${id}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...buildDevHeaders(),
+    },
+    body: JSON.stringify(patch),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`PATCH ${API_BASE_URL}/api/transactions/${id} failed (${res.status}) ${text}`);
+  }
+
+  return (await res.json()) as { transaction: TransactionDTO };
+}
+
+export async function deleteTransactionById(id: string) {
+  const res = await fetch(`${API_BASE_URL}/api/transactions/${id}`, {
+    method: "DELETE",
+    headers: {
+      ...buildDevHeaders(),
+    },
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`DELETE ${API_BASE_URL}/api/transactions/${id} failed (${res.status}) ${text}`);
+  }
+
+  return (await res.json()) as { deleted: true };
 }
