@@ -5,17 +5,61 @@ import {
   getWeeklyPeriodStartUTC,
   getBiweeklyPeriodStartUTC,
   calcNextPeriodEnd,
-} from "@/lib/period";
-import type { PeriodType } from "@/lib/period";
+} from "@/lib/plan/periodRules";
+import {
+  DEFAULT_TIME_ZONE,
+  DEFAULT_LOCALE,
+  DEFAULT_WEEK_STARTS_ON,
+} from "@/lib/plan/defaults";
+import { CurrencyCode, LanguageCode, PeriodType } from "@prisma/client";
 import { z } from "zod";
 import { toZonedTime, fromZonedTime } from "date-fns-tz";
 
-const periodTypeSchema = z.enum(["WEEKLY", "BIWEEKLY", "MONTHLY"]);
+// ---- Helper utilities ----
+function isValidIanaTimeZone(tz: unknown): tz is string {
+  if (typeof tz !== "string") return false;
+  const v = tz.trim();
+  if (!v) return false;
+  try {
+    // Will throw on unknown time zone in JS runtimes that support IANA tz
+    Intl.DateTimeFormat(DEFAULT_LOCALE, { timeZone: v }).format(new Date());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function normalizeUserTimeZone(tz: unknown): string {
+  return isValidIanaTimeZone(tz) ? tz.trim() : DEFAULT_TIME_ZONE;
+}
+
+function parseIsoDateOrNull(v: unknown): Date | null {
+  if (typeof v !== "string" || !v.trim()) return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+const periodTypeSchema = z.nativeEnum(PeriodType);
+
+const currencyCodeValues = Object.values(CurrencyCode) as string[];
 
 const currencySchema = z
   .string()
   .transform((v) => v.trim().toUpperCase())
-  .refine((v) => v.length > 0, { message: "currency is required" });
+  .refine((v) => currencyCodeValues.includes(v), {
+    message: "Invalid currency",
+  })
+  .transform((v) => v as CurrencyCode);
+
+const languageCodeValues = Object.values(LanguageCode) as string[];
+
+const languageSchema = z
+  .string()
+  .transform((v) => v.trim())
+  .refine((v) => languageCodeValues.includes(v), {
+    message: "Invalid language",
+  })
+  .transform((v) => v as LanguageCode);
 
 // Shared schema for creating/updating a plan
 const patchPlanSchema = z.object({
@@ -30,10 +74,10 @@ const patchPlanSchema = z.object({
   periodStartUTC: z.string().min(1).optional(),
   // DB uses a single `currency` field (CurrencyCode). We still accept legacy client fields.
   currency: currencySchema.optional(),
-  homeCurrency: z.string().min(1).optional(),
-  displayCurrency: z.string().min(1).optional(),
+  homeCurrency: currencySchema.optional(),
+  displayCurrency: currencySchema.optional(),
   advancedCurrencyMode: z.boolean().optional(),
-  language: z.string().min(1).optional(),
+  language: languageSchema.optional(),
   totalBudgetLimitMinor: z.number().int().nonnegative().optional(),
   // New: Accept arrays of goals for upsert
   budgetGoals: z
@@ -43,7 +87,7 @@ const patchPlanSchema = z.object({
         id: z.string().min(1).optional(),
         category: z.string().min(1),
         limitMinor: z.number().int().nonnegative(),
-      })
+      }),
     )
     .optional(),
   savingsGoals: z
@@ -53,7 +97,7 @@ const patchPlanSchema = z.object({
         id: z.string().min(1).optional(),
         name: z.string().min(1),
         targetMinor: z.number().int().nonnegative(),
-      })
+      }),
     )
     .optional(),
   // If true, set this plan as the user's active plan (updates User.activePlanId)
@@ -96,15 +140,23 @@ function isoToUTCDate(iso: unknown): Date {
 
 function isoLocalDayToUTCDate(timeZone: string, iso: unknown): Date {
   // Interpret YYYY-MM-DD as *local* midnight in `timeZone`, then convert to UTC.
-  const s = String(iso || "");
-  const [y, m, d] = s.split("-").map((n) => Number(n));
-  const localMidnight = new Date(y, (m || 1) - 1, d || 1, 0, 0, 0, 0);
-  return fromZonedTime(localMidnight, timeZone);
+  // IMPORTANT: avoid `new Date(y, m, d, ...)` because it uses the server's runtime timezone.
+  const s = typeof iso === "string" ? iso.trim() : String(iso ?? "").trim();
+
+  // Basic ISO date (local day) validation: YYYY-MM-DD
+  const m = /^\d{4}-\d{2}-\d{2}$/.exec(s);
+  if (!m) {
+    throw new Error(`Invalid ISO local-day date: ${s}`);
+  }
+
+  // Build a local time string in the user's timezone and convert that instant to UTC.
+  // Example: 2026-01-19T00:00:00 in America/New_York -> 2026-01-19T05:00:00.000Z
+  return fromZonedTime(`${s}T00:00:00`, timeZone);
 }
 
 function getMonthlyPeriodStartUTC_local(
   timeZone: string,
-  now: Date = new Date()
+  now: Date = new Date(),
 ): Date {
   const zonedNow = toZonedTime(now, timeZone);
   const zonedStart = new Date(
@@ -114,16 +166,19 @@ function getMonthlyPeriodStartUTC_local(
     0,
     0,
     0,
-    0
+    0,
   );
   return fromZonedTime(zonedStart, timeZone);
 }
 
 function withPlanUtcFields(plan: any, timeZone: string) {
   // Prisma DateTime fields arrive as JS Date objects. Provide stable ISO strings for clients.
-  const periodStartUTC = plan?.periodStart instanceof Date ? plan.periodStart.toISOString() : null;
-  const periodEndUTC = plan?.periodEnd instanceof Date ? plan.periodEnd.toISOString() : null;
-  const periodAnchorUTC = plan?.periodAnchor instanceof Date ? plan.periodAnchor.toISOString() : null;
+  const periodStartUTC =
+    plan?.periodStart instanceof Date ? plan.periodStart.toISOString() : null;
+  const periodEndUTC =
+    plan?.periodEnd instanceof Date ? plan.periodEnd.toISOString() : null;
+  const periodAnchorUTC =
+    plan?.periodAnchor instanceof Date ? plan.periodAnchor.toISOString() : null;
 
   return {
     ...plan,
@@ -140,7 +195,7 @@ async function ensureDefaultActivePlan(userId: string, timeZone: string) {
   // (can be changed later to WEEKLY/BIWEEKLY based on onboarding).
   const include = { budgetGoals: true, savingsGoals: true } as const;
 
-  const periodType: PeriodType = "MONTHLY";
+  const periodType: PeriodType = PeriodType.MONTHLY;
   const periodStart = getMonthlyPeriodStartUTC_local(timeZone);
   const periodEnd = calcNextPeriodEnd(periodStart, periodType, timeZone);
 
@@ -195,7 +250,7 @@ export async function GET(request: NextRequest) {
         error: "Unauthorized",
         hint: "DEV: set DEV_USER_ID or pass x-dev-user-id / ?userId",
       },
-      { status: 401 }
+      { status: 401 },
     );
   }
 
@@ -208,7 +263,7 @@ export async function GET(request: NextRequest) {
   if (!parsedQuery.success) {
     return NextResponse.json(
       { error: "Invalid query", details: parsedQuery.error.flatten() },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -224,7 +279,7 @@ export async function GET(request: NextRequest) {
         where: { id: userId },
         select: { timeZone: true },
       });
-      const timeZone = userTzRow?.timeZone ?? "America/New_York";
+      const timeZone = normalizeUserTimeZone(userTzRow?.timeZone);
 
       const plan = await prisma.plan.findUnique({
         where: {
@@ -249,7 +304,7 @@ export async function GET(request: NextRequest) {
       where: { id: userId },
       select: { activePlanId: true, timeZone: true },
     });
-    const timeZone = user?.timeZone ?? "America/New_York";
+    const timeZone = normalizeUserTimeZone(user?.timeZone);
 
     if (user?.activePlanId) {
       const activePlan = await prisma.plan.findUnique({
@@ -287,7 +342,7 @@ export async function GET(request: NextRequest) {
     console.error("Get plan error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -306,7 +361,7 @@ export async function POST(request: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json(
       { error: "Invalid body", details: parsed.error.flatten() },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -319,7 +374,7 @@ export async function POST(request: NextRequest) {
         error: "Unauthorized",
         hint: "DEV: set DEV_USER_ID or pass x-dev-user-id / ?userId / body.userId",
       },
-      { status: 401 }
+      { status: 401 },
     );
   }
 
@@ -332,54 +387,75 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
-    const timeZone = user.timeZone ?? "America/New_York";
+    const timeZone = normalizeUserTimeZone(user.timeZone);
     const data = parsed.data;
 
     const setActive = data.setActive === true;
     const useCurrentPeriod = data.useCurrentPeriod === true;
 
     // ✅ biweekly는 anchor가 필수 (2주 단위 기준점)
-    if (data.periodType === "BIWEEKLY" && !data.periodAnchorISO && !data.periodAnchorUTC) {
+    if (
+      data.periodType === PeriodType.BIWEEKLY &&
+      !data.periodAnchorISO &&
+      !data.periodAnchorUTC
+    ) {
       return NextResponse.json(
-        { error: "periodAnchorISO or periodAnchorUTC is required for biweekly plans" },
-        { status: 400 }
+        {
+          error:
+            "periodAnchorISO or periodAnchorUTC is required for biweekly plans",
+        },
+        { status: 400 },
       );
     }
 
     // ✅ non-weekly는 기본적으로 periodStart가 필요하지만,
     // setActive+useCurrentPeriod 조합이면 서버가 현재 기간의 periodStart를 계산한다.
     if (
-      data.periodType !== "WEEKLY" &&
+      data.periodType !== PeriodType.WEEKLY &&
       !data.periodStartISO &&
       !data.periodStartUTC &&
       !(setActive && useCurrentPeriod)
     ) {
       return NextResponse.json(
-        { error: "periodStartISO or periodStartUTC is required for non-weekly plans" },
-        { status: 400 }
+        {
+          error:
+            "periodStartISO or periodStartUTC is required for non-weekly plans",
+        },
+        { status: 400 },
       );
     }
 
     let periodStart: Date;
 
-    if (data.periodType === "WEEKLY") {
-      // ✅ Weekly는 서버가 월요일 기준으로 계산 (유저 타임존 기준)
-      periodStart = getWeeklyPeriodStartUTC(timeZone);
+    if (data.periodType === PeriodType.WEEKLY) {
+      // ✅ Weekly는 서버가 weekStartsOn 기준으로 계산 (유저 타임존 기준)
+      periodStart = getWeeklyPeriodStartUTC(
+        timeZone,
+        new Date(),
+        DEFAULT_WEEK_STARTS_ON,
+      );
     } else if (setActive && useCurrentPeriod) {
       // ✅ 즉시 전환: 서버가 "현재 기간"의 periodStart를 계산
-      if (data.periodType === "MONTHLY") {
+      if (data.periodType === PeriodType.MONTHLY) {
         periodStart = getMonthlyPeriodStartUTC_local(timeZone);
       } else {
         // BIWEEKLY (anchor 기반 2주 주기 시작점 계산)
-        const anchorUTC = data.periodAnchorUTC
-          ? new Date(data.periodAnchorUTC)
+        const parsedAnchorUTC = parseIsoDateOrNull(data.periodAnchorUTC);
+        const anchorUTC = parsedAnchorUTC
+          ? parsedAnchorUTC
           : isoLocalDayToUTCDate(timeZone, data.periodAnchorISO!);
-        periodStart = getBiweeklyPeriodStartUTC(timeZone, anchorUTC, new Date(), 1);
+        periodStart = getBiweeklyPeriodStartUTC(
+          timeZone,
+          anchorUTC,
+          new Date(),
+          1,
+        );
       }
     } else {
       // Prefer explicit UTC instant when provided; otherwise interpret periodStartISO as a local-day identifier.
-      if (data.periodStartUTC) {
-        periodStart = new Date(data.periodStartUTC);
+      const parsedStartUTC = parseIsoDateOrNull(data.periodStartUTC);
+      if (parsedStartUTC) {
+        periodStart = parsedStartUTC;
       } else {
         periodStart = isoLocalDayToUTCDate(timeZone, data.periodStartISO!);
       }
@@ -387,20 +463,18 @@ export async function POST(request: NextRequest) {
 
     const periodEnd = calcNextPeriodEnd(periodStart, data.periodType, timeZone);
 
-    const periodAnchor = data.periodAnchorUTC
-      ? new Date(data.periodAnchorUTC)
+    const parsedAnchorUTC = parseIsoDateOrNull(data.periodAnchorUTC);
+    const periodAnchor = parsedAnchorUTC
+      ? parsedAnchorUTC
       : data.periodAnchorISO
-      ? isoLocalDayToUTCDate(timeZone, data.periodAnchorISO)
-      : undefined;
-
-    const currency =
-      typeof (data.currency ?? data.homeCurrency ?? data.displayCurrency) === "string"
-        ? String(data.currency ?? data.homeCurrency ?? data.displayCurrency)
-            .trim()
-            .toUpperCase()
+        ? isoLocalDayToUTCDate(timeZone, data.periodAnchorISO)
         : undefined;
 
-    const language = typeof data.language === "string" ? data.language : undefined;
+    const currency = (data.currency ??
+      data.homeCurrency ??
+      data.displayCurrency) as CurrencyCode | undefined;
+
+    const language = data.language as LanguageCode | undefined;
 
     const plan = await prisma.$transaction(async (tx) => {
       const upserted = await tx.plan.upsert({
@@ -417,15 +491,15 @@ export async function POST(request: NextRequest) {
           periodStart,
           periodEnd,
           periodAnchor,
-          ...(currency ? { currency: currency as any } : {}),
-          ...(language ? { language: language as any } : {}),
+          ...(currency ? { currency } : {}),
+          ...(language ? { language } : {}),
           totalBudgetLimitMinor: data.totalBudgetLimitMinor ?? 0,
         },
         update: {
           periodEnd,
           periodAnchor,
-          ...(currency ? { currency: currency as any } : {}),
-          ...(language ? { language: language as any } : {}),
+          ...(currency ? { currency } : {}),
+          ...(language ? { language } : {}),
           totalBudgetLimitMinor: data.totalBudgetLimitMinor,
         },
         include: {
@@ -534,7 +608,7 @@ export async function POST(request: NextRequest) {
     console.error("Create/get plan error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -553,7 +627,7 @@ export async function PATCH(request: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json(
       { error: "Invalid body", details: parsed.error.flatten() },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -566,7 +640,7 @@ export async function PATCH(request: NextRequest) {
         error: "Unauthorized",
         hint: "DEV: set DEV_USER_ID or pass x-dev-user-id / ?userId / body.userId",
       },
-      { status: 401 }
+      { status: 401 },
     );
   }
 
@@ -579,54 +653,75 @@ export async function PATCH(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
-    const timeZone = user.timeZone ?? "America/New_York";
+    const timeZone = normalizeUserTimeZone(user.timeZone);
     const data = parsed.data;
 
     const setActive = data.setActive === true;
     const useCurrentPeriod = data.useCurrentPeriod === true;
 
     // ✅ biweekly는 anchor가 필수 (2주 단위 기준점)
-    if (data.periodType === "BIWEEKLY" && !data.periodAnchorISO && !data.periodAnchorUTC) {
+    if (
+      data.periodType === PeriodType.BIWEEKLY &&
+      !data.periodAnchorISO &&
+      !data.periodAnchorUTC
+    ) {
       return NextResponse.json(
-        { error: "periodAnchorISO or periodAnchorUTC is required for biweekly plans" },
-        { status: 400 }
+        {
+          error:
+            "periodAnchorISO or periodAnchorUTC is required for biweekly plans",
+        },
+        { status: 400 },
       );
     }
 
     // ✅ non-weekly는 기본적으로 periodStart가 필요하지만,
     // setActive+useCurrentPeriod 조합이면 서버가 현재 기간의 periodStart를 계산한다.
     if (
-      data.periodType !== "WEEKLY" &&
+      data.periodType !== PeriodType.WEEKLY &&
       !data.periodStartISO &&
       !data.periodStartUTC &&
       !(setActive && useCurrentPeriod)
     ) {
       return NextResponse.json(
-        { error: "periodStartISO or periodStartUTC is required for non-weekly plans" },
-        { status: 400 }
+        {
+          error:
+            "periodStartISO or periodStartUTC is required for non-weekly plans",
+        },
+        { status: 400 },
       );
     }
 
     let periodStart: Date;
 
-    if (data.periodType === "WEEKLY") {
-      // ✅ Weekly는 서버가 월요일 기준으로 계산 (유저 타임존 기준)
-      periodStart = getWeeklyPeriodStartUTC(timeZone);
+    if (data.periodType === PeriodType.WEEKLY) {
+      // ✅ Weekly는 서버가 weekStartsOn 기준으로 계산 (유저 타임존 기준)
+      periodStart = getWeeklyPeriodStartUTC(
+        timeZone,
+        new Date(),
+        DEFAULT_WEEK_STARTS_ON,
+      );
     } else if (setActive && useCurrentPeriod) {
       // ✅ 즉시 전환: 서버가 "현재 기간"의 periodStart를 계산
-      if (data.periodType === "MONTHLY") {
+      if (data.periodType === PeriodType.MONTHLY) {
         periodStart = getMonthlyPeriodStartUTC_local(timeZone);
       } else {
         // BIWEEKLY (anchor 기반 2주 주기 시작점 계산)
-        const anchorUTC = data.periodAnchorUTC
-          ? new Date(data.periodAnchorUTC)
+        const parsedAnchorUTC = parseIsoDateOrNull(data.periodAnchorUTC);
+        const anchorUTC = parsedAnchorUTC
+          ? parsedAnchorUTC
           : isoLocalDayToUTCDate(timeZone, data.periodAnchorISO!);
-        periodStart = getBiweeklyPeriodStartUTC(timeZone, anchorUTC, new Date(), 1);
+        periodStart = getBiweeklyPeriodStartUTC(
+          timeZone,
+          anchorUTC,
+          new Date(),
+          1,
+        );
       }
     } else {
       // Prefer explicit UTC instant when provided; otherwise interpret periodStartISO as a local-day identifier.
-      if (data.periodStartUTC) {
-        periodStart = new Date(data.periodStartUTC);
+      const parsedStartUTC = parseIsoDateOrNull(data.periodStartUTC);
+      if (parsedStartUTC) {
+        periodStart = parsedStartUTC;
       } else {
         periodStart = isoLocalDayToUTCDate(timeZone, data.periodStartISO!);
       }
@@ -634,20 +729,18 @@ export async function PATCH(request: NextRequest) {
 
     const periodEnd = calcNextPeriodEnd(periodStart, data.periodType, timeZone);
 
-    const periodAnchor = data.periodAnchorUTC
-      ? new Date(data.periodAnchorUTC)
+    const parsedAnchorUTC = parseIsoDateOrNull(data.periodAnchorUTC);
+    const periodAnchor = parsedAnchorUTC
+      ? parsedAnchorUTC
       : data.periodAnchorISO
-      ? isoLocalDayToUTCDate(timeZone, data.periodAnchorISO)
-      : undefined;
-
-    const currency =
-      typeof (data.currency ?? data.homeCurrency ?? data.displayCurrency) === "string"
-        ? String(data.currency ?? data.homeCurrency ?? data.displayCurrency)
-            .trim()
-            .toUpperCase()
+        ? isoLocalDayToUTCDate(timeZone, data.periodAnchorISO)
         : undefined;
 
-    const language = typeof data.language === "string" ? data.language : undefined;
+    const currency = (data.currency ??
+      data.homeCurrency ??
+      data.displayCurrency) as CurrencyCode | undefined;
+
+    const language = data.language as LanguageCode | undefined;
 
     const plan = await prisma.$transaction(async (tx) => {
       const upserted = await tx.plan.upsert({
@@ -664,15 +757,15 @@ export async function PATCH(request: NextRequest) {
           periodStart,
           periodEnd,
           periodAnchor,
-          ...(currency ? { currency: currency as any } : {}),
-          ...(language ? { language: language as any } : {}),
+          ...(currency ? { currency } : {}),
+          ...(language ? { language } : {}),
           totalBudgetLimitMinor: data.totalBudgetLimitMinor ?? 0,
         },
         update: {
           periodEnd, // ✅ periodEnd는 항상 최신 규칙으로 채우기(특히 null 복구)
           periodAnchor,
-          ...(currency ? { currency: currency as any } : {}),
-          ...(language ? { language: language as any } : {}),
+          ...(currency ? { currency } : {}),
+          ...(language ? { language } : {}),
           totalBudgetLimitMinor: data.totalBudgetLimitMinor,
         },
         include: {
@@ -784,7 +877,7 @@ export async function PATCH(request: NextRequest) {
     console.error("Update plan error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

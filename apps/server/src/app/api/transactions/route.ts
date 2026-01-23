@@ -5,7 +5,7 @@ import {
   getMonthlyPeriodStartUTC,
   getNextMonthlyPeriodStartUTC,
   getPreviousMonthlyPeriodStartUTC,
-} from "@/lib/period";
+} from "@/lib/plan/periodRules";
 import { z } from "zod";
 
 const transactionSchema = z.object({
@@ -53,7 +53,7 @@ export async function GET(request: NextRequest) {
             ? "DEV: pass x-dev-user-id header or ?userId=..."
             : undefined,
       },
-      { status: 401 }
+      { status: 401 },
     );
   }
 
@@ -175,7 +175,7 @@ export async function GET(request: NextRequest) {
     console.error("Get transactions error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -199,7 +199,7 @@ export async function POST(request: NextRequest) {
               ? "DEV: pass x-dev-user-id header or include userId in body"
               : undefined,
         },
-        { status: 401 }
+        { status: 401 },
       );
     }
 
@@ -223,14 +223,14 @@ export async function POST(request: NextRequest) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(
         { error: "Invalid request data", details: error.errors },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     console.error("Create transaction error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

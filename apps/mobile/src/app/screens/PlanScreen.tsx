@@ -54,8 +54,8 @@ function txToHomeMinor(tx: any, homeCurrency: Currency): number {
     typeof tx?.amountMinor === "number"
       ? tx.amountMinor
       : typeof tx?.amountCents === "number"
-      ? tx.amountCents
-      : 0;
+        ? tx.amountCents
+        : 0;
 
   const absAmount = absMinor(amountMinor);
   if (currency === homeCurrency) return absAmount;
@@ -91,7 +91,8 @@ export default function PlanScreen() {
   // Keep isKo/tr logic as-is for translation
   const isKo = (plan as any)?.language === "ko" || false;
   const tr = (en: string, ko: string) => (isKo ? ko : en);
-  const baseCurrency: Currency = (homeCurrency ??
+  const baseCurrency: Currency = ((plan as any)?.currency ??
+    homeCurrency ??
     (plan as any).homeCurrency ??
     "USD") as Currency;
   const { transactions } = useTransactions();
@@ -105,7 +106,7 @@ export default function PlanScreen() {
 
   const { startISO, endISO, type } = useMemo(
     () => getPlanPeriodRange(plan as any),
-    [plan]
+    [plan],
   );
 
   const periodStartUTC = useMemo(() => {
@@ -117,10 +118,10 @@ export default function PlanScreen() {
   const periodAnchorUTC = useMemo(() => {
     const fromPlan = String((plan as any)?.periodAnchorUTC || "");
     if (fromPlan) return fromPlan;
-  
+
     // For biweekly, if no anchor is present yet, use the current period start as the anchor.
     if (type === "BIWEEKLY") return periodStartUTC;
-  
+
     return "";
   }, [plan, type, periodStartUTC]);
 
@@ -137,7 +138,7 @@ export default function PlanScreen() {
         // Hydrate the server plan that matches the currently selected period
         if (__DEV__ && !DEV_USER_ID) {
           warnPlanDevOnce(
-            "[PlanScreen] Missing EXPO_PUBLIC_DEV_USER_ID. Skipping server hydration in DEV."
+            "[PlanScreen] Missing EXPO_PUBLIC_DEV_USER_ID. Skipping server hydration in DEV.",
           );
           return;
         }
@@ -176,6 +177,9 @@ export default function PlanScreen() {
           : [];
 
         applyServerPlan({
+          currency: sp.currency,
+          timeZone: sp.timeZone,
+          language: sp.language,
           periodType: sp.periodType,
           periodStartUTC: sp.periodStartUTC ?? sp.periodStart,
           periodAnchorUTC: sp.periodAnchorUTC ?? sp.periodAnchor ?? null,
@@ -188,7 +192,7 @@ export default function PlanScreen() {
         dlog(
           "[PlanScreen] server response goals",
           sp?.budgetGoals,
-          sp?.savingsGoals
+          sp?.savingsGoals,
         );
       } catch (e) {
         // OK to fail quietly when server is offline
@@ -208,15 +212,15 @@ export default function PlanScreen() {
     type === "MONTHLY"
       ? tr("Monthly", "월간")
       : type === "BIWEEKLY"
-      ? tr("Bi-weekly", "2주")
-      : tr("Weekly", "주간");
+        ? tr("Bi-weekly", "2주")
+        : tr("Weekly", "주간");
 
   const periodText =
     type === "MONTHLY"
       ? tr("this month", "이번 달")
       : type === "BIWEEKLY"
-      ? tr("this 2 weeks", "이번 2주")
-      : tr("this week", "이번 주");
+        ? tr("this 2 weeks", "이번 2주")
+        : tr("this week", "이번 주");
 
   const periodTransactions = useMemo(() => {
     return transactions.filter((t) => {
@@ -225,7 +229,7 @@ export default function PlanScreen() {
           (t as any).occurredAtISO ??
           (t as any).createdAtISO ??
           (t as any).createdAt ??
-          ""
+          "",
       );
       if (!iso) return false;
       return isISOInRange(iso, startISO, endISO);
@@ -233,13 +237,13 @@ export default function PlanScreen() {
   }, [transactions, startISO, endISO]);
 
   const [selectedCategory, setSelectedCategory] = useState<string>(
-    EXPENSE_CATEGORIES[0]
+    EXPENSE_CATEGORIES[0],
   );
   const [selectedLimit, setSelectedLimit] = useState("");
   const [savingBudgetGoal, setSavingBudgetGoal] = useState(false);
 
   const [selectedSavingsGoal, setSelectedSavingsGoal] = useState<string>(
-    SAVINGS_GOALS[0]
+    SAVINGS_GOALS[0],
   );
   const [selectedSavingsTarget, setSelectedSavingsTarget] = useState("");
   const [savingSavingsGoal, setSavingSavingsGoal] = useState(false);
@@ -249,7 +253,7 @@ export default function PlanScreen() {
     setSelectedLimit(
       g && g.limitMinor > 0
         ? formatMoneyNoSymbol(g.limitMinor, baseCurrency)
-        : ""
+        : "",
     );
   }, [selectedCategory, plan.budgetGoals, baseCurrency]);
 
@@ -258,7 +262,7 @@ export default function PlanScreen() {
     setSelectedSavingsTarget(
       g && g.targetMinor > 0
         ? formatMoneyNoSymbol(g.targetMinor, baseCurrency)
-        : ""
+        : "",
     );
   }, [selectedSavingsGoal, plan.savingsGoals, baseCurrency]);
 
@@ -289,7 +293,7 @@ export default function PlanScreen() {
       const goalName = String((tx as any).category || "Other");
       map.set(
         goalName,
-        (map.get(goalName) || 0) + txToHomeMinor(tx, baseCurrency)
+        (map.get(goalName) || 0) + txToHomeMinor(tx, baseCurrency),
       );
     }
 
@@ -347,6 +351,9 @@ export default function PlanScreen() {
     }
 
     applyServerPlan({
+      currency: sp.currency,
+      timeZone: sp.timeZone,
+      language: sp.language,
       periodType: sp.periodType,
       periodStartUTC: sp.periodStartUTC ?? sp.periodStart,
       periodAnchorUTC: sp.periodAnchorUTC ?? sp.periodAnchor ?? null,
@@ -355,7 +362,6 @@ export default function PlanScreen() {
       savingsGoals: Array.from(savingsMap.values()),
     });
   };
-
 
   const saveSelectedCategoryLimit = async () => {
     try {
@@ -373,8 +379,8 @@ export default function PlanScreen() {
             tr("Save failed", "저장 실패"),
             tr(
               "Missing DEV user id. Set EXPO_PUBLIC_DEV_USER_ID in your Expo env.",
-              "DEV 유저 ID가 없어요. EXPO_PUBLIC_DEV_USER_ID를 설정해 주세요."
-            )
+              "DEV 유저 ID가 없어요. EXPO_PUBLIC_DEV_USER_ID를 설정해 주세요.",
+            ),
           );
           return;
         }
@@ -399,8 +405,8 @@ export default function PlanScreen() {
           tr("Save failed", "저장 실패"),
           tr(
             "Missing DEV user id. Set EXPO_PUBLIC_DEV_USER_ID in your Expo env.",
-            "DEV 유저 ID가 없어요. EXPO_PUBLIC_DEV_USER_ID를 설정해 주세요."
-          )
+            "DEV 유저 ID가 없어요. EXPO_PUBLIC_DEV_USER_ID를 설정해 주세요.",
+          ),
         );
         return;
       }
@@ -417,7 +423,7 @@ export default function PlanScreen() {
     } catch (e: any) {
       Alert.alert(
         tr("Save failed", "저장 실패"),
-        e?.message || "Unknown error"
+        e?.message || "Unknown error",
       );
     } finally {
       setSavingBudgetGoal(false);
@@ -438,8 +444,8 @@ export default function PlanScreen() {
           tr("Save failed", "저장 실패"),
           tr(
             "Missing DEV user id. Set EXPO_PUBLIC_DEV_USER_ID in your Expo env.",
-            "DEV 유저 ID가 없어요. EXPO_PUBLIC_DEV_USER_ID를 설정해 주세요."
-          )
+            "DEV 유저 ID가 없어요. EXPO_PUBLIC_DEV_USER_ID를 설정해 주세요.",
+          ),
         );
         return;
       }
@@ -456,7 +462,7 @@ export default function PlanScreen() {
     } catch (e: any) {
       Alert.alert(
         tr("Save failed", "저장 실패"),
-        e?.message || "Unknown error"
+        e?.message || "Unknown error",
       );
     } finally {
       setSavingBudgetGoal(false);
@@ -619,8 +625,8 @@ export default function PlanScreen() {
             tr("Save failed", "저장 실패"),
             tr(
               "Missing DEV user id. Set EXPO_PUBLIC_DEV_USER_ID in your Expo env.",
-              "DEV 유저 ID가 없어요. EXPO_PUBLIC_DEV_USER_ID를 설정해 주세요."
-            )
+              "DEV 유저 ID가 없어요. EXPO_PUBLIC_DEV_USER_ID를 설정해 주세요.",
+            ),
           );
           return;
         }
@@ -645,8 +651,8 @@ export default function PlanScreen() {
           tr("Save failed", "저장 실패"),
           tr(
             "Missing DEV user id. Set EXPO_PUBLIC_DEV_USER_ID in your Expo env.",
-            "DEV 유저 ID가 없어요. EXPO_PUBLIC_DEV_USER_ID를 설정해 주세요."
-          )
+            "DEV 유저 ID가 없어요. EXPO_PUBLIC_DEV_USER_ID를 설정해 주세요.",
+          ),
         );
         return;
       }
@@ -663,7 +669,7 @@ export default function PlanScreen() {
     } catch (e: any) {
       Alert.alert(
         tr("Save failed", "저장 실패"),
-        e?.message || "Unknown error"
+        e?.message || "Unknown error",
       );
     } finally {
       setSavingSavingsGoal(false);
@@ -684,8 +690,8 @@ export default function PlanScreen() {
           tr("Save failed", "저장 실패"),
           tr(
             "Missing DEV user id. Set EXPO_PUBLIC_DEV_USER_ID in your Expo env.",
-            "DEV 유저 ID가 없어요. EXPO_PUBLIC_DEV_USER_ID를 설정해 주세요."
-          )
+            "DEV 유저 ID가 없어요. EXPO_PUBLIC_DEV_USER_ID를 설정해 주세요.",
+          ),
         );
         return;
       }
@@ -702,7 +708,7 @@ export default function PlanScreen() {
     } catch (e: any) {
       Alert.alert(
         tr("Save failed", "저장 실패"),
-        e?.message || "Unknown error"
+        e?.message || "Unknown error",
       );
     } finally {
       setSavingSavingsGoal(false);
@@ -717,7 +723,14 @@ export default function PlanScreen() {
       selectedCategory,
       period: { startISO, endISO, type },
     });
-  }, [plan.budgetGoals.length, plan.savingsGoals.length, selectedCategory, startISO, endISO, type]);
+  }, [
+    plan.budgetGoals.length,
+    plan.savingsGoals.length,
+    selectedCategory,
+    startISO,
+    endISO,
+    type,
+  ]);
 
   return (
     <ScreenLayout
@@ -727,11 +740,11 @@ export default function PlanScreen() {
           title={tr(`${periodLabel} Plan`, `${periodLabel} 플랜`)}
           subtitle={tr(
             `Progress (${periodText}): ${progressPercent}%`,
-            `진행률(${periodText}): ${progressPercent}%`
+            `진행률(${periodText}): ${progressPercent}%`,
           )}
           description={tr(
             `Base currency: ${baseCurrency}`,
-            `기준 통화: ${baseCurrency}`
+            `기준 통화: ${baseCurrency}`,
           )}
         />
       }
@@ -773,7 +786,7 @@ export default function PlanScreen() {
       <View style={[CardSpacing.card, styles.card]}>
         {(() => {
           const goal = plan.budgetGoals.find(
-            (g) => g.category === selectedCategory
+            (g) => g.category === selectedCategory,
           );
           const limit = goal?.limitMinor || 0;
           const spent = spentByCategory.get(selectedCategory) || 0;
@@ -782,10 +795,10 @@ export default function PlanScreen() {
             limit <= 0
               ? "NO_LIMIT"
               : ratio > 1
-              ? "OVER"
-              : ratio > 0.8
-              ? "WARNING"
-              : "SAFE";
+                ? "OVER"
+                : ratio > 0.8
+                  ? "WARNING"
+                  : "SAFE";
           const statusColor =
             status === "OVER" ? "#c00" : status === "WARNING" ? "#c90" : "#0a7";
 
@@ -802,14 +815,14 @@ export default function PlanScreen() {
                   {status === "SAFE"
                     ? "✅"
                     : status === "WARNING"
-                    ? "⚠️"
-                    : tr("🚨 Over", "🚨 초과")}
+                      ? "⚠️"
+                      : tr("🚨 Over", "🚨 초과")}
                 </Text>
               ) : (
                 <Text style={styles.cardBody}>
                   {tr(
                     "No limit set for this category yet.",
-                    "이 카테고리는 아직 예산 한도가 없어요."
+                    "이 카테고리는 아직 예산 한도가 없어요.",
                   )}
                 </Text>
               )}
@@ -894,7 +907,7 @@ export default function PlanScreen() {
       <View style={[CardSpacing.card, styles.card]}>
         {(() => {
           const goal = plan.savingsGoals.find(
-            (x) => x.name === selectedSavingsGoal
+            (x) => x.name === selectedSavingsGoal,
           );
           const target = goal?.targetMinor || 0;
           const saved = savedByGoal.get(selectedSavingsGoal) || 0;
@@ -921,7 +934,7 @@ export default function PlanScreen() {
                 <Text style={styles.cardBody}>
                   {tr(
                     "No target set for this goal yet.",
-                    "이 목표는 아직 목표 금액이 없어요."
+                    "이 목표는 아직 목표 금액이 없어요.",
                   )}
                 </Text>
               )}

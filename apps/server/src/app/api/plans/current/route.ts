@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import {
   getMonthlyPeriodStartUTC,
   getNextMonthlyPeriodStartUTC,
-} from "@/lib/period";
+} from "@/lib/plan/periodRules";
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -14,7 +14,7 @@ export async function GET(request: Request) {
   if (!userId) {
     return NextResponse.json(
       { error: "userId is required (dev only). Use ?userId=..." },
-      { status: 400 }
+      { status: 400 },
     );
   }
 

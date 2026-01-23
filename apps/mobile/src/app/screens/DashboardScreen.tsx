@@ -71,11 +71,11 @@ function txToHomeMinor(tx: any, homeCurrency: Currency): number {
 
   // Prefer new field; fallback to legacy amountMinor
   const rawAmount =
-  typeof tx?.amountMinor === "number"
-    ? tx.amountMinor
-    : typeof (tx as any)?.amountHomeMinor === "number"
-    ? (tx as any).amountHomeMinor
-    : 0;
+    typeof tx?.amountMinor === "number"
+      ? tx.amountMinor
+      : typeof (tx as any)?.amountHomeMinor === "number"
+        ? (tx as any).amountHomeMinor
+        : 0;
 
   if (!Number.isFinite(rawAmount) || rawAmount === 0) return 0;
 
@@ -89,7 +89,7 @@ function txToHomeMinor(tx: any, homeCurrency: Currency): number {
   if (!Number.isFinite(fx) || fx <= 0) return 0;
 
   const convertedAbs = absMinor(
-    convertMinor(amountAbs, currency, homeCurrency, fx)
+    convertMinor(amountAbs, currency, homeCurrency, fx),
   );
   return sign * convertedAbs;
 }
@@ -102,10 +102,38 @@ function moneyHome(amountHomeMinor: number, homeCurrency: Currency) {
   return formatMoney(amountHomeMinor, homeCurrency);
 }
 
+function pickFxUsdKrw(txs: any[]): number {
+  // Prefer the most recent tx with a valid fx snapshot.
+  for (let i = txs.length - 1; i >= 0; i--) {
+    const fx = Number((txs[i] as any)?.fxUsdKrw);
+    if (Number.isFinite(fx) && fx > 0) return fx;
+  }
+  return NaN;
+}
+
+function planMinorToHomeMinor(
+  amountPlanMinor: number,
+  planCurrency: Currency,
+  homeCurrency: Currency,
+  fxUsdKrw: number,
+): number {
+  if (!Number.isFinite(amountPlanMinor) || amountPlanMinor === 0) return 0;
+  if (planCurrency === homeCurrency) return amountPlanMinor;
+
+  // Only USD<->KRW supported for now.
+  if (!Number.isFinite(fxUsdKrw) || fxUsdKrw <= 0) return 0;
+
+  const abs = Math.abs(amountPlanMinor);
+  const sign = amountPlanMinor < 0 ? -1 : 1;
+  const convertedAbs = convertMinor(abs, planCurrency, homeCurrency, fxUsdKrw);
+  return sign * Math.abs(convertedAbs);
+}
+
 export default function DashboardScreen() {
-  const { plan, homeCurrency, displayCurrency, language } =
-    usePlan();
+  const { plan, homeCurrency, displayCurrency, language } = usePlan();
   const isKo = language === "ko";
+  const planCurrency: Currency =
+    (plan as any)?.currency === "KRW" ? "KRW" : "USD";
 
   const tr = (en: string, ko: string) => (isKo ? ko : en);
 
@@ -132,7 +160,7 @@ export default function DashboardScreen() {
         } catch (error) {
           console.error(
             "[DashboardScreen] failed to load transactions from server",
-            error
+            error,
           );
         } finally {
           if (isActive) setIsLoading(false);
@@ -142,17 +170,20 @@ export default function DashboardScreen() {
       return () => {
         isActive = false;
       };
-    }, [])
+    }, []),
   );
 
-  const { startISO, endISO, type } = useMemo(() => getPlanPeriodRange(plan), [plan]);
+  const { startISO, endISO, type } = useMemo(
+    () => getPlanPeriodRange(plan),
+    [plan],
+  );
 
   const periodLabel =
     type === "MONTHLY"
       ? tr("This month", "이번 달")
       : type === "BIWEEKLY"
-      ? tr("This 2 weeks", "이번 2주")
-      : tr("This week", "이번 주");
+        ? tr("This 2 weeks", "이번 2주")
+        : tr("This week", "이번 주");
 
   const periodTransactions = useMemo(() => {
     return transactions.filter((t) => {
@@ -180,23 +211,40 @@ export default function DashboardScreen() {
     });
   }, [transactions, startISO, endISO]);
 
+  const fxUsdKrwForDisplay = useMemo(() => {
+    // Prefer period txs; fallback to all loaded txs.
+    return pickFxUsdKrw(
+      periodTransactions.length ? periodTransactions : transactions,
+    );
+  }, [periodTransactions, transactions]);
+
   // Helper to get category limit from plan (interpreted as homeCurrency minor units)
   const getCategoryLimitHomeMinor = (category: string): number => {
     const goals: any = (plan as any).budgetGoals;
     if (!goals) return 0;
 
+    let limitPlanMinor = 0;
+
     // Array form: [{ category: string, limitMinor: number }]
     if (Array.isArray(goals)) {
       const found = goals.find((g) => String(g.category) === category);
-      return found?.limitMinor ?? 0;
+      limitPlanMinor = Number(found?.limitMinor ?? 0);
+    } else {
+      // Object/map form: { [category]: number } or { [category]: { limitMinor } }
+      const v = (goals as any)[category];
+      if (typeof v === "number") limitPlanMinor = v;
+      else if (v && typeof v.limitMinor === "number")
+        limitPlanMinor = v.limitMinor;
     }
 
-    // Object/map form: { [category]: number } or { [category]: { limitMinor } }
-    const v = (goals as any)[category];
-    if (typeof v === "number") return v;
-    if (v && typeof v.limitMinor === "number") return v.limitMinor;
+    if (!Number.isFinite(limitPlanMinor) || limitPlanMinor <= 0) return 0;
 
-    return 0;
+    return planMinorToHomeMinor(
+      limitPlanMinor,
+      planCurrency,
+      homeCurrency,
+      fxUsdKrwForDisplay,
+    );
   };
 
   const totalSpentHomeMinor = useMemo(() => {
@@ -241,8 +289,8 @@ export default function DashboardScreen() {
           .map((g: any) => String(g.category || ""))
           .filter((c: string) => !!c)
       : goals && typeof goals === "object"
-      ? Object.keys(goals)
-      : [];
+        ? Object.keys(goals)
+        : [];
 
     const rows: Array<{
       category: string;
@@ -275,7 +323,13 @@ export default function DashboardScreen() {
     });
 
     return rows;
-  }, [spentByCategoryHomeMinor, plan]);
+  }, [
+    spentByCategoryHomeMinor,
+    plan,
+    planCurrency,
+    homeCurrency,
+    fxUsdKrwForDisplay,
+  ]);
 
   const savedByGoalHomeMinor = useMemo(() => {
     const map = new Map<string, number>();
@@ -284,7 +338,7 @@ export default function DashboardScreen() {
       const goalName = String((tx as any).category || "Other");
       map.set(
         goalName,
-        (map.get(goalName) || 0) + txToHomeAbsMinor(tx, homeCurrency)
+        (map.get(goalName) || 0) + txToHomeAbsMinor(tx, homeCurrency),
       );
     }
     return map;
@@ -299,11 +353,17 @@ export default function DashboardScreen() {
   const totalSavingsTargetHomeMinor = useMemo(() => {
     let sum = 0;
     for (const g of (plan as any).savingsGoals ?? []) {
-      const target = Number((g as any).targetMinor ?? 0);
-      if (Number.isFinite(target) && target > 0) sum += target;
+      const targetPlanMinor = Number((g as any).targetMinor ?? 0);
+      if (!Number.isFinite(targetPlanMinor) || targetPlanMinor <= 0) continue;
+      sum += planMinorToHomeMinor(
+        targetPlanMinor,
+        planCurrency,
+        homeCurrency,
+        fxUsdKrwForDisplay,
+      );
     }
     return sum;
-  }, [plan]);
+  }, [plan, planCurrency, homeCurrency, fxUsdKrwForDisplay]);
 
   const savingsProgressRows = useMemo(() => {
     const rows: Array<{
@@ -315,13 +375,22 @@ export default function DashboardScreen() {
 
     for (const g of (plan as any).savingsGoals ?? []) {
       const name = String(
-        (g as any).name ?? (g as any).title ?? (g as any).goalName ?? "Goal"
+        (g as any).name ?? (g as any).title ?? (g as any).goalName ?? "Goal",
       );
-      const targetHomeMinor = Number((g as any).targetMinor ?? 0);
+      const targetPlanMinor = Number((g as any).targetMinor ?? 0);
+      if (!Number.isFinite(targetPlanMinor) || targetPlanMinor <= 0) continue;
+
+      const targetHomeMinor = planMinorToHomeMinor(
+        targetPlanMinor,
+        planCurrency,
+        homeCurrency,
+        fxUsdKrwForDisplay,
+      );
       if (!Number.isFinite(targetHomeMinor) || targetHomeMinor <= 0) continue;
 
       const savedHomeMinor = savedByGoalHomeMinor.get(name) ?? 0;
       const ratio = targetHomeMinor > 0 ? savedHomeMinor / targetHomeMinor : 0;
+
       rows.push({ name, savedHomeMinor, targetHomeMinor, ratio });
     }
 
@@ -335,7 +404,15 @@ export default function DashboardScreen() {
 
   useEffect(() => {
     // DEBUG: Dashboard consistency checks (period + totals)
-    const totalBudget = Number((plan as any).totalBudgetLimitMinor ?? 0);
+    const totalBudgetPlanMinor = Number(
+      (plan as any).totalBudgetLimitMinor ?? 0,
+    );
+    const totalBudget = planMinorToHomeMinor(
+      totalBudgetPlanMinor,
+      planCurrency,
+      homeCurrency,
+      fxUsdKrwForDisplay,
+    );
 
     console.log("[DASH] period", {
       type,
@@ -343,6 +420,8 @@ export default function DashboardScreen() {
       endISO,
       homeCurrency,
       displayCurrency,
+      planCurrency,
+      fxUsdKrwForDisplay,
       txAll: transactions.length,
       txInPeriod: periodTransactions.length,
     });
@@ -352,7 +431,8 @@ export default function DashboardScreen() {
       totalSpentHomeMinor,
       categorySpentSumHomeMinor,
       totalBudget,
-      budgetRemaining: totalBudget > 0 ? totalBudget - totalSpentHomeMinor : null,
+      budgetRemaining:
+        totalBudget > 0 ? totalBudget - totalSpentHomeMinor : null,
       totalsMatch:
         totalSpentHomeMinor === categorySpentSumHomeMinor ? "OK" : "MISMATCH",
     });
@@ -382,7 +462,7 @@ export default function DashboardScreen() {
         occurredAt: (t as any).occurredAt,
         createdAtISO: (t as any).createdAtISO,
         createdAt: (t as any).createdAt,
-      }))
+      })),
     );
   }, [
     type,
@@ -406,13 +486,13 @@ export default function DashboardScreen() {
           title={tr("Dashboard", "대시보드")}
           subtitle={tr(
             `${periodLabel} at a glance`,
-            `${periodLabel} 한눈에 보기`
+            `${periodLabel} 한눈에 보기`,
           )}
           description={
             displayCurrency !== homeCurrency
               ? tr(
                   `Base totals shown in ${homeCurrency}.`,
-                  `기준 합계 통화: ${homeCurrency}.`
+                  `기준 합계 통화: ${homeCurrency}.`,
                 )
               : undefined
           }
@@ -439,7 +519,7 @@ export default function DashboardScreen() {
           const tone = summaryTone(
             s.key === "SAFE" || s.key === "WARNING" || s.key === "OVER"
               ? s.key
-              : "NONE"
+              : "NONE",
           );
           return (
             <View style={[styles.summaryPill, tone]}>
@@ -476,7 +556,7 @@ export default function DashboardScreen() {
             {totalIncomeHomeMinor > 0
               ? moneyHome(
                   totalIncomeHomeMinor - totalSpentHomeMinor,
-                  homeCurrency
+                  homeCurrency,
                 )
               : "—"}
           </Text>
@@ -504,8 +584,8 @@ export default function DashboardScreen() {
                   {s.key === "SAFE"
                     ? tr("Healthy", "건강")
                     : s.key === "WARNING"
-                    ? tr("Caution", "주의")
-                    : tr("Over", "초과")}
+                      ? tr("Caution", "주의")
+                      : tr("Over", "초과")}
                 </Text>
               );
             })()
@@ -529,8 +609,8 @@ export default function DashboardScreen() {
               status === "OVER"
                 ? "#c00"
                 : status === "WARNING"
-                ? "#c90"
-                : "#0a7";
+                  ? "#c90"
+                  : "#0a7";
 
             return (
               <>
@@ -581,7 +661,7 @@ export default function DashboardScreen() {
                 <Text style={CardSpacing.description}>
                   {tr(
                     `Shows your spending as a share of income for ${periodLabel.toLowerCase()}.`,
-                    `${periodLabel} 동안 수입 대비 지출 비율을 보여줘요.`
+                    `${periodLabel} 동안 수입 대비 지출 비율을 보여줘요.`,
                   )}
                 </Text>
               </>
@@ -591,7 +671,7 @@ export default function DashboardScreen() {
           <Text style={CardSpacing.description}>
             {tr(
               `Add Income transactions (paycheck, gift, bonus, etc.) to see spending vs income for ${periodLabel.toLowerCase()}.`,
-              `${periodLabel} 동안 수입 대비 지출을 보려면 수입 거래(월급/선물/보너스 등)를 추가하세요.`
+              `${periodLabel} 동안 수입 대비 지출을 보려면 수입 거래(월급/선물/보너스 등)를 추가하세요.`,
             )}
           </Text>
         )}
@@ -607,13 +687,21 @@ export default function DashboardScreen() {
         </View>
 
         {(() => {
-          const totalBudget = Number((plan as any).totalBudgetLimitMinor ?? 0);
+          const totalBudgetPlanMinor = Number(
+            (plan as any).totalBudgetLimitMinor ?? 0,
+          );
+          const totalBudget = planMinorToHomeMinor(
+            totalBudgetPlanMinor,
+            planCurrency,
+            homeCurrency,
+            fxUsdKrwForDisplay,
+          );
           const r = totalBudget > 0 ? totalSpentHomeMinor / totalBudget : NaN;
           const s = ratioStatus(r);
           const tone = summaryTone(
             s.key === "SAFE" || s.key === "WARNING" || s.key === "OVER"
               ? s.key
-              : "NONE"
+              : "NONE",
           );
 
           return (
@@ -626,44 +714,45 @@ export default function DashboardScreen() {
           );
         })()}
 
-        <View
-          style={[
-            styles.summaryPill,
-            Number((plan as any).totalBudgetLimitMinor ?? 0) > 0
-              ? Number((plan as any).totalBudgetLimitMinor) -
-                  totalSpentHomeMinor <
-                0
-                ? summaryTone("OVER")
-                : summaryTone("SAFE")
-              : summaryTone("NONE"),
-          ]}
-        >
-          <Text style={styles.summaryLabel}>
-            {tr("Remaining", "남은 예산")}
-          </Text>
-          <Text
-            style={[
-              styles.summaryValue,
-              {
-                color:
-                  Number((plan as any).totalBudgetLimitMinor ?? 0) > 0 &&
-                  Number((plan as any).totalBudgetLimitMinor) -
-                    totalSpentHomeMinor <
-                    0
-                    ? "#c00"
-                    : "#111",
-              },
-            ]}
-          >
-            {Number((plan as any).totalBudgetLimitMinor ?? 0) > 0
-              ? moneyHome(
-                  Number((plan as any).totalBudgetLimitMinor) -
-                    totalSpentHomeMinor,
-                  homeCurrency
-                )
-              : "—"}
-          </Text>
-        </View>
+        {(() => {
+          const totalBudgetPlanMinor = Number(
+            (plan as any).totalBudgetLimitMinor ?? 0,
+          );
+          const totalBudget = planMinorToHomeMinor(
+            totalBudgetPlanMinor,
+            planCurrency,
+            homeCurrency,
+            fxUsdKrwForDisplay,
+          );
+
+          const remaining = totalBudget - totalSpentHomeMinor;
+          const hasBudget = totalBudget > 0;
+
+          return (
+            <View
+              style={[
+                styles.summaryPill,
+                hasBudget
+                  ? remaining < 0
+                    ? summaryTone("OVER")
+                    : summaryTone("SAFE")
+                  : summaryTone("NONE"),
+              ]}
+            >
+              <Text style={styles.summaryLabel}>
+                {tr("Remaining", "남은 예산")}
+              </Text>
+              <Text
+                style={[
+                  styles.summaryValue,
+                  { color: hasBudget && remaining < 0 ? "#c00" : "#111" },
+                ]}
+              >
+                {hasBudget ? moneyHome(remaining, homeCurrency) : "—"}
+              </Text>
+            </View>
+          );
+        })()}
       </View>
 
       {/* Total Budget Card */}
@@ -674,15 +763,26 @@ export default function DashboardScreen() {
           </Text>
           {Number((plan as any).totalBudgetLimitMinor ?? 0) > 0 ? (
             (() => {
-              const totalBudget = Number((plan as any).totalBudgetLimitMinor);
-              const r = totalSpentHomeMinor / totalBudget;
+              const totalBudgetPlanMinor = Number(
+                (plan as any).totalBudgetLimitMinor ?? 0,
+              );
+              const totalBudgetHomeMinor = planMinorToHomeMinor(
+                totalBudgetPlanMinor,
+                planCurrency,
+                homeCurrency,
+                fxUsdKrwForDisplay,
+              );
+              const r =
+                totalBudgetHomeMinor > 0
+                  ? totalSpentHomeMinor / totalBudgetHomeMinor
+                  : NaN;
               const s = ratioStatus(r);
               const label =
                 s.key === "SAFE"
                   ? tr("Safe", "안전")
                   : s.key === "WARNING"
-                  ? tr("Warning", "주의")
-                  : tr("Over", "초과");
+                    ? tr("Warning", "주의")
+                    : tr("Over", "초과");
               return (
                 <Text
                   style={[
@@ -703,10 +803,25 @@ export default function DashboardScreen() {
 
         {Number((plan as any).totalBudgetLimitMinor ?? 0) > 0 ? (
           (() => {
-            const totalBudget = Number((plan as any).totalBudgetLimitMinor);
-            const ratio = totalSpentHomeMinor / totalBudget;
-            const clamped = Math.min(1, Math.max(0, ratio));
-            const remaining = totalBudget - totalSpentHomeMinor;
+            const totalBudgetPlanMinor = Number(
+              (plan as any).totalBudgetLimitMinor ?? 0,
+            );
+            const totalBudgetHomeMinor = planMinorToHomeMinor(
+              totalBudgetPlanMinor,
+              planCurrency,
+              homeCurrency,
+              fxUsdKrwForDisplay,
+            );
+
+            const ratio =
+              totalBudgetHomeMinor > 0
+                ? totalSpentHomeMinor / totalBudgetHomeMinor
+                : NaN;
+            const clamped = Math.min(
+              1,
+              Math.max(0, Number.isFinite(ratio) ? ratio : 0),
+            );
+            const remaining = totalBudgetHomeMinor - totalSpentHomeMinor;
 
             const status =
               ratio > 1 ? "OVER" : ratio > 0.8 ? "WARNING" : "SAFE";
@@ -714,8 +829,8 @@ export default function DashboardScreen() {
               status === "OVER"
                 ? "#c00"
                 : status === "WARNING"
-                ? "#c90"
-                : "#0a7";
+                  ? "#c90"
+                  : "#0a7";
 
             return (
               <>
@@ -727,7 +842,7 @@ export default function DashboardScreen() {
                     </Text>
                     <Text style={styles.kpiValueDivider}> / </Text>
                     <Text style={styles.kpiValueSecondary}>
-                      {moneyHome(totalBudget, homeCurrency)}
+                      {moneyHome(totalBudgetHomeMinor, homeCurrency)}
                     </Text>
                   </Text>
                 </View>
@@ -761,7 +876,7 @@ export default function DashboardScreen() {
                 <Text style={CardSpacing.description}>
                   {tr(
                     "Auto total is the sum of your category limits.",
-                    "총 예산은 카테고리별 한도의 합으로 자동 계산돼요."
+                    "총 예산은 카테고리별 한도의 합으로 자동 계산돼요.",
                   )}
                 </Text>
               </>
@@ -771,7 +886,7 @@ export default function DashboardScreen() {
           <Text style={CardSpacing.description}>
             {tr(
               "Set category limits in Plan to generate your total budget automatically.",
-              "플랜에서 카테고리 예산을 설정하면 총 예산이 자동으로 계산돼요."
+              "플랜에서 카테고리 예산을 설정하면 총 예산이 자동으로 계산돼요.",
             )}
           </Text>
         )}
@@ -794,7 +909,7 @@ export default function DashboardScreen() {
           <Text style={CardSpacing.description}>
             {tr(
               "No categories are near or over their limits. Nice work.",
-              "설정한 예산 한도에 가까운/초과한 카테고리가 없어요. 잘하고 있어요!"
+              "설정한 예산 한도에 가까운/초과한 카테고리가 없어요. 잘하고 있어요!",
             )}
           </Text>
         ) : (
@@ -802,14 +917,14 @@ export default function DashboardScreen() {
             {budgetStatusRows.map((row) => {
               const pctLabel = Math.round(row.ratio * 100);
               const pctBar = Math.round(
-                Math.min(1, Math.max(0, row.ratio)) * 100
+                Math.min(1, Math.max(0, row.ratio)) * 100,
               );
               const color =
                 row.status === "OVER"
                   ? "#c00"
                   : row.status === "WARNING"
-                  ? "#c90"
-                  : "#0a7";
+                    ? "#c90"
+                    : "#0a7";
 
               return (
                 <View key={row.category}>
@@ -819,8 +934,8 @@ export default function DashboardScreen() {
                       {row.status === "OVER"
                         ? `↑ ${tr("Over", "초과")}`
                         : row.status === "WARNING"
-                        ? `→ ${tr("Warning", "주의")}`
-                        : `↓ ${tr("Safe", "안전")}`}
+                          ? `→ ${tr("Warning", "주의")}`
+                          : `↓ ${tr("Safe", "안전")}`}
                     </Text>
                   </View>
 
@@ -859,7 +974,7 @@ export default function DashboardScreen() {
             <Text style={CardSpacing.description}>
               {tr(
                 `Shows all budget categories you planned for this period. "Caution" starts at 80%.`,
-                `이번 기간에 계획한 모든 예산 카테고리를 보여줘요. "주의"는 80%부터 시작해요.`
+                `이번 기간에 계획한 모든 예산 카테고리를 보여줘요. "주의"는 80%부터 시작해요.`,
               )}
             </Text>
           </View>
@@ -1001,7 +1116,7 @@ export default function DashboardScreen() {
                 <Text style={CardSpacing.description}>
                   {tr(
                     "Total target is the sum of your savings goal targets.",
-                    "총 목표는 저축 목표들의 합이에요."
+                    "총 목표는 저축 목표들의 합이에요.",
                   )}
                 </Text>
 
@@ -1009,7 +1124,7 @@ export default function DashboardScreen() {
                   <Text style={CardSpacing.description}>
                     {tr(
                       "No savings goals with targets yet.",
-                      "아직 목표 금액이 있는 저축 목표가 없어요."
+                      "아직 목표 금액이 있는 저축 목표가 없어요.",
                     )}
                   </Text>
                 ) : (
@@ -1020,7 +1135,7 @@ export default function DashboardScreen() {
                     {savingsProgressRows.map((r) => {
                       const pctLabel = Math.round(r.ratio * 100);
                       const pctBar = Math.round(
-                        Math.min(1, Math.max(0, r.ratio)) * 100
+                        Math.min(1, Math.max(0, r.ratio)) * 100,
                       );
                       const done = r.ratio >= 1;
                       const rowColor = done ? "#0a7" : "#111";
@@ -1079,7 +1194,7 @@ export default function DashboardScreen() {
           <Text style={CardSpacing.description}>
             {tr(
               "Set savings targets in Plan to track your savings progress for this period.",
-              "플랜에서 저축 목표를 설정하면 이번 기간 저축 진행률을 추적할 수 있어요."
+              "플랜에서 저축 목표를 설정하면 이번 기간 저축 진행률을 추적할 수 있어요.",
             )}
           </Text>
         )}

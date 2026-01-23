@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { calcNextPeriodEnd, ensurePeriodEnd } from "@/lib/period";
-import type { PeriodType } from "@/lib/period";
+import { calcNextPeriodEnd, ensurePeriodEnd } from "@/lib/plan/periodRules";
+import type { PeriodType } from "@prisma/client";
 
 export async function POST() {
   console.log("[ROLL_OVER] called");
@@ -16,7 +16,7 @@ export async function POST() {
     if (!devUserId) {
       return NextResponse.json(
         { error: "DEV_USER_ID is not set (dev only)" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -28,7 +28,7 @@ export async function POST() {
     if (!user || !user.activePlan) {
       return NextResponse.json(
         { error: "No active plan found for user", userId: devUserId },
-        { status: 404 }
+        { status: 404 },
       );
     }
 
@@ -41,7 +41,7 @@ export async function POST() {
       current.periodStart,
       current.periodEnd,
       periodType,
-      user.timeZone
+      user.timeZone,
     );
 
     // 아직 기간 안 끝났으면 종료
@@ -173,7 +173,7 @@ export async function POST() {
     console.error("[PLAN_ROLLOVER_ERROR]", error);
     return NextResponse.json(
       { error: "Internal Server Error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

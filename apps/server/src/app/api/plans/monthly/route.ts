@@ -3,7 +3,7 @@ import { fromZonedTime, toZonedTime } from "date-fns-tz";
 import { NextRequest, NextResponse } from "next/server";
 // NOTE: Avoid importing model types (e.g., BudgetGoal) because some Prisma client builds may not export them reliably in this repo setup.
 import { prisma } from "@/lib/prisma";
-import { getMonthlyPeriodStartUTC } from "@/lib/period";
+import { getMonthlyPeriodStartUTC } from "@/lib/plan/periodRules";
 
 function getDevUserId(request: NextRequest, body?: unknown): string | null {
   if (process.env.NODE_ENV === "production") return null;
@@ -42,7 +42,7 @@ function parseAtToMonthStartUTC(atRaw: string, timeZone: string): Date | null {
 
 function parseAtToUTC(
   atRaw: string | null | undefined,
-  timeZone: string
+  timeZone: string,
 ): Date {
   const raw = String(atRaw || "").trim();
 
@@ -95,7 +95,7 @@ function parseAtToDate(atRaw: string | null | undefined): Date {
   if (Number.isNaN(parsed.getTime())) {
     const now = new Date();
     return new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0)
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0),
     );
   }
   return parsed;
@@ -136,7 +136,7 @@ function computeMonthlyPeriodStartSafe(timeZone: string, atDate: Date): Date {
   } catch {
     // Fallback: UTC month start based on atDate
     return new Date(
-      Date.UTC(atDate.getUTCFullYear(), atDate.getUTCMonth(), 1, 0, 0, 0, 0)
+      Date.UTC(atDate.getUTCFullYear(), atDate.getUTCMonth(), 1, 0, 0, 0, 0),
     );
   }
 }
@@ -144,7 +144,7 @@ function computeMonthlyPeriodStartSafe(timeZone: string, atDate: Date): Date {
 function monthKeyFromZoned(
   baseUTC: Date,
   timeZone: string,
-  offsetMonths: number
+  offsetMonths: number,
 ): string {
   const z = toZonedTime(baseUTC, timeZone);
   const y0 = z.getFullYear();
@@ -158,7 +158,7 @@ function monthKeyFromZoned(
 
 function monthlyPeriodStartUTCFromAt(
   atRaw: string | null | undefined,
-  timeZone: string
+  timeZone: string,
 ): Date {
   const atDate = parseAtToUTC(atRaw, timeZone);
   // For MONTHLY, our canonical periodStart is "local month start" converted to UTC.
@@ -183,7 +183,7 @@ export async function GET(request: NextRequest) {
       // DEV ONLY: userId is passed explicitly or resolved from DEV_USER_ID.
       // In production, this should come from auth/session.
       { error: "userId is required (dev only)" },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -215,7 +215,7 @@ export async function GET(request: NextRequest) {
         details: e?.message ?? String(e),
         debug: { at: atRaw || null, note: "Expected at=YYYY-MM" },
       },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -264,7 +264,7 @@ export async function GET(request: NextRequest) {
     });
 
     const byStart = new Map(
-      existing.map((p: any) => [p.periodStart.toISOString(), p] as const)
+      existing.map((p: any) => [p.periodStart.toISOString(), p] as const),
     );
 
     const items = starts
@@ -323,7 +323,7 @@ export async function GET(request: NextRequest) {
         periodType: "MONTHLY",
         periodStartUTC: periodStart.toISOString(),
       },
-      { status: 404 }
+      { status: 404 },
     );
   }
 
@@ -365,7 +365,7 @@ export async function POST(request: NextRequest) {
         // DEV ONLY: userId is passed explicitly or resolved from DEV_USER_ID.
         // In production, this should come from auth/session.
         { error: "userId is required (dev only)" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -405,7 +405,7 @@ export async function POST(request: NextRequest) {
           details: e?.message ?? String(e),
           debug: { at: atRaw || null, note: "Expected at=YYYY-MM" },
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -469,8 +469,8 @@ export async function POST(request: NextRequest) {
       error && typeof error.message === "string"
         ? error.message
         : typeof error === "string"
-        ? error
-        : "Internal server error";
+          ? error
+          : "Internal server error";
 
     const code =
       error && typeof error.code === "string" ? error.code : undefined;
@@ -488,7 +488,7 @@ export async function POST(request: NextRequest) {
             meta,
           }
         : { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -509,7 +509,7 @@ const patchMonthlyPlanSchema = z.object({
       z.object({
         category: z.string().min(1),
         limitMinor: z.number().int().nonnegative(),
-      })
+      }),
     )
     .optional(),
 
@@ -528,8 +528,8 @@ const patchMonthlyPlanSchema = z.object({
           {
             message:
               "savingsGoals[].targetMinor or savingsGoals[].targetCents is required",
-          }
-        )
+          },
+        ),
     )
     .optional(),
 });
@@ -542,7 +542,7 @@ export async function PATCH(request: NextRequest) {
     if (!parsed.success) {
       return NextResponse.json(
         { error: "Invalid body", details: parsed.error.flatten() },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -578,7 +578,7 @@ export async function PATCH(request: NextRequest) {
           details: e?.message ?? String(e),
           debug: { at: atRaw || null, note: "Expected at=YYYY-MM" },
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -636,7 +636,7 @@ export async function PATCH(request: NextRequest) {
           const category = String((g as any)?.category ?? "").trim();
           const limitMinor = Math.max(
             0,
-            Math.round(Number((g as any)?.limitMinor) || 0)
+            Math.round(Number((g as any)?.limitMinor) || 0),
           );
           if (!category) continue;
           byCategory.set(category, limitMinor);
@@ -721,8 +721,8 @@ export async function PATCH(request: NextRequest) {
     console.log(
       "[PATCH monthly] saved goals:",
       result?.budgetGoals?.find(
-        (g: { category: string }) => g.category === "Utilities"
-      )
+        (g: { category: string }) => g.category === "Utilities",
+      ),
     );
 
     return NextResponse.json({
@@ -745,8 +745,8 @@ export async function PATCH(request: NextRequest) {
       error && typeof error.message === "string"
         ? error.message
         : typeof error === "string"
-        ? error
-        : "Internal server error";
+          ? error
+          : "Internal server error";
 
     // Prisma errors often include `code` and `meta`
     const code =
@@ -765,7 +765,7 @@ export async function PATCH(request: NextRequest) {
             meta,
           }
         : { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

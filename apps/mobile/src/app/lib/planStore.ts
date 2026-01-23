@@ -98,6 +98,7 @@ type Store = {
 
   refreshPlan: () => Promise<boolean>;
   applyServerPlan: (serverPlan: {
+    language?: UILanguage | string | null;
     periodType?: PeriodType;
     // server may send DateTime ISO under either key
     periodStartUTC?: string;
@@ -142,7 +143,6 @@ type Store = {
   isLoading: boolean;
   initialize: () => Promise<void>;
 };
-
 
 const PlanContext = createContext<Store | null>(null);
 
@@ -257,7 +257,7 @@ function mergeBudgetGoalsWithDefaults(
     id?: string | null;
     category: string;
     limitMinor?: number | null;
-  }[]
+  }[],
 ): BudgetGoal[] {
   // Map by normalized category: { limit, id? }
   const byCat = new Map<string, { limit: number; id?: string }>();
@@ -304,7 +304,7 @@ function mergeSavingsGoals(
     id?: string | null;
     name: string;
     targetMinor?: number | null;
-  }[]
+  }[],
 ): SavingsGoal[] {
   const byName = new Map<string, { target: number; id?: string }>();
   serverGoals.forEach((g) => {
@@ -332,7 +332,7 @@ function mergeSavingsGoals(
 function sumBudgetLimits(goals: BudgetGoal[]) {
   return goals.reduce(
     (sum, g) => sum + (g.limitMinor > 0 ? g.limitMinor : 0),
-    0
+    0,
   );
 }
 
@@ -346,7 +346,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     const periodStartISO = periodStartFrom(
       DEFAULT_PERIOD_TYPE,
       new Date(),
-      DEFAULT_BIWEEKLY_ANCHOR_ISO
+      DEFAULT_BIWEEKLY_ANCHOR_ISO,
     );
 
     return {
@@ -379,7 +379,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   >(async () => {});
 
   const setTotalBudgetLimitMinor: Store["setTotalBudgetLimitMinor"] = (
-    minor
+    minor,
   ) => {
     const clean = Math.max(0, Number.isFinite(minor) ? Math.round(minor) : 0);
     setPlan((p) => ({ ...p, totalBudgetLimitMinor: clean }));
@@ -396,7 +396,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   };
 
   const setAdvancedCurrencyMode: Store["setAdvancedCurrencyMode"] = (
-    enabled
+    enabled,
   ) => {
     const on = !!enabled;
 
@@ -434,7 +434,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       const periodStartISO = periodStartFrom(
         nextType,
         new Date(),
-        p.periodAnchorISO ?? DEFAULT_BIWEEKLY_ANCHOR_ISO
+        p.periodAnchorISO ?? DEFAULT_BIWEEKLY_ANCHOR_ISO,
       );
       return {
         ...p,
@@ -456,15 +456,19 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         DEFAULT_PERIOD_TYPE) as PeriodType;
 
       const timeZone = (serverPlan as any)?.timeZone
-      ? String((serverPlan as any).timeZone)
-      : undefined;
+        ? String((serverPlan as any).timeZone)
+        : undefined;
 
       const periodStartUTC = (
-        serverPlan?.periodStartUTC ?? (serverPlan as any)?.periodStart ?? ""
+        serverPlan?.periodStartUTC ??
+        (serverPlan as any)?.periodStart ??
+        ""
       ).toString();
 
       const periodEndUTC = (
-        (serverPlan as any)?.periodEndUTC ?? (serverPlan as any)?.periodEnd ?? ""
+        (serverPlan as any)?.periodEndUTC ??
+        (serverPlan as any)?.periodEnd ??
+        ""
       ).toString();
 
       const periodAnchorUTC = (
@@ -478,12 +482,18 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
       const startDt = safeParseISODateTime(periodStartUTC);
-      const derivedStartISO = startDt ? toISODateInTimeZone(startDt, tzForDerive) : "";
+      const derivedStartISO = startDt
+        ? toISODateInTimeZone(startDt, tzForDerive)
+        : "";
 
       const anchorDt = safeParseISODateTime(periodAnchorUTC);
-      const derivedAnchorISO = anchorDt ? toISODateInTimeZone(anchorDt, tzForDerive) : "";
+      const derivedAnchorISO = anchorDt
+        ? toISODateInTimeZone(anchorDt, tzForDerive)
+        : "";
       const fallbackAnchorISO =
-        periodAnchorUTC && !derivedAnchorISO ? periodAnchorUTC.slice(0, 10) : "";
+        periodAnchorUTC && !derivedAnchorISO
+          ? periodAnchorUTC.slice(0, 10)
+          : "";
 
       const periodStartISO =
         derivedStartISO || (periodStartUTC ? periodStartUTC.slice(0, 10) : "");
@@ -503,12 +513,12 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         const defaults = buildDefaultBudgetGoals();
         const nextBudgetGoals = mergeBudgetGoalsWithDefaults(
           defaults,
-          serverBudgetGoals
+          serverBudgetGoals,
         );
 
         const nextSavingsGoals = mergeSavingsGoals(
           p.savingsGoals,
-          serverSavingsGoals
+          serverSavingsGoals,
         );
 
         const computedTotal = sumBudgetLimits(nextBudgetGoals);
@@ -517,28 +527,41 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
         const nextPeriodStartISO = periodStartISO || p.periodStartISO;
 
+        const normalizedLang: UILanguage | undefined =
+          serverPlan?.language == null
+            ? undefined
+            : String(serverPlan.language) === "ko"
+              ? "ko"
+              : "en";
+
         const next = {
           ...p,
+          language: normalizedLang ?? p.language ?? "en",
           periodType,
           periodAnchorISO:
             periodType === "BIWEEKLY"
-              ? (derivedAnchorISO || fallbackAnchorISO || p.periodAnchorISO)
+              ? derivedAnchorISO || fallbackAnchorISO || p.periodAnchorISO
               : p.periodAnchorISO,
           periodStartISO: nextPeriodStartISO,
           periodStartUTC: periodStartUTC || p.periodStartUTC,
           periodEndUTC: periodEndUTC || p.periodEndUTC,
           periodAnchorUTC: periodAnchorUTC || p.periodAnchorUTC,
           timeZone: timeZone ?? p.timeZone,
-          weekStartISO: periodType === "WEEKLY" ? nextPeriodStartISO : p.weekStartISO,
+          weekStartISO:
+            periodType === "WEEKLY" ? nextPeriodStartISO : p.weekStartISO,
           totalBudgetLimitMinor,
-          homeCurrency: serverPlan.homeCurrency ?? serverPlan.currency ?? p.homeCurrency,
+          homeCurrency:
+            serverPlan.homeCurrency ?? serverPlan.currency ?? p.homeCurrency,
           displayCurrency:
-            serverPlan.displayCurrency ?? serverPlan.currency ?? p.displayCurrency,
+            serverPlan.displayCurrency ??
+            serverPlan.currency ??
+            p.displayCurrency,
           budgetGoals: nextBudgetGoals,
           savingsGoals: nextSavingsGoals,
         };
 
         dlog("[applyServerPlan] applied:", {
+          language: serverPlan.language,
           periodType: next.periodType,
           currencyFromServer: serverPlan.currency,
           homeCurrency: next.homeCurrency,
@@ -557,11 +580,11 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
           dlog("[planStore] post-apply rollover check running");
           void tryRolloverIfNeededRef.current("resume");
         }, 0);
-        
+
         return next;
       });
     },
-    []
+    [],
   );
 
   const refreshPlan: Store["refreshPlan"] = useCallback(async () => {
@@ -572,34 +595,35 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     };
 
     // Helper to map raw server plan to applyServerPlan
-      const applyRawPlan = (raw: any) => {
-        applyServerPlan({
-          periodType: raw?.periodType,
-          // server may send DateTime ISO under either key
-          periodStartUTC: raw?.periodStartUTC ?? raw?.periodStart,
-          periodEndUTC: raw?.periodEndUTC ?? raw?.periodEnd,
-          periodAnchorUTC: raw?.periodAnchorUTC ?? raw?.periodAnchor,
-          timeZone: raw?.timeZone,
-          totalBudgetLimitMinor: raw?.totalBudgetLimitMinor ?? null,
-          currency: raw?.currency,
-          budgetGoals: Array.isArray(raw?.budgetGoals)
-            ? raw.budgetGoals.map((g: any) => ({
-                id: g.id ?? null,
-                category: g.category,
-                limitMinor:
-                  typeof g.limitMinor === "number" ? g.limitMinor : null,
-              }))
-            : null,
-          savingsGoals: Array.isArray(raw?.savingsGoals)
-            ? raw.savingsGoals.map((g: any) => ({
-                id: g.id ?? null,
-                name: g.name,
-                targetMinor:
-                  typeof g.targetMinor === "number" ? g.targetMinor : null,
-              }))
-            : null,
-        });
-      };
+    const applyRawPlan = (raw: any) => {
+      applyServerPlan({
+        language: raw?.language,
+        periodType: raw?.periodType,
+        // server may send DateTime ISO under either key
+        periodStartUTC: raw?.periodStartUTC ?? raw?.periodStart,
+        periodEndUTC: raw?.periodEndUTC ?? raw?.periodEnd,
+        periodAnchorUTC: raw?.periodAnchorUTC ?? raw?.periodAnchor,
+        timeZone: raw?.timeZone,
+        totalBudgetLimitMinor: raw?.totalBudgetLimitMinor ?? null,
+        currency: raw?.currency,
+        budgetGoals: Array.isArray(raw?.budgetGoals)
+          ? raw.budgetGoals.map((g: any) => ({
+              id: g.id ?? null,
+              category: g.category,
+              limitMinor:
+                typeof g.limitMinor === "number" ? g.limitMinor : null,
+            }))
+          : null,
+        savingsGoals: Array.isArray(raw?.savingsGoals)
+          ? raw.savingsGoals.map((g: any) => ({
+              id: g.id ?? null,
+              name: g.name,
+              targetMinor:
+                typeof g.targetMinor === "number" ? g.targetMinor : null,
+            }))
+          : null,
+      });
+    };
 
     try {
       // 1) active plan 조회
@@ -631,7 +655,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
           console.warn(
             "[planStore] Failed to create monthly plan",
             createRes.status,
-            text
+            text,
           );
           return false;
         }
@@ -647,7 +671,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         console.warn(
           "[planStore] Failed to refresh plan from server",
           res.status,
-          text
+          text,
         );
         return false;
       }
@@ -809,15 +833,25 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
           await refreshPlan();
         } else {
           // If server says nothing rolled, allow a future attempt (e.g., if clocks differ)
-          if (lastRolloverKeyRef.current === key) lastRolloverKeyRef.current = null;
+          if (lastRolloverKeyRef.current === key)
+            lastRolloverKeyRef.current = null;
         }
       } catch (e) {
         // On failure, release the key so a later resume/timer can retry
-        if (lastRolloverKeyRef.current === key) lastRolloverKeyRef.current = null;
+        if (lastRolloverKeyRef.current === key)
+          lastRolloverKeyRef.current = null;
         console.warn(`[planStore] rollover failed (${reason})`, e);
       }
     },
-    [isInitialized, isLoading, plan.periodType, plan.periodStartUTC, plan.periodEndUTC, postRollover, refreshPlan]
+    [
+      isInitialized,
+      isLoading,
+      plan.periodType,
+      plan.periodStartUTC,
+      plan.periodEndUTC,
+      postRollover,
+      refreshPlan,
+    ],
   );
 
   useEffect(() => {
@@ -927,7 +961,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
           console.warn(
             "[planStore] switchPlanCurrency failed",
             res.status,
-            text
+            text,
           );
           return false;
         }
@@ -935,6 +969,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         const raw = await res.json();
 
         applyServerPlan({
+          language: raw?.language,
           periodType: raw?.periodType,
           periodStartUTC: raw?.periodStartUTC ?? raw?.periodStart,
           periodEndUTC: raw?.periodEndUTC ?? raw?.periodEnd,
@@ -966,7 +1001,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
     },
-    [plan, applyServerPlan]
+    [plan, applyServerPlan],
   );
 
   const switchPeriodType: Store["switchPeriodType"] = useCallback(
@@ -1008,7 +1043,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
           console.warn(
             "[planStore] Failed to switch period type",
             res.status,
-            text
+            text,
           );
           return false;
         }
@@ -1017,6 +1052,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
         // Apply server plan (source of truth)
         applyServerPlan({
+          language: raw?.language,
           periodType: raw?.periodType,
           periodStartUTC: raw?.periodStartUTC ?? raw?.periodStart,
           periodEndUTC: raw?.periodEndUTC ?? raw?.periodEnd,
@@ -1049,54 +1085,61 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
     },
-    [plan, applyServerPlan]
+    [plan, applyServerPlan],
   );
 
-  const refreshPeriodIfNeeded: Store["refreshPeriodIfNeeded"] = useCallback(() => {
-    setPlan((p) => {
-      // If server provided precise UTC bounds, don't "recompute" locally.
-      // We only keep UI date-only fields in sync with the server boundaries.
-      const tz = p.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  const refreshPeriodIfNeeded: Store["refreshPeriodIfNeeded"] =
+    useCallback(() => {
+      setPlan((p) => {
+        // If server provided precise UTC bounds, don't "recompute" locally.
+        // We only keep UI date-only fields in sync with the server boundaries.
+        const tz =
+          p.timeZone ||
+          Intl.DateTimeFormat().resolvedOptions().timeZone ||
+          "UTC";
 
-      // If plan already ended, do nothing here. Rollover logic will create/apply next plan.
-      if (p.periodEndUTC) {
-        const endMs = Date.parse(p.periodEndUTC);
-        if (Number.isFinite(endMs) && Date.now() >= endMs) {
-          return p;
+        // If plan already ended, do nothing here. Rollover logic will create/apply next plan.
+        if (p.periodEndUTC) {
+          const endMs = Date.parse(p.periodEndUTC);
+          if (Number.isFinite(endMs) && Date.now() >= endMs) {
+            return p;
+          }
         }
-      }
 
-      if (p.periodStartUTC) {
-        const startDt = safeParseISODateTime(p.periodStartUTC);
-        if (!startDt) return p;
+        if (p.periodStartUTC) {
+          const startDt = safeParseISODateTime(p.periodStartUTC);
+          if (!startDt) return p;
 
-        const expectedStartISO = toISODateInTimeZone(startDt, tz);
-        if (!expectedStartISO || p.periodStartISO === expectedStartISO) return p;
+          const expectedStartISO = toISODateInTimeZone(startDt, tz);
+          if (!expectedStartISO || p.periodStartISO === expectedStartISO)
+            return p;
+
+          return {
+            ...p,
+            periodStartISO: expectedStartISO,
+            // Keep legacy field aligned for WEEKLY
+            weekStartISO:
+              p.periodType === "WEEKLY" ? expectedStartISO : p.weekStartISO,
+          };
+        }
+
+        // Fallback: older flows before server boundaries were standardized.
+        const expectedStartISO = periodStartFrom(
+          p.periodType,
+          new Date(),
+          p.periodAnchorISO ?? DEFAULT_BIWEEKLY_ANCHOR_ISO,
+        );
+
+        if (p.periodStartISO === expectedStartISO) return p;
 
         return {
           ...p,
           periodStartISO: expectedStartISO,
-          // Keep legacy field aligned for WEEKLY
-          weekStartISO: p.periodType === "WEEKLY" ? expectedStartISO : p.weekStartISO,
+          weekStartISO:
+            p.periodType === "WEEKLY" ? expectedStartISO : p.weekStartISO,
         };
-      }
-
-      // Fallback: older flows before server boundaries were standardized.
-      const expectedStartISO = periodStartFrom(
-        p.periodType,
-        new Date(),
-        p.periodAnchorISO ?? DEFAULT_BIWEEKLY_ANCHOR_ISO
-      );
-
-      if (p.periodStartISO === expectedStartISO) return p;
-
-      return {
-        ...p,
-        periodStartISO: expectedStartISO,
-        weekStartISO: p.periodType === "WEEKLY" ? expectedStartISO : p.weekStartISO,
-      };
-    });
-  }, []);
+      });
+    }, []);
 
   const initialize: Store["initialize"] = useCallback(async () => {
     if (isInitialized || isLoading) return;
@@ -1128,12 +1171,12 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
   const upsertBudgetGoalLimit: Store["upsertBudgetGoalLimit"] = (
     category,
-    limitMinor
+    limitMinor,
   ) => {
     const cat = (category || "Other").toString().trim() || "Other";
     const cleanLimit = Math.max(
       0,
-      Number.isFinite(limitMinor) ? Math.round(limitMinor) : 0
+      Number.isFinite(limitMinor) ? Math.round(limitMinor) : 0,
     );
 
     setPlan((p) => {
@@ -1152,7 +1195,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
       const total = nextGoals.reduce(
         (sum, g) => sum + (g.limitMinor > 0 ? g.limitMinor : 0),
-        0
+        0,
       );
 
       return {
@@ -1165,12 +1208,12 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
   const upsertSavingsGoalTarget: Store["upsertSavingsGoalTarget"] = (
     name,
-    targetMinor
+    targetMinor,
   ) => {
     const n = (name || "Other").toString().trim() || "Other";
     const clean = Math.max(
       0,
-      Number.isFinite(targetMinor) ? Math.round(targetMinor) : 0
+      Number.isFinite(targetMinor) ? Math.round(targetMinor) : 0,
     );
 
     setPlan((p) => {
@@ -1198,7 +1241,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     const n = (name || "").trim();
     const t = Math.max(
       0,
-      Number.isFinite(targetMinor) ? Math.round(targetMinor) : 0
+      Number.isFinite(targetMinor) ? Math.round(targetMinor) : 0,
     );
     if (!n || t <= 0) return;
 
@@ -1261,7 +1304,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       isInitialized,
       isLoading,
       initialize,
-    ]
+    ],
   );
 
   return React.createElement(PlanContext.Provider, { value: store }, children);
