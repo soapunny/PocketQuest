@@ -52,6 +52,12 @@ model User {
   // IANA timezone identifier (e.g., "America/New_York") used to compute plan period boundaries.
   timeZone        String  @default("America/New_York") //default value: America/New_York
 
+  // Preferred display / planning currency for this user (used as a default for new plans).
+  currency        CurrencyCode @default(USD)
+
+  // Preferred UI language for this user.
+  language        LanguageCode @default(en)
+
   provider   AuthProvider //auth provider type(GOOGLE, KAKAO, etc.)
   providerId String //auth provider id(google id, kakao id, etc. external id)
 
@@ -103,6 +109,10 @@ model Plan {
   activeForUser User? @relation("ActivePlan")
 
   periodType PeriodType //period type(WEEKLY, BIWEEKLY, MONTHLY)
+  // Snapshot of the user's timezone at plan creation.
+  // Policy A: period boundaries for this plan must be computed using THIS timezone
+  // even if the user later changes their profile timezone.
+  timeZone   String @default("America/New_York")
   // For BIWEEKLY: optional anchor date (e.g., Monday) used to compute biweekly boundaries.
   periodAnchor DateTime? @db.Timestamptz(6) //optional anchor date(e.g., Monday) used to compute biweekly boundaries.
   // Start of the plan period (e.g., first day of month/week)

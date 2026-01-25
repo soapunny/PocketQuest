@@ -1,4 +1,4 @@
-import { PeriodType, CurrencyCode, LanguageCode } from "@prisma/client";
+import { PeriodType } from "@prisma/client";
 
 import {
   getMonthlyPeriodStartUTC,
@@ -187,86 +187,5 @@ export function computePeriodWindowForPlan(args: {
     timeZone: args.timeZone,
     now: args.now,
     periodAnchorUTC: args.periodAnchorUTC ?? null,
-  });
-}
-
-/**
- * Data shape used by routes when creating a new Plan.
- * NOTE: Plan does NOT have `timeZone` (it's on User). Do not add it here.
- */
-export type NewPlanCreateData = {
-  userId: string;
-  periodType: PeriodType;
-  periodStart: Date;
-  periodEnd: Date;
-  periodAnchor: Date | null;
-  currency: CurrencyCode;
-  language: LanguageCode;
-  totalBudgetLimitMinor: number;
-};
-
-/**
- * Build Plan.create data using canonical period rules.
- *
- * Use this for:
- * - initial plan creation
- * - currency switch (new plan)
- * - any place you want a fresh plan record
- */
-export function buildNewPlanCreateData(params: {
-  userId: string;
-  periodType: PeriodType;
-  timeZone: string;
-  currency: CurrencyCode;
-  language: LanguageCode;
-  totalBudgetLimitMinor: number;
-  now?: Date;
-  periodAnchorUTC?: Date | null;
-}): NewPlanCreateData {
-  const window = computePeriodWindow({
-    periodType: params.periodType,
-    timeZone: params.timeZone,
-    now: params.now,
-    periodAnchorUTC: params.periodAnchorUTC ?? null,
-  });
-
-  return {
-    userId: params.userId,
-    periodType: window.periodType,
-    periodStart: window.periodStartUTC,
-    periodEnd: window.periodEndUTC,
-    periodAnchor: window.periodAnchorUTC,
-    currency: params.currency,
-    language: params.language,
-    totalBudgetLimitMinor: params.totalBudgetLimitMinor,
-  };
-}
-
-/**
- * Utility for currency switch: keep the SAME period rules, but change currency.
- * This creates a *new* plan window for "now" (not a naive copy).
- */
-export function buildCurrencySwitchPlanCreateData(params: {
-  userId: string;
-  current: {
-    periodType: PeriodType;
-    periodAnchorUTC: Date | null;
-    currency: CurrencyCode;
-    language: LanguageCode;
-    totalBudgetLimitMinor: number;
-  };
-  timeZone: string;
-  nextCurrency: CurrencyCode;
-  now?: Date;
-}): NewPlanCreateData {
-  return buildNewPlanCreateData({
-    userId: params.userId,
-    periodType: params.current.periodType,
-    timeZone: params.timeZone,
-    currency: params.nextCurrency,
-    language: params.current.language,
-    totalBudgetLimitMinor: params.current.totalBudgetLimitMinor,
-    now: params.now,
-    periodAnchorUTC: params.current.periodAnchorUTC,
   });
 }

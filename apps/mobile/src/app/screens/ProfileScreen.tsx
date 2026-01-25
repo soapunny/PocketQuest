@@ -2,16 +2,16 @@ import { useLayoutEffect, useMemo } from "react";
 import { View, Text, StyleSheet, Image, Pressable } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 
-import { useAuth } from "../lib/authStore";
-import { usePlan } from "../lib/planStore";
-import { useTransactions } from "../lib/transactionsStore";
-import { computeAllTimePlanProgressPercent } from "../lib/planProgress";
+import { useAuth } from "../store/authStore";
+import { usePlan } from "../store/planStore";
+import { useTransactions } from "../store/transactionsStore";
+import { computeAllTimePlanProgressPercent } from "../domain/plan/progress";
 import ScreenHeader from "../components/layout/ScreenHeader";
 import ScreenLayout from "../components/layout/ScreenLayout";
 import ScreenCard from "../components/layout/ScreenCard";
 import { CardSpacing } from "../components/Typography";
-import type { Currency } from "../lib/currency";
-import { formatMoney, convertMinor } from "../lib/currency";
+import type { Currency } from "../domain/money/currency";
+import { formatMoney, convertMinor } from "../domain/money/currency";
 
 function absMinor(n: any) {
   const v = typeof n === "number" ? n : Number(n);
@@ -27,8 +27,8 @@ function txToHomeMinor(tx: any, homeCurrency: Currency): number {
     typeof tx?.amountMinor === "number"
       ? tx.amountMinor
       : typeof tx?.amountMinor === "number"
-      ? tx.amountMinor
-      : 0;
+        ? tx.amountMinor
+        : 0;
 
   if (!Number.isFinite(rawAmount) || rawAmount === 0) return 0;
 
@@ -42,7 +42,7 @@ function txToHomeMinor(tx: any, homeCurrency: Currency): number {
   if (!Number.isFinite(fx) || fx <= 0) return 0;
 
   const convertedAbs = absMinor(
-    convertMinor(amountAbs, currency, homeCurrency, fx)
+    convertMinor(amountAbs, currency, homeCurrency, fx),
   );
   return sign * convertedAbs;
 }
@@ -146,7 +146,7 @@ export default function ProfileScreen() {
         <Text style={CardSpacing.description}>
           {tr(
             "Overall plan completion rate across all periods",
-            "모든 기간에 걸친 전체 계획 완료율"
+            "모든 기간에 걸친 전체 계획 완료율",
           )}
         </Text>
       </ScreenCard>
@@ -161,7 +161,7 @@ export default function ProfileScreen() {
         <Text style={CardSpacing.description}>
           {tr(
             "Total amount saved across all periods",
-            "모든 기간에 걸쳐 저축한 총 금액"
+            "모든 기간에 걸쳐 저축한 총 금액",
           )}
         </Text>
       </ScreenCard>

@@ -3,8 +3,8 @@ import { View, Text, StyleSheet, Image, Pressable, Alert, Platform } from "react
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
-import { useAuth } from "../lib/authStore";
-import { usePlan } from "../lib/planStore";
+import { useAuth } from "../store/authStore";
+import { usePlan } from "../store/planStore";
 import LoadingButton from "../components/LoadingButton";
 
 type RouteParams = {

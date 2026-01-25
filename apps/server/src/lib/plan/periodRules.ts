@@ -27,6 +27,200 @@ import { PeriodType } from "@prisma/client";
 const WEEK_DAYS = 7;
 const BIWEEK_DAYS = 14;
 
+// ---- Route-facing helpers (keep routing code declarative) ----
+
+/**
+ * Interpret YYYY-MM-DD as local midnight in `timeZone`, then convert that instant to UTC.
+ * This is for API inputs where the client sends a "local day identifier".
+ */
+export function isoLocalDayToUTCDate(timeZone: string, iso: unknown): Date {
+  const tz = normalizeTimeZone(timeZone);
+  const s = typeof iso === "string" ? iso.trim() : String(iso ?? "").trim();
+
+  // Basic ISO date (local day) validation: YYYY-MM-DD
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    throw new Error(`Invalid ISO local-day date: ${s}`);
+  }
+
+  return fromZonedTime(`${s}T00:00:00`, tz);
+}
+
+/** Parse monthly "at" helper (YYYY-MM). */
+export function parseMonthlyAtOrNull(
+  at: unknown,
+): { year: number; monthIndex: number } | null {
+  if (typeof at !== "string") return null;
+  const s = at.trim();
+  const m = /^(\d{4})-(\d{2})$/.exec(s);
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  if (!Number.isFinite(year) || !Number.isFinite(month)) return null;
+  if (month < 1 || month > 12) return null;
+  return { year, monthIndex: month - 1 };
+}
+
+/**
+ * Monthly periodStart (UTC) for an explicit at=YYYY-MM (user's local month).
+ */
+export function getMonthlyPeriodStartUTCForAt(
+  timeZone: string,
+  at: { year: number; monthIndex: number },
+): Date {
+  const tz = normalizeTimeZone(timeZone);
+  const y = at.year;
+  const mm = String(at.monthIndex + 1).padStart(2, "0");
+  return fromZonedTime(`${y}-${mm}-01T00:00:00`, tz);
+}
+
+/**
+ * Build a list of MONTHLY periodStart UTC instants aligned to the user's timezone.
+ * - months: how many months to include, counting backwards from `at` (or current month if omitted)
+ */
+function buildMonthlyStartListUTC(params: {
+  timeZone: string;
+  at?: unknown;
+  months?: unknown;
+  now?: Date;
+}): Date[] {
+  const tz = normalizeTimeZone(params.timeZone);
+  const baseNow = isValidDate(params.now) ? (params.now as Date) : new Date();
+
+  const monthsNRaw =
+    typeof params.months === "string" ? Number(params.months) : NaN;
+  const monthsN = Number.isFinite(monthsNRaw)
+    ? Math.max(1, Math.trunc(monthsNRaw))
+    : 1;
+
+  const atParsed = parseMonthlyAtOrNull(params.at);
+  const baseStartUTC = atParsed
+    ? getMonthlyPeriodStartUTCForAt(tz, atParsed)
+    : getMonthlyPeriodStartUTC(tz, baseNow);
+
+  const baseZoned = toZonedTime(baseStartUTC, tz);
+
+  const starts: Date[] = [];
+  for (let i = 0; i < monthsN; i++) {
+    const d = new Date(
+      baseZoned.getFullYear(),
+      baseZoned.getMonth() - i,
+      1,
+      0,
+      0,
+      0,
+      0,
+    );
+    starts.push(fromZonedTime(d, tz));
+  }
+
+  return starts;
+}
+
+/**
+ * Build a list of WEEKLY periodStart UTC instants aligned to the plan's timezone.
+ * - count: how many periods to include, counting backwards from `startUTC` (inclusive)
+ */
+function buildWeeklyStartListUTC(params: {
+  timeZone: string;
+  startUTC: Date;
+  count: number;
+}): Date[] {
+  const tz = normalizeTimeZone(params.timeZone);
+  const baseStartUTC = isValidDate(params.startUTC)
+    ? params.startUTC
+    : new Date();
+  const n = Number.isFinite(params.count)
+    ? Math.min(52, Math.max(1, Math.trunc(params.count)))
+    : 3;
+
+  // Snap to local midnight of the provided start boundary
+  const startLocal = toZonedTime(baseStartUTC, tz);
+  const startLocalMidnight = new Date(
+    startLocal.getFullYear(),
+    startLocal.getMonth(),
+    startLocal.getDate(),
+    0,
+    0,
+    0,
+    0,
+  );
+
+  const starts: Date[] = [];
+  for (let i = 0; i < n; i++) {
+    const d = addDays(startLocalMidnight, -WEEK_DAYS * i);
+    starts.push(fromZonedTime(d, tz));
+  }
+  return starts;
+}
+
+/**
+ * Build a list of BIWEEKLY periodStart UTC instants aligned to the plan's timezone.
+ * - count: how many periods to include, counting backwards from `startUTC` (inclusive)
+ */
+function buildBiweeklyStartListUTC(params: {
+  timeZone: string;
+  startUTC: Date;
+  count: number;
+}): Date[] {
+  const tz = normalizeTimeZone(params.timeZone);
+  const baseStartUTC = isValidDate(params.startUTC)
+    ? params.startUTC
+    : new Date();
+  const n = Number.isFinite(params.count)
+    ? Math.min(52, Math.max(1, Math.trunc(params.count)))
+    : 3;
+
+  // Snap to local midnight of the provided start boundary
+  const startLocal = toZonedTime(baseStartUTC, tz);
+  const startLocalMidnight = new Date(
+    startLocal.getFullYear(),
+    startLocal.getMonth(),
+    startLocal.getDate(),
+    0,
+    0,
+    0,
+    0,
+  );
+
+  const starts: Date[] = [];
+  for (let i = 0; i < n; i++) {
+    const d = addDays(startLocalMidnight, -BIWEEK_DAYS * i);
+    starts.push(fromZonedTime(d, tz));
+  }
+  return starts;
+}
+
+/**
+ * Entrance: build a list of periodStart UTC instants for navigation.
+ * - WEEKLY/BIWEEKLY: uses `startUTC` as the current period boundary and walks backwards.
+ * - MONTHLY: uses `at` (YYYY-MM) if provided; otherwise uses `now` to pick the current month.
+ */
+export function buildPeriodStartListUTC(params: {
+  periodType: PeriodType;
+  timeZone: string;
+  startUTC: Date;
+  count: number;
+  at?: unknown;
+  now?: Date;
+}): Date[] {
+  const { periodType, timeZone, startUTC, count, at, now } = params;
+
+  switch (periodType) {
+    case PeriodType.WEEKLY:
+      return buildWeeklyStartListUTC({ timeZone, startUTC, count });
+    case PeriodType.BIWEEKLY:
+      return buildBiweeklyStartListUTC({ timeZone, startUTC, count });
+    case PeriodType.MONTHLY:
+    default:
+      return buildMonthlyStartListUTC({
+        timeZone,
+        at,
+        months: String(count),
+        now,
+      });
+  }
+}
+
 function utcDayStart(d: Date): Date {
   const base = isValidDate(d) ? d : new Date();
   return new Date(

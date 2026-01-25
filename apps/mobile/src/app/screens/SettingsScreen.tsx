@@ -1,7 +1,7 @@
 import React, { useMemo } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
-import { usePlan, DEFAULT_BIWEEKLY_ANCHOR_ISO, type PeriodType, type UILanguage  } from "../lib/planStore";
-import type { Currency } from "../lib/currency";
+import { usePlan, type PeriodType, type UILanguage  } from "../store/planStore";
+import type { Currency } from "../domain/money/currency";
 import ScreenHeader from "../components/layout/ScreenHeader";
 import ScreenLayout from "../components/layout/ScreenLayout";
 
@@ -156,14 +156,7 @@ export default function SettingsScreen() {
           {OPTIONS.find((o) => o.value === current)?.help}
         </Text>
 
-        {current === "BIWEEKLY" ? (
-          <Text style={styles.help}>
-            {isKo ? "기준일:" : "Anchor:"}{" "}
-            <Text style={{ fontWeight: "900" }}>
-              {plan.periodAnchorISO ?? DEFAULT_BIWEEKLY_ANCHOR_ISO}
-            </Text>
-          </Text>
-        ) : null}
+        {/* Server-driven: no client-side anchor/boundary calculations */}
       </View>
 
       <View style={styles.card}>

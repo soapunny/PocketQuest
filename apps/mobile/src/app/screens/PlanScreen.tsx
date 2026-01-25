@@ -9,19 +9,23 @@ import {
   Alert,
 } from "react-native";
 
-import { usePlan, getPlanState } from "../lib/planStore";
-import { patchPlan, upsertPlan } from "../lib/api/plans";
-import { useTransactions } from "../lib/transactionsStore";
-import { EXPENSE_CATEGORIES, SAVINGS_GOALS } from "../lib/categories";
-
+import { usePlan, getPlanState } from "../store/planStore";
+import { plansApi } from "../api/plansApi";
+import { useTransactions } from "../store/transactionsStore";
 import {
-  computePlanProgressPercent,
-  getPlanPeriodRange,
-  isISOInRange,
-} from "../lib/planProgress";
+  EXPENSE_CATEGORIES,
+  SAVINGS_GOALS,
+} from "../domain/transactions/categories";
 
-import type { Currency } from "../lib/currency";
-import { convertMinor, formatMoney, parseInputToMinor } from "../lib/currency";
+import { computePlanProgressPercent } from "../domain/plan/progress";
+import { getPlanPeriodRange, isISOInRange } from "../domain/plan/period/index";
+
+import type { Currency } from "../domain/money/currency";
+import {
+  convertMinor,
+  formatMoney,
+  parseInputToMinor,
+} from "../domain/money/currency";
 import { CardSpacing } from "../components/Typography";
 import ScreenHeader from "../components/layout/ScreenHeader";
 import ScreenLayout from "../components/layout/ScreenLayout";
@@ -97,14 +101,11 @@ export default function PlanScreen() {
     "USD") as Currency;
   const { transactions } = useTransactions();
 
-  // DEV ONLY: read from Expo public env so 각자 로컬 .env.development에서 설정 가능
-  // 예: EXPO_PUBLIC_DEV_USER_ID=cmjw3lb0d000076zuddg5lo6o
-  const DEV_USER_ID = process.env.EXPO_PUBLIC_DEV_USER_ID;
   const [serverHydrating, setServerHydrating] = useState(true);
 
   const lastHydrateKeyRef = useRef<string>("");
 
-  const { startISO, endISO, type } = useMemo(
+  const { startISO, endISO, periodType } = useMemo(
     () => getPlanPeriodRange(plan as any),
     [plan],
   );
@@ -120,43 +121,25 @@ export default function PlanScreen() {
     if (fromPlan) return fromPlan;
 
     // For biweekly, if no anchor is present yet, use the current period start as the anchor.
-    if (type === "BIWEEKLY") return periodStartUTC;
+    if (periodType === "BIWEEKLY") return periodStartUTC;
 
     return "";
-  }, [plan, type, periodStartUTC]);
+  }, [plan, periodType, periodStartUTC]);
 
   // Initial server sync (period-aware)
   useEffect(() => {
     let mounted = true;
-    const hydrateKey = `${type}|${startISO || ""}`;
+    const hydrateKey = `${periodType}|${startISO || ""}`;
     if (lastHydrateKeyRef.current === hydrateKey) return;
     lastHydrateKeyRef.current = hydrateKey;
 
     const load = async () => {
       try {
         setServerHydrating(true);
-        // Hydrate the server plan that matches the currently selected period
-        if (__DEV__ && !DEV_USER_ID) {
-          warnPlanDevOnce(
-            "[PlanScreen] Missing EXPO_PUBLIC_DEV_USER_ID. Skipping server hydration in DEV.",
-          );
-          return;
-        }
-
-        const res: any = await upsertPlan({
-          userId: DEV_USER_ID,
-          periodType: type as any,
-          periodStartUTC,
-          ...(type === "BIWEEKLY"
-            ? {
-                // Server requires an anchor for biweekly boundaries.
-                periodAnchorUTC: periodAnchorUTC || periodStartUTC,
-              }
-            : {}),
-        });
+        const res: any = await plansApi.get("");
         if (!mounted) return;
 
-        const sp = res?.plan;
+        const sp = res;
         if (!sp) return;
 
         // Normalize server fields -> app store shape
@@ -206,19 +189,26 @@ export default function PlanScreen() {
     return () => {
       mounted = false;
     };
-  }, [applyServerPlan, plan, startISO, type, periodStartUTC, periodAnchorUTC]);
+  }, [
+    applyServerPlan,
+    plan,
+    startISO,
+    periodType,
+    periodStartUTC,
+    periodAnchorUTC,
+  ]);
 
   const periodLabel =
-    type === "MONTHLY"
+    periodType === "MONTHLY"
       ? tr("Monthly", "월간")
-      : type === "BIWEEKLY"
+      : periodType === "BIWEEKLY"
         ? tr("Bi-weekly", "2주")
         : tr("Weekly", "주간");
 
   const periodText =
-    type === "MONTHLY"
+    periodType === "MONTHLY"
       ? tr("this month", "이번 달")
-      : type === "BIWEEKLY"
+      : periodType === "BIWEEKLY"
         ? tr("this 2 weeks", "이번 2주")
         : tr("this week", "이번 주");
 
@@ -305,7 +295,7 @@ export default function PlanScreen() {
   }, [plan, transactions]);
 
   const applyServerResponse = (res: any) => {
-    const sp: any = res?.plan;
+    const sp: any = res;
     if (!sp) return;
 
     // 서버에서 내려온 "부분 goals"을 기존 plan과 merge
@@ -374,22 +364,10 @@ export default function PlanScreen() {
         setSelectedLimit("");
         upsertBudgetGoalLimit(selectedCategory, 0);
 
-        if (__DEV__ && !DEV_USER_ID) {
-          Alert.alert(
-            tr("Save failed", "저장 실패"),
-            tr(
-              "Missing DEV user id. Set EXPO_PUBLIC_DEV_USER_ID in your Expo env.",
-              "DEV 유저 ID가 없어요. EXPO_PUBLIC_DEV_USER_ID를 설정해 주세요.",
-            ),
-          );
-          return;
-        }
-
-        const res = await patchPlan({
-          userId: DEV_USER_ID,
-          periodType: type as any,
+        const res = await plansApi.update("", {
+          periodType: periodType as any,
           periodStartUTC,
-          ...(type === "BIWEEKLY" ? { periodAnchorUTC } : {}),
+          ...(periodType === "BIWEEKLY" ? { periodAnchorUTC } : {}),
           budgetGoals: [{ category: selectedCategory, limitMinor: 0 }],
         });
 
@@ -400,22 +378,10 @@ export default function PlanScreen() {
       // optimistic local update
       upsertBudgetGoalLimit(selectedCategory, v);
 
-      if (__DEV__ && !DEV_USER_ID) {
-        Alert.alert(
-          tr("Save failed", "저장 실패"),
-          tr(
-            "Missing DEV user id. Set EXPO_PUBLIC_DEV_USER_ID in your Expo env.",
-            "DEV 유저 ID가 없어요. EXPO_PUBLIC_DEV_USER_ID를 설정해 주세요.",
-          ),
-        );
-        return;
-      }
-
-      const res = await patchPlan({
-        userId: DEV_USER_ID,
-        periodType: type as any,
+      const res = await plansApi.update("", {
+        periodType: periodType as any,
         periodStartUTC,
-        ...(type === "BIWEEKLY" ? { periodAnchorUTC } : {}),
+        ...(periodType === "BIWEEKLY" ? { periodAnchorUTC } : {}),
         budgetGoals: [{ category: selectedCategory, limitMinor: v }],
       });
 
@@ -439,22 +405,10 @@ export default function PlanScreen() {
       // optimistic local update
       upsertBudgetGoalLimit(selectedCategory, 0);
 
-      if (__DEV__ && !DEV_USER_ID) {
-        Alert.alert(
-          tr("Save failed", "저장 실패"),
-          tr(
-            "Missing DEV user id. Set EXPO_PUBLIC_DEV_USER_ID in your Expo env.",
-            "DEV 유저 ID가 없어요. EXPO_PUBLIC_DEV_USER_ID를 설정해 주세요.",
-          ),
-        );
-        return;
-      }
-
-      const res = await patchPlan({
-        userId: DEV_USER_ID,
-        periodType: type as any,
+      const res = await plansApi.update("", {
+        periodType: periodType as any,
         periodStartUTC,
-        ...(type === "BIWEEKLY" ? { periodAnchorUTC } : {}),
+        ...(periodType === "BIWEEKLY" ? { periodAnchorUTC } : {}),
         budgetGoals: [{ category: selectedCategory, limitMinor: 0 }],
       });
 
@@ -620,22 +574,10 @@ export default function PlanScreen() {
         setSelectedSavingsTarget("");
         upsertSavingsGoalTarget(selectedSavingsGoal, 0);
 
-        if (__DEV__ && !DEV_USER_ID) {
-          Alert.alert(
-            tr("Save failed", "저장 실패"),
-            tr(
-              "Missing DEV user id. Set EXPO_PUBLIC_DEV_USER_ID in your Expo env.",
-              "DEV 유저 ID가 없어요. EXPO_PUBLIC_DEV_USER_ID를 설정해 주세요.",
-            ),
-          );
-          return;
-        }
-
-        const res = await patchPlan({
-          userId: DEV_USER_ID,
-          periodType: type as any,
+        const res = await plansApi.update("", {
+          periodType: periodType as any,
           periodStartUTC,
-          ...(type === "BIWEEKLY" ? { periodAnchorUTC } : {}),
+          ...(periodType === "BIWEEKLY" ? { periodAnchorUTC } : {}),
           savingsGoals: [{ name: selectedSavingsGoal, targetMinor: 0 }],
         });
 
@@ -646,22 +588,10 @@ export default function PlanScreen() {
       // optimistic local update
       upsertSavingsGoalTarget(selectedSavingsGoal, v);
 
-      if (__DEV__ && !DEV_USER_ID) {
-        Alert.alert(
-          tr("Save failed", "저장 실패"),
-          tr(
-            "Missing DEV user id. Set EXPO_PUBLIC_DEV_USER_ID in your Expo env.",
-            "DEV 유저 ID가 없어요. EXPO_PUBLIC_DEV_USER_ID를 설정해 주세요.",
-          ),
-        );
-        return;
-      }
-
-      const res = await patchPlan({
-        userId: DEV_USER_ID,
-        periodType: type as any,
+      const res = await plansApi.update("", {
+        periodType: periodType as any,
         periodStartUTC,
-        ...(type === "BIWEEKLY" ? { periodAnchorUTC } : {}),
+        ...(periodType === "BIWEEKLY" ? { periodAnchorUTC } : {}),
         savingsGoals: [{ name: selectedSavingsGoal, targetMinor: v }],
       });
 
@@ -685,22 +615,10 @@ export default function PlanScreen() {
       // optimistic local update
       upsertSavingsGoalTarget(selectedSavingsGoal, 0);
 
-      if (__DEV__ && !DEV_USER_ID) {
-        Alert.alert(
-          tr("Save failed", "저장 실패"),
-          tr(
-            "Missing DEV user id. Set EXPO_PUBLIC_DEV_USER_ID in your Expo env.",
-            "DEV 유저 ID가 없어요. EXPO_PUBLIC_DEV_USER_ID를 설정해 주세요.",
-          ),
-        );
-        return;
-      }
-
-      const res = await patchPlan({
-        userId: DEV_USER_ID,
-        periodType: type as any,
+      const res = await plansApi.update("", {
+        periodType: periodType as any,
         periodStartUTC,
-        ...(type === "BIWEEKLY" ? { periodAnchorUTC } : {}),
+        ...(periodType === "BIWEEKLY" ? { periodAnchorUTC } : {}),
         savingsGoals: [{ name: selectedSavingsGoal, targetMinor: 0 }],
       });
 
@@ -721,7 +639,7 @@ export default function PlanScreen() {
       budgetGoals: plan.budgetGoals.length,
       savingsGoals: plan.savingsGoals.length,
       selectedCategory,
-      period: { startISO, endISO, type },
+      period: { startISO, endISO, periodType },
     });
   }, [
     plan.budgetGoals.length,
@@ -729,7 +647,7 @@ export default function PlanScreen() {
     selectedCategory,
     startISO,
     endISO,
-    type,
+    periodType,
   ]);
 
   return (

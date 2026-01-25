@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { View, Text, StyleSheet, Pressable, ActivityIndicator } from "react-native";
-import { useAuth } from "../lib/authStore";
-import { usePlan } from "../lib/planStore";
+import { View, Text, StyleSheet, Pressable } from "react-native";
+import { useAuth } from "../store/authStore";
+import { useUserPrefsStore } from "../store/userPrefsStore";
 import ScreenLayout from "../components/layout/ScreenLayout";
 import ScreenHeader from "../components/layout/ScreenHeader";
 import LoadingButton from "../components/LoadingButton";
@@ -10,7 +10,7 @@ import ScreenCard from "../components/layout/ScreenCard";
 
 export default function LoginScreen() {
   const { signIn } = useAuth();
-  const { language } = usePlan();
+  const language = useUserPrefsStore((s) => s.language);
   const isKo = language === "ko";
   const tr = (en: string, ko: string) => (isKo ? ko : en);
 
@@ -18,53 +18,34 @@ export default function LoginScreen() {
   const [isKakaoLoading, setIsKakaoLoading] = useState(false);
   const [keepSignedIn, setKeepSignedIn] = useState(true);
 
-  const handleGoogleLogin = async () => {
+  const handleOAuthLogin = async (
+    provider: "google" | "kakao",
+    setLoading: (v: boolean) => void,
+  ) => {
     if (isGoogleLoading || isKakaoLoading) return;
 
-    setIsGoogleLoading(true);
+    setLoading(true);
     try {
-      // TODO: 실제 Google 로그인 구현
-      // 현재는 임시 사용자 데이터로 로그인
       const mockUser = {
-        id: "google_" + Date.now(),
-        email: "user@gmail.com",
-        name: "Google User",
+        id: `${provider}_` + Date.now(),
+        email: provider === "google" ? "user@gmail.com" : "user@kakao.com",
+        name: provider === "google" ? "Google User" : "카카오 사용자",
         profileImageUri: null,
-        provider: "google" as const,
+        provider,
       };
 
       await signIn(mockUser, keepSignedIn);
     } catch (error) {
-      console.error("Google login failed:", error);
-      // TODO: 에러 처리 (Alert 등)
+      console.error(`${provider} login failed:`, error);
     } finally {
-      setIsGoogleLoading(false);
+      setLoading(false);
     }
   };
 
-  const handleKakaoLogin = async () => {
-    if (isGoogleLoading || isKakaoLoading) return;
+  const handleGoogleLogin = () =>
+    handleOAuthLogin("google", setIsGoogleLoading);
 
-    setIsKakaoLoading(true);
-    try {
-      // TODO: 실제 카카오 로그인 구현
-      // 현재는 임시 사용자 데이터로 로그인
-      const mockUser = {
-        id: "kakao_" + Date.now(),
-        email: "user@kakao.com",
-        name: "카카오 사용자",
-        profileImageUri: null,
-        provider: "kakao" as const,
-      };
-
-      await signIn(mockUser, keepSignedIn);
-    } catch (error) {
-      console.error("Kakao login failed:", error);
-      // TODO: 에러 처리 (Alert 등)
-    } finally {
-      setIsKakaoLoading(false);
-    }
-  };
+  const handleKakaoLogin = () => handleOAuthLogin("kakao", setIsKakaoLoading);
 
   return (
     <ScreenLayout
@@ -80,13 +61,11 @@ export default function LoginScreen() {
       }}
     >
       <ScreenCard>
-        <Text style={CardSpacing.cardTitle}>
-          {tr("Sign In", "로그인")}
-        </Text>
+        <Text style={CardSpacing.cardTitle}>{tr("Sign In", "로그인")}</Text>
         <Text style={CardSpacing.description}>
           {tr(
             "Choose a sign-in method to get started",
-            "시작하려면 로그인 방법을 선택하세요"
+            "시작하려면 로그인 방법을 선택하세요",
           )}
         </Text>
 
@@ -119,10 +98,7 @@ export default function LoginScreen() {
           style={styles.keepSignedInContainer}
         >
           <View
-            style={[
-              styles.checkbox,
-              keepSignedIn && styles.checkboxChecked,
-            ]}
+            style={[styles.checkbox, keepSignedIn && styles.checkboxChecked]}
           >
             {keepSignedIn && <Text style={styles.checkmark}>✓</Text>}
           </View>
@@ -193,19 +169,3 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

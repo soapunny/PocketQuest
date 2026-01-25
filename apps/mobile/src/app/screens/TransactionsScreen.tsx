@@ -17,16 +17,12 @@ import {
   EXPENSE_CATEGORIES,
   INCOME_CATEGORIES,
   SAVINGS_GOALS,
-} from "../lib/categories";
-import {
-  deleteTransactionById,
-  fetchTransactions,
-  patchTransaction,
-  TransactionDTO,
-} from "../lib/transactionsApi";
-import { usePlan } from "../lib/planStore";
-import type { Currency } from "../lib/currency";
-import { formatMoney } from "../lib/currency";
+} from "../domain/transactions/categories";
+import { transactionsApi } from "../api/transactionsApi";
+import { useBootStrap } from "../hooks/useBootStrap";
+import { usePlan } from "../store/planStore";
+import type { Currency } from "../domain/money/currency";
+import { formatMoney } from "../domain/money/currency";
 import ScreenLayout from "../components/layout/ScreenLayout";
 
 const DEBUG_TX = __DEV__;
@@ -80,7 +76,7 @@ function parseAmountTextToMinor(input: string, currency: Currency): number {
 
 function formatAmountTextFromMinor(
   amountMinor: number,
-  currency: Currency
+  currency: Currency,
 ): string {
   const abs = Math.abs(amountMinor);
   if (currency === "KRW") return String(Math.round(abs));
@@ -118,8 +114,9 @@ function typeUI(t: TxType) {
 }
 
 export default function TransactionsScreen() {
+  const { runBootstrap } = useBootStrap();
   // 서버에서 받아온 트랜잭션들을 저장하는 로컬 상태
-  const [transactions, setTransactions] = useState<TransactionDTO[]>([]);
+  const [transactions, setTransactions] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   // 🔥 여기서 periodFilter를 먼저 선언
   const [periodFilter, setPeriodFilter] = useState<PeriodFilter>("ALL");
@@ -143,8 +140,8 @@ export default function TransactionsScreen() {
         periodFilter === "THIS_MONTH"
           ? "THIS_MONTH"
           : periodFilter === "LAST_MONTH"
-          ? "LAST_MONTH"
-          : "ALL";
+            ? "LAST_MONTH"
+            : "ALL";
 
       // DEBUG: confirm what we actually send to the server
       dlog("[TX] request params", {
@@ -162,10 +159,7 @@ export default function TransactionsScreen() {
             includeSummary: true,
           });
 
-          const { transactions } = await fetchTransactions({
-            range: rangeParam,
-            includeSummary: true,
-          });
+          const transactions = await transactionsApi.getAll("");
 
           dlog("[TX] fetchTransactions:done", {
             range: rangeParam,
@@ -190,7 +184,7 @@ export default function TransactionsScreen() {
         } catch (error) {
           console.error(
             "[TransactionsScreen] failed to load transactions from server",
-            error
+            error,
           );
         } finally {
           if (isActive) {
@@ -205,7 +199,7 @@ export default function TransactionsScreen() {
         // If a request is in-flight, ensure loading doesn't stay stuck when we leave the screen.
         setIsLoading(false);
       };
-    }, [periodFilter])
+    }, [periodFilter]),
   );
 
   const { homeCurrency, language } = usePlan();
@@ -216,7 +210,7 @@ export default function TransactionsScreen() {
 
   const editingTx = useMemo(
     () => transactions.find((t) => t.id === editingId) ?? null,
-    [transactions, editingId]
+    [transactions, editingId],
   );
 
   const [type, setType] = useState<TxType>("EXPENSE");
@@ -239,16 +233,16 @@ export default function TransactionsScreen() {
       nextType === "EXPENSE"
         ? (EXPENSE_CATEGORIES as readonly string[])
         : nextType === "INCOME"
-        ? (INCOME_CATEGORIES as readonly string[])
-        : (SAVINGS_GOALS as readonly string[]);
+          ? (INCOME_CATEGORIES as readonly string[])
+          : (SAVINGS_GOALS as readonly string[]);
 
     if (opts.includes(current)) return current;
 
     return nextType === "EXPENSE"
       ? EXPENSE_CATEGORIES[0]
       : nextType === "INCOME"
-      ? INCOME_CATEGORIES[0]
-      : SAVINGS_GOALS[0];
+        ? INCOME_CATEGORIES[0]
+        : SAVINGS_GOALS[0];
   }
 
   function getTxTimeMs(tx: any) {
@@ -377,12 +371,12 @@ export default function TransactionsScreen() {
     if (isLoading) return;
 
     const absMinor = Math.abs(
-      parseAmountTextToMinor(amountText, editingCurrency)
+      parseAmountTextToMinor(amountText, editingCurrency),
     );
     if (!absMinor || absMinor <= 0) {
       Alert.alert(
         tr("Invalid amount", "금액 오류"),
-        tr("Please enter a positive amount.", "0보다 큰 금액을 입력해 주세요.")
+        tr("Please enter a positive amount.", "0보다 큰 금액을 입력해 주세요."),
       );
       return;
     }
@@ -403,13 +397,13 @@ export default function TransactionsScreen() {
 
     try {
       setIsLoading(true);
-
-      const { transaction } = await patchTransaction(editingTx.id, patch);
-
-      // 서버 응답으로 로컬 리스트 동기화
+      const transaction = await transactionsApi.update("", editingTx.id, patch);
       setTransactions((prev) =>
-        prev.map((tx) => (tx.id === transaction.id ? transaction : tx))
+        prev.map((tx) => (tx.id === transaction.id ? transaction : tx)),
       );
+
+      // MVP: refresh dashboard/plan snapshot after mutation
+      await runBootstrap();
 
       closeEdit();
     } catch (e) {
@@ -418,8 +412,8 @@ export default function TransactionsScreen() {
         tr("Update failed", "수정 실패"),
         tr(
           "Could not save changes. Please try again.",
-          "저장에 실패했어요. 다시 시도해 주세요."
-        )
+          "저장에 실패했어요. 다시 시도해 주세요.",
+        ),
       );
     } finally {
       setIsLoading(false);
@@ -431,10 +425,12 @@ export default function TransactionsScreen() {
 
     try {
       setIsLoading(true);
-
-      await deleteTransactionById(editingTx.id);
+      await transactionsApi.delete("", editingTx.id);
 
       setTransactions((prev) => prev.filter((tx) => tx.id !== editingTx.id));
+
+      // MVP: refresh dashboard/plan snapshot after mutation
+      await runBootstrap();
 
       closeEdit();
     } catch (e) {
@@ -443,8 +439,8 @@ export default function TransactionsScreen() {
         tr("Delete failed", "삭제 실패"),
         tr(
           "Could not delete. Please try again.",
-          "삭제에 실패했어요. 다시 시도해 주세요."
-        )
+          "삭제에 실패했어요. 다시 시도해 주세요.",
+        ),
       );
     } finally {
       setIsLoading(false);
@@ -467,7 +463,7 @@ export default function TransactionsScreen() {
             void deleteEditingTransaction();
           },
         },
-      ]
+      ],
     );
   }
 
@@ -480,7 +476,7 @@ export default function TransactionsScreen() {
             title={tr("Transactions", "거래 내역")}
             subtitle={tr(
               "Filter, search, and tap a card to edit.",
-              "필터/검색 후 카드를 눌러 수정하세요."
+              "필터/검색 후 카드를 눌러 수정하세요.",
             )}
             rightSlot={
               <View style={styles.resultPill}>
@@ -549,7 +545,7 @@ export default function TransactionsScreen() {
               onChangeText={setSearchText}
               placeholder={tr(
                 "Search by category or note",
-                "카테고리/메모로 검색"
+                "카테고리/메모로 검색",
               )}
               autoCorrect={false}
               style={styles.searchInput}
@@ -644,7 +640,7 @@ export default function TransactionsScreen() {
                   <Text style={styles.metaText}>
                     {tr(
                       `Base totals use ${homeCurrency}. This transaction is in ${cur}.`,
-                      `기준 합계 통화는 ${homeCurrency}이고, 이 거래는 ${cur}로 기록되어 있어요.`
+                      `기준 합계 통화는 ${homeCurrency}이고, 이 거래는 ${cur}로 기록되어 있어요.`,
                     )}
                   </Text>
                 ) : null}
@@ -672,7 +668,7 @@ export default function TransactionsScreen() {
           <Text style={styles.emptyText}>
             {tr(
               "No matching transactions. Try changing filters or search.",
-              "조건에 맞는 거래가 없어요. 필터나 검색어를 바꿔보세요."
+              "조건에 맞는 거래가 없어요. 필터나 검색어를 바꿔보세요.",
             )}
           </Text>
         }
@@ -721,8 +717,8 @@ export default function TransactionsScreen() {
                         {t === "EXPENSE"
                           ? tr("Expense", "지출")
                           : t === "INCOME"
-                          ? tr("Income", "수입")
-                          : tr("Saving", "저축")}
+                            ? tr("Income", "수입")
+                            : tr("Saving", "저축")}
                       </Text>
                     </Pressable>
                   );
@@ -751,7 +747,7 @@ export default function TransactionsScreen() {
                 <Text style={{ alignSelf: "center", color: "#666" }}>
                   {tr(
                     "(currency is set when created)",
-                    "(통화는 생성 시점에 결정돼요)"
+                    "(통화는 생성 시점에 결정돼요)",
                   )}
                 </Text>
               </View>
@@ -773,8 +769,8 @@ export default function TransactionsScreen() {
                 {type === "SAVING"
                   ? tr("Savings Goal", "저축 목표")
                   : type === "INCOME"
-                  ? tr("Income Category", "수입 카테고리")
-                  : tr("Category", "카테고리")}
+                    ? tr("Income Category", "수입 카테고리")
+                    : tr("Category", "카테고리")}
               </Text>
               <View style={styles.categoryWrap}>
                 {categoryOptions.map((c) => {
@@ -800,7 +796,7 @@ export default function TransactionsScreen() {
                 onChangeText={setNote}
                 placeholder={tr(
                   "e.g., Costco chicken",
-                  "예: 코스트코 닭가슴살"
+                  "예: 코스트코 닭가슴살",
                 )}
                 style={styles.modalInput}
               />

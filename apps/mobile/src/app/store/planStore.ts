@@ -1,0 +1,1247 @@
+const DEBUG_PLAN = __DEV__;
+const dlog = (...args: any[]) => {
+  if (DEBUG_PLAN) console.log(...args);
+};
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  useRef,
+} from "react";
+import { AppState, AppStateStatus } from "react-native";
+
+import { API_BASE_URL, DEV_USER_ID } from "../config/env";
+import { EXPENSE_CATEGORIES } from "../domain/transactions/categories";
+import type { Currency } from "../domain/money/currency";
+
+export type BudgetCategory = (typeof EXPENSE_CATEGORIES)[number] | string;
+
+export type BudgetGoal = {
+  id: string;
+  category: BudgetCategory;
+  limitMinor: number;
+};
+
+export type SavingsGoal = {
+  id: string;
+  name: string;
+  targetMinor: number;
+};
+
+export type PeriodType = "WEEKLY" | "BIWEEKLY" | "MONTHLY";
+
+export type UILanguage = "en" | "ko";
+
+export type Plan = {
+  // Period type
+  periodType: PeriodType;
+
+  // Start of the current period (week / 2-week block / calendar month) as YYYY-MM-DD.
+  periodStartISO: string;
+  // End of the current period as YYYY-MM-DD (inclusive, local date).
+  periodEndISO: string;
+  // Server-source-of-truth period boundaries (UTC instants as ISO strings)
+  periodStartUTC?: string;
+  periodEndUTC?: string;
+
+  // For BIWEEKLY, server may provide an anchor instant (UTC ISO)
+  periodAnchorUTC?: string;
+  // Optional timezone (IANA). If not provided by server, device timezone is used.
+  timeZone?: string;
+
+  // Currency preferences
+  // Home currency is the base for totals/progress calculations.
+  homeCurrency: Currency;
+  // Display currency controls how amounts are shown in the UI.
+  displayCurrency: Currency;
+
+  // Advanced currency mode (when false, treat currency as a single setting)
+  advancedCurrencyMode?: boolean;
+
+  // UI language
+  language?: UILanguage;
+
+  totalBudgetLimitMinor: number; // 0 = disabled
+  budgetGoals: BudgetGoal[];
+  savingsGoals: SavingsGoal[];
+};
+
+type Store = {
+  plan: Plan;
+  setPeriodType: (type: PeriodType) => void;
+  // Switch period type on the server and set the returned plan as active.
+  // Returns true on success.
+  switchPeriodType: (type: PeriodType) => Promise<boolean>;
+  refreshPeriodIfNeeded: () => void;
+  homeCurrency: Currency;
+  displayCurrency: Currency;
+  switchPlanCurrency: (currency: Currency) => Promise<boolean>;
+  advancedCurrencyMode: boolean;
+  language: UILanguage;
+  setHomeCurrency: (c: Currency) => void;
+  setDisplayCurrency: (c: Currency) => void;
+  setAdvancedCurrencyMode: (enabled: boolean) => void;
+  setLanguage: (lang: UILanguage) => void;
+  setTotalBudgetLimitMinor: (minor: number) => void;
+  upsertBudgetGoalLimit: (category: BudgetCategory, limitMinor: number) => void;
+  upsertSavingsGoalTarget: (name: string, targetMinor: number) => void;
+  addSavingsGoal: (name: string, targetMinor: number) => void;
+  removeSavingsGoal: (id: string) => void;
+
+  refreshPlan: () => Promise<boolean>;
+  applyServerPlan: (serverPlan: {
+    language?: UILanguage | string | null;
+    periodType?: PeriodType;
+    // server may send DateTime ISO under either key
+    periodStartUTC?: string;
+    periodStart?: string;
+
+    // server may send period end under either key
+    periodEndUTC?: string;
+    periodEnd?: string;
+
+    periodAnchorUTC?: string;
+    periodAnchor?: string;
+
+    // optional user timezone
+    timeZone?: string;
+
+    // totals are in minor units
+    totalBudgetLimitMinor?: number | null;
+
+    currency?: Currency;
+    homeCurrency?: Currency;
+    displayCurrency?: Currency;
+
+    // goals use minor units
+    budgetGoals?:
+      | {
+          id?: string | null;
+          category: string;
+          limitMinor?: number | null;
+        }[]
+      | null;
+    savingsGoals?:
+      | {
+          id?: string | null;
+          name: string;
+          targetMinor?: number | null;
+        }[]
+      | null;
+  }) => void;
+
+  // Bootstrap hydrate (plan only). Prefs source is userPrefsStore; these fields are deprecated.
+  applyBootstrapPlan: (bootstrap: any) => void;
+
+  // --- bootstrap/initialize 상태 및 함수 ---
+  isInitialized: boolean;
+  isLoading: boolean;
+  initialize: () => Promise<void>;
+};
+
+const PlanContext = createContext<Store | null>(null);
+
+// Latest plan snapshot (module-level) for non-hook callers.
+// This avoids stale closures in helper functions (e.g., merge after server responses).
+let _latestPlanSnapshot: { plan: Plan } | null = null;
+
+export function getPlanState() {
+  return _latestPlanSnapshot;
+}
+
+function uid() {
+  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+function toISODateInTimeZone(d: Date, timeZone: string) {
+  const fmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  return fmt.format(d);
+}
+
+function safeParseISODateTime(iso: any): Date | null {
+  if (!iso) return null;
+  const d = new Date(String(iso));
+  return Number.isFinite(d.getTime()) ? d : null;
+}
+
+function deriveLocalISOFromUTCInstant(
+  utcISO: string,
+  timeZone: string,
+): string {
+  const d = safeParseISODateTime(utcISO);
+  if (!d) return "";
+  return toISODateInTimeZone(d, timeZone);
+}
+
+// Period range is half-open: [periodStartUTC, periodEndUTC).
+// For UI date-only comparisons, we keep endISO as the local calendar date of periodEndUTC (exclusive).
+
+function stableIdForKey(prefix: string, key: string) {
+  return `${prefix}:${key}`;
+}
+
+function buildDefaultBudgetGoals(): BudgetGoal[] {
+  return EXPENSE_CATEGORIES.map((c) => ({
+    id: stableIdForKey("budget", String(c)),
+    category: c,
+    limitMinor: 0,
+  }));
+}
+
+function normalizeCategory(x: any): string {
+  return (x ?? "Other").toString().trim() || "Other";
+}
+
+function normalizePositiveInt(n: any): number {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return 0;
+  return Math.max(0, Math.round(v));
+}
+
+function mergeBudgetGoalsWithDefaults(
+  defaults: BudgetGoal[],
+  serverGoals: {
+    id?: string | null;
+    category: string;
+    limitMinor?: number | null;
+  }[],
+): BudgetGoal[] {
+  // Map by normalized category: { limit, id? }
+  const byCat = new Map<string, { limit: number; id?: string }>();
+  serverGoals.forEach((g) => {
+    const cat = normalizeCategory(g.category);
+    const raw = g.limitMinor ?? 0;
+    const limit = normalizePositiveInt(raw);
+    const id = g.id ? String(g.id) : undefined;
+    byCat.set(cat, { limit, id });
+  });
+
+  // Start with defaults (keeps ordering + stable IDs), but if server provides an id for
+  // a default category we accept it.
+  const merged: BudgetGoal[] = defaults.map((d) => {
+    const key = String(d.category);
+    const hit = byCat.get(key);
+    if (!hit) return d;
+
+    return {
+      ...d,
+      id: hit.id || d.id,
+      limitMinor: hit.limit,
+    };
+  });
+
+  // Append any server categories not in defaults
+  byCat.forEach((val, cat) => {
+    const exists = merged.some((m) => String(m.category) === cat);
+    if (!exists) {
+      merged.push({
+        id: val.id || stableIdForKey("budget", cat),
+        category: cat,
+        limitMinor: val.limit,
+      });
+    }
+  });
+
+  return merged;
+}
+
+function mergeSavingsGoals(
+  current: SavingsGoal[],
+  serverGoals: {
+    id?: string | null;
+    name: string;
+    targetMinor?: number | null;
+  }[],
+): SavingsGoal[] {
+  const byName = new Map<string, { target: number; id?: string }>();
+  serverGoals.forEach((g) => {
+    const name = normalizeCategory(g.name);
+    const raw = g.targetMinor ?? 0;
+    const target = normalizePositiveInt(raw);
+    const id = g.id ? String(g.id) : undefined;
+    byName.set(name, { target, id });
+  });
+
+  // Keep existing IDs when possible, otherwise accept server id, otherwise stable id.
+  const merged: SavingsGoal[] = [];
+  byName.forEach((val, name) => {
+    const existing = current.find((x) => x.name === name);
+    merged.push({
+      id: existing?.id ?? val.id ?? stableIdForKey("savings", name),
+      name,
+      targetMinor: val.target,
+    });
+  });
+
+  return merged;
+}
+
+function sumBudgetLimits(goals: BudgetGoal[]) {
+  return goals.reduce(
+    (sum, g) => sum + (g.limitMinor > 0 ? g.limitMinor : 0),
+    0,
+  );
+}
+
+export function PlanProvider({ children }: { children: React.ReactNode }) {
+  const DEFAULT_PERIOD_TYPE: PeriodType = "MONTHLY";
+
+  const DEFAULT_HOME_CURRENCY: Currency = "USD";
+  const DEFAULT_DISPLAY_CURRENCY: Currency = "USD";
+
+  const [plan, setPlan] = useState<Plan>(() => {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    const todayISO = toISODateInTimeZone(new Date(), tz);
+
+    return {
+      periodType: DEFAULT_PERIOD_TYPE,
+      // Server-driven: we don't compute boundaries client-side.
+      // Initialize with today's local date as a placeholder; will be replaced by server plan/bundle.
+      periodStartISO: todayISO,
+      periodEndISO: todayISO,
+      homeCurrency: DEFAULT_HOME_CURRENCY,
+      displayCurrency: DEFAULT_DISPLAY_CURRENCY,
+      advancedCurrencyMode: false,
+      language: "en",
+      totalBudgetLimitMinor: 0,
+      budgetGoals: buildDefaultBudgetGoals(),
+      savingsGoals: [],
+    };
+  });
+
+  // Keep module-level snapshot in sync for non-hook reads.
+  useEffect(() => {
+    _latestPlanSnapshot = { plan };
+  }, [plan]);
+
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  // `applyServerPlan` is memoized with [], so anything it calls can become stale.
+  // Keep a ref to the latest rollover callback so we can trigger rollover right after
+  // applying a server plan without stale-closure issues.
+  const tryRolloverIfNeededRef = useRef<
+    (reason: "launch" | "resume" | "period-switch" | "timer") => Promise<void>
+  >(async () => {});
+
+  const setTotalBudgetLimitMinor: Store["setTotalBudgetLimitMinor"] = (
+    minor,
+  ) => {
+    const clean = Math.max(0, Number.isFinite(minor) ? Math.round(minor) : 0);
+    setPlan((p) => ({ ...p, totalBudgetLimitMinor: clean }));
+  };
+
+  const setHomeCurrency: Store["setHomeCurrency"] = (c) => {
+    const next: Currency = c === "KRW" ? "KRW" : "USD";
+    setPlan((p) => ({ ...p, homeCurrency: next }));
+  };
+
+  const setDisplayCurrency: Store["setDisplayCurrency"] = (c) => {
+    const next: Currency = c === "KRW" ? "KRW" : "USD";
+    setPlan((p) => ({ ...p, displayCurrency: next }));
+  };
+
+  const setAdvancedCurrencyMode: Store["setAdvancedCurrencyMode"] = (
+    enabled,
+  ) => {
+    const on = !!enabled;
+
+    setPlan((p) => {
+      // If turning OFF advanced mode, keep currencies aligned to the current display currency
+      // so the app behaves like a single-currency experience.
+      if (!on) {
+        const base: Currency = p.displayCurrency === "KRW" ? "KRW" : "USD";
+        return {
+          ...p,
+          advancedCurrencyMode: false,
+          homeCurrency: base,
+          displayCurrency: base,
+        };
+      }
+
+      return {
+        ...p,
+        advancedCurrencyMode: true,
+      };
+    });
+  };
+
+  const setLanguage: Store["setLanguage"] = (lang) => {
+    const next: UILanguage = lang === "ko" ? "ko" : "en";
+    setPlan((p) => ({
+      ...p,
+      language: next,
+    }));
+  };
+
+  const setPeriodType: Store["setPeriodType"] = (type) => {
+    const nextType: PeriodType = type ?? DEFAULT_PERIOD_TYPE;
+    setPlan((p) => {
+      return {
+        ...p,
+        periodType: nextType,
+      };
+    });
+  };
+
+  /**
+   * ✅ applyServerPlan을 먼저 정의 (refreshPlan에서 참조하므로 순서 중요)
+   * - deps는 []: setPlan(updater)만 사용하므로 stale problem 없음
+   */
+  const applyServerPlan: Store["applyServerPlan"] = useCallback(
+    (serverPlan) => {
+      const periodType: PeriodType = (serverPlan?.periodType ??
+        DEFAULT_PERIOD_TYPE) as PeriodType;
+
+      const timeZone = (serverPlan as any)?.timeZone
+        ? String((serverPlan as any).timeZone)
+        : undefined;
+
+      const periodStartUTC = (
+        serverPlan?.periodStartUTC ??
+        (serverPlan as any)?.periodStart ??
+        ""
+      ).toString();
+
+      const periodEndUTC = (
+        (serverPlan as any)?.periodEndUTC ??
+        (serverPlan as any)?.periodEnd ??
+        ""
+      ).toString();
+
+      const periodAnchorUTC = (
+        (serverPlan as any)?.periodAnchorUTC ??
+        (serverPlan as any)?.periodAnchor ??
+        ""
+      ).toString();
+
+      // Derive YYYY-MM-DD strings for UI from UTC instants when possible
+      const tzForDerive =
+        timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+
+      const periodStartISO =
+        deriveLocalISOFromUTCInstant(periodStartUTC, tzForDerive) ||
+        (periodStartUTC ? periodStartUTC.slice(0, 10) : "");
+
+      const periodEndISO =
+        deriveLocalISOFromUTCInstant(periodEndUTC, tzForDerive) ||
+        (periodEndUTC ? periodEndUTC.slice(0, 10) : "");
+
+      const serverBudgetGoals = Array.isArray(serverPlan?.budgetGoals)
+        ? serverPlan.budgetGoals
+        : [];
+
+      const serverSavingsGoals = Array.isArray(serverPlan?.savingsGoals)
+        ? serverPlan.savingsGoals
+        : [];
+
+      const serverTotalRaw = serverPlan?.totalBudgetLimitMinor;
+      const serverTotalClean = normalizePositiveInt(serverTotalRaw);
+
+      setPlan((p) => {
+        const defaults = buildDefaultBudgetGoals();
+        const nextBudgetGoals = mergeBudgetGoalsWithDefaults(
+          defaults,
+          serverBudgetGoals,
+        );
+
+        const nextSavingsGoals = mergeSavingsGoals(
+          p.savingsGoals,
+          serverSavingsGoals,
+        );
+
+        const computedTotal = sumBudgetLimits(nextBudgetGoals);
+        const totalBudgetLimitMinor =
+          serverTotalClean > 0 ? serverTotalClean : computedTotal;
+
+        const nextPeriodStartISO = periodStartISO || p.periodStartISO;
+
+        const normalizedLang: UILanguage | undefined =
+          serverPlan?.language == null
+            ? undefined
+            : String(serverPlan.language) === "ko"
+              ? "ko"
+              : "en";
+
+        const next = {
+          ...p,
+          language: normalizedLang ?? p.language ?? "en",
+          periodType,
+          periodStartISO: nextPeriodStartISO,
+          periodEndISO: periodEndISO || (p as any).periodEndISO,
+          periodStartUTC: periodStartUTC || p.periodStartUTC,
+          periodEndUTC: periodEndUTC || p.periodEndUTC,
+          periodAnchorUTC: periodAnchorUTC || p.periodAnchorUTC,
+          timeZone: timeZone ?? p.timeZone,
+          totalBudgetLimitMinor,
+          homeCurrency:
+            serverPlan.homeCurrency ?? serverPlan.currency ?? p.homeCurrency,
+          displayCurrency:
+            serverPlan.displayCurrency ??
+            serverPlan.currency ??
+            p.displayCurrency,
+          budgetGoals: nextBudgetGoals,
+          savingsGoals: nextSavingsGoals,
+        };
+
+        dlog("[applyServerPlan] applied:", {
+          language: serverPlan.language,
+          periodType: next.periodType,
+          currencyFromServer: serverPlan.currency,
+          homeCurrency: next.homeCurrency,
+          displayCurrency: next.displayCurrency,
+          periodStartISO: next.periodStartISO,
+          periodEndISO: (next as any).periodEndISO,
+          periodStartUTC: next.periodStartUTC,
+          periodEndUTC: next.periodEndUTC,
+          periodAnchorUTC: next.periodAnchorUTC,
+          timeZone: next.timeZone,
+        });
+
+        dlog("[planStore] post-apply rollover check queued");
+
+        setTimeout(() => {
+          dlog("[planStore] post-apply rollover check running");
+          void tryRolloverIfNeededRef.current("resume");
+        }, 0);
+
+        return next;
+      });
+    },
+    [],
+  );
+
+  const refreshPlan: Store["refreshPlan"] = useCallback(async () => {
+    const endpoint = `${API_BASE_URL}/api/plans`;
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "x-dev-user-id": DEV_USER_ID,
+    };
+
+    // Helper to map raw server plan to applyServerPlan
+    const applyRawPlan = (raw: any) => {
+      applyServerPlan({
+        language: raw?.language,
+        periodType: raw?.periodType,
+        // server may send DateTime ISO under either key
+        periodStartUTC: raw?.periodStartUTC ?? raw?.periodStart,
+        periodEndUTC: raw?.periodEndUTC ?? raw?.periodEnd,
+        periodAnchorUTC: raw?.periodAnchorUTC ?? raw?.periodAnchor,
+        timeZone: raw?.timeZone,
+        totalBudgetLimitMinor: raw?.totalBudgetLimitMinor ?? null,
+        currency: raw?.currency,
+        budgetGoals: Array.isArray(raw?.budgetGoals)
+          ? raw.budgetGoals.map((g: any) => ({
+              id: g.id ?? null,
+              category: g.category,
+              limitMinor:
+                typeof g.limitMinor === "number" ? g.limitMinor : null,
+            }))
+          : null,
+        savingsGoals: Array.isArray(raw?.savingsGoals)
+          ? raw.savingsGoals.map((g: any) => ({
+              id: g.id ?? null,
+              name: g.name,
+              targetMinor:
+                typeof g.targetMinor === "number" ? g.targetMinor : null,
+            }))
+          : null,
+      });
+    };
+
+    try {
+      // 1) active plan 조회
+      const res = await fetch(endpoint, {
+        method: "GET",
+        headers,
+      });
+
+      // 404면 최초 생성 흐름으로 넘어감
+      if (res.status === 404) {
+        console.log("[planStore] No plan found. Creating monthly plan...");
+
+        const createRes = await fetch(endpoint, {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify({
+            periodType: DEFAULT_PERIOD_TYPE,
+            // 기본값=MONTHLY+ 즉시 active로 전환
+            setActive: true,
+            useCurrentPeriod: true,
+            currency: "USD",
+            language: "en",
+            totalBudgetLimitMinor: 0,
+          }),
+        });
+
+        if (!createRes.ok) {
+          const text = await createRes.text().catch(() => "");
+          console.warn(
+            "[planStore] Failed to create monthly plan",
+            createRes.status,
+            text,
+          );
+          return false;
+        }
+
+        const raw = await createRes.json();
+        applyRawPlan(raw);
+        return true;
+      }
+
+      // 그 외 에러는 실패 처리
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        console.warn(
+          "[planStore] Failed to refresh plan from server",
+          res.status,
+          text,
+        );
+        return false;
+      }
+
+      // 2) 정상 조회면 plan 적용
+      const raw = await res.json();
+
+      dlog("[switchPeriodType] server raw:", {
+        periodType: raw?.periodType,
+        currency: raw?.currency,
+        periodStartUTC: raw?.periodStartUTC ?? raw?.periodStart,
+        periodEndUTC: raw?.periodEndUTC ?? raw?.periodEnd,
+        timeZone: raw?.timeZone,
+        periodAnchorUTC: raw?.periodAnchorUTC ?? raw?.periodAnchor,
+      });
+      applyRawPlan(raw);
+      return true;
+    } catch (err) {
+      console.error("[planStore] Error while refreshing plan", err);
+      return false;
+    }
+  }, [applyServerPlan]);
+
+  // ---------------------------------------------------------------------------
+  // Global rollover orchestration (works from any screen)
+  // Triggers:
+  // - app launch (after first refreshPlan)
+  // - foreground resume (AppState)
+  // - period switch (after switchPeriodType applies new plan)
+  // - optional: single timer when plan ends "today" (local day)
+  // ---------------------------------------------------------------------------
+
+  const rolloverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastRolloverAttemptAtRef = useRef<number>(0);
+  // Prevent duplicate rollover attempts for the same period end within a single app session
+  const lastRolloverKeyRef = useRef<string | null>(null);
+
+  const clearRolloverTimer = useCallback(() => {
+    if (rolloverTimerRef.current) {
+      clearTimeout(rolloverTimerRef.current);
+      rolloverTimerRef.current = null;
+    }
+  }, []);
+
+  const postRollover = useCallback(async () => {
+    const endpoint = `${API_BASE_URL}/api/plans/rollover`;
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "x-dev-user-id": DEV_USER_ID,
+    };
+
+    const res = await fetch(endpoint, { method: "POST", headers });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`rollover failed: ${res.status} ${text}`);
+    }
+    return res.json();
+  }, []);
+
+  const getUserTimeZone = useCallback((): string => {
+    return (
+      plan.timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+    );
+  }, [plan.timeZone]);
+
+  const isSameLocalDay = useCallback((a: Date, b: Date, timeZone: string) => {
+    // Compare YYYY-MM-DD in the given IANA timezone
+    const fmt = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    return fmt.format(a) === fmt.format(b);
+  }, []);
+
+  const tryRolloverIfNeeded = useCallback(
+    async (reason: "launch" | "resume" | "period-switch" | "timer") => {
+      // Need server plan info first
+      // initialize 중(isLoading=true)에도 launch 체크는 허용
+      if (!isInitialized && !isLoading && reason !== "launch") {
+        dlog("[planStore] rollover skip (not ready)", {
+          reason,
+          isInitialized,
+          isLoading,
+        });
+        return;
+      }
+
+      const endISO = plan.periodEndUTC;
+      if (!endISO) {
+        dlog("[planStore] rollover skip (no periodEndUTC)", { reason });
+        return;
+      }
+
+      // Session-level de-dupe key (prevents repeated attempts for the same server period)
+      const key = `${plan.periodType}|${plan.periodStartUTC ?? ""}|${endISO}`;
+      if (lastRolloverKeyRef.current === key) {
+        dlog("[planStore] rollover skip (same key)", { reason, key });
+        return;
+      }
+
+      const endMs = Date.parse(endISO);
+      if (!Number.isFinite(endMs)) {
+        dlog("[planStore] rollover skip (bad endMs)", {
+          reason,
+          endISO,
+        });
+        return;
+      }
+
+      const nowMs = Date.now();
+
+      // Only rollover after the plan has actually ended
+      if (nowMs < endMs) {
+        dlog("[planStore] rollover skip (not ended yet)", {
+          reason,
+          endISO,
+          msUntilEnd: endMs - nowMs,
+        });
+        return;
+      }
+
+      // Cooldown (avoid spamming rollover calls)
+      // For `timer`, allow it to proceed even if a recent resume check happened.
+      // Same-key de-dupe still prevents double-rollover for the same period.
+      if (
+        reason !== "timer" &&
+        nowMs - lastRolloverAttemptAtRef.current < 2 * 60 * 1000
+      ) {
+        dlog("[planStore] rollover skip (cooldown)", {
+          reason,
+          msSinceLast: nowMs - lastRolloverAttemptAtRef.current,
+        });
+        return;
+      }
+
+      // Record this attempt only when we are actually eligible to rollover.
+      lastRolloverAttemptAtRef.current = nowMs;
+
+      // Mark key as in-flight for this session (prevents back-to-back double calls)
+      lastRolloverKeyRef.current = key;
+
+      dlog("[planStore] rollover attempt", {
+        reason,
+        key,
+        endISO,
+      });
+
+      try {
+        const r = await postRollover();
+        dlog("[planStore] rollover response", {
+          reason,
+          key,
+          rolled: !!r?.rolled,
+        });
+
+        if (r?.rolled) {
+          await refreshPlan();
+        } else {
+          // If server says nothing rolled, allow a future attempt (e.g., if clocks differ)
+          if (lastRolloverKeyRef.current === key)
+            lastRolloverKeyRef.current = null;
+        }
+      } catch (e) {
+        // On failure, release the key so a later resume/timer can retry
+        if (lastRolloverKeyRef.current === key)
+          lastRolloverKeyRef.current = null;
+        console.warn(`[planStore] rollover failed (${reason})`, e);
+      }
+    },
+    [
+      isInitialized,
+      isLoading,
+      plan.periodType,
+      plan.periodStartUTC,
+      plan.periodEndUTC,
+      postRollover,
+      refreshPlan,
+    ],
+  );
+
+  useEffect(() => {
+    tryRolloverIfNeededRef.current = tryRolloverIfNeeded;
+  }, [tryRolloverIfNeeded]);
+
+  const scheduleRolloverTimerIfNeeded = useCallback(() => {
+    clearRolloverTimer();
+
+    if (!isInitialized) return;
+
+    const endISO = plan.periodEndUTC;
+    if (!endISO) return;
+
+    const endMs = Date.parse(endISO);
+    if (!Number.isFinite(endMs)) return;
+
+    const nowMs = Date.now();
+    if (nowMs >= endMs) return; // already ended; resume/launch will catch it
+
+    // Schedule only if it ends "today" (local day) AND app is foreground
+    const tz = getUserTimeZone();
+    const now = new Date(nowMs);
+    const end = new Date(endMs);
+
+    if (!isSameLocalDay(now, end, tz)) return;
+    if (AppState.currentState !== "active") return;
+
+    const delay = Math.max(0, endMs - nowMs);
+    // Small jitter helps avoid edge timing issues at the exact boundary
+    const jitter = 2000;
+
+    rolloverTimerRef.current = setTimeout(() => {
+      tryRolloverIfNeeded("timer");
+    }, delay + jitter);
+  }, [
+    clearRolloverTimer,
+    getUserTimeZone,
+    isInitialized,
+    isSameLocalDay,
+    plan.periodEndUTC,
+    tryRolloverIfNeeded,
+  ]);
+
+  // Foreground resume trigger
+  useEffect(() => {
+    const onChange = (state: AppStateStatus) => {
+      if (state === "active") {
+        tryRolloverIfNeeded("resume");
+        scheduleRolloverTimerIfNeeded();
+      } else {
+        clearRolloverTimer();
+      }
+    };
+
+    const sub = AppState.addEventListener("change", onChange);
+    return () => {
+      sub.remove();
+      clearRolloverTimer();
+    };
+  }, [clearRolloverTimer, scheduleRolloverTimerIfNeeded, tryRolloverIfNeeded]);
+
+  // Reschedule timer whenever active plan changes
+  useEffect(() => {
+    scheduleRolloverTimerIfNeeded();
+  }, [
+    plan.periodType,
+    plan.periodStartISO,
+    plan.periodEndUTC,
+    scheduleRolloverTimerIfNeeded,
+  ]);
+
+  const switchPlanCurrency = useCallback(
+    async (nextCurrency: "USD" | "KRW") => {
+      const endpoint = `${API_BASE_URL}/api/plans`;
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "x-dev-user-id": DEV_USER_ID,
+      };
+
+      const currentType: PeriodType = (plan.periodType ??
+        DEFAULT_PERIOD_TYPE) as PeriodType;
+
+      const body: any = {
+        periodType: currentType,
+        setActive: true,
+        useCurrentPeriod: true,
+        currency: nextCurrency,
+        language: plan.language ?? "en",
+        totalBudgetLimitMinor: plan.totalBudgetLimitMinor ?? 0,
+      };
+
+      try {
+        const res = await fetch(endpoint, {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify(body),
+        });
+
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          console.warn(
+            "[planStore] switchPlanCurrency failed",
+            res.status,
+            text,
+          );
+          return false;
+        }
+
+        const raw = await res.json();
+
+        applyServerPlan({
+          language: raw?.language,
+          periodType: raw?.periodType,
+          periodStartUTC: raw?.periodStartUTC ?? raw?.periodStart,
+          periodEndUTC: raw?.periodEndUTC ?? raw?.periodEnd,
+          periodAnchorUTC: raw?.periodAnchorUTC ?? raw?.periodAnchor,
+          timeZone: raw?.timeZone,
+          totalBudgetLimitMinor: raw?.totalBudgetLimitMinor ?? null,
+          currency: raw?.currency,
+          budgetGoals: Array.isArray(raw?.budgetGoals)
+            ? raw.budgetGoals.map((g: any) => ({
+                id: g.id ?? null,
+                category: g.category,
+                limitMinor:
+                  typeof g.limitMinor === "number" ? g.limitMinor : null,
+              }))
+            : null,
+          savingsGoals: Array.isArray(raw?.savingsGoals)
+            ? raw.savingsGoals.map((g: any) => ({
+                id: g.id ?? null,
+                name: g.name,
+                targetMinor:
+                  typeof g.targetMinor === "number" ? g.targetMinor : null,
+              }))
+            : null,
+        });
+
+        return true;
+      } catch (err) {
+        console.error("[planStore] switchPlanCurrency error", err);
+        return false;
+      }
+    },
+    [plan, applyServerPlan],
+  );
+
+  const switchPeriodType: Store["switchPeriodType"] = useCallback(
+    async (type) => {
+      const nextType: PeriodType = (type ?? DEFAULT_PERIOD_TYPE) as PeriodType;
+
+      const endpoint = `${API_BASE_URL}/api/plans`;
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        "x-dev-user-id": DEV_USER_ID,
+      };
+
+      const body: any = {
+        periodType: nextType,
+        setActive: true,
+        useCurrentPeriod: true,
+        // keep user preferences when switching
+        // currency: plan.homeCurrency,
+        language: plan.language ?? "en",
+        totalBudgetLimitMinor: plan.totalBudgetLimitMinor ?? 0,
+      };
+
+      try {
+        const res = await fetch(endpoint, {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify(body),
+        });
+
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          console.warn(
+            "[planStore] Failed to switch period type",
+            res.status,
+            text,
+          );
+          return false;
+        }
+
+        const raw = await res.json();
+
+        // Apply server plan (source of truth)
+        applyServerPlan({
+          language: raw?.language,
+          periodType: raw?.periodType,
+          periodStartUTC: raw?.periodStartUTC ?? raw?.periodStart,
+          periodEndUTC: raw?.periodEndUTC ?? raw?.periodEnd,
+          periodAnchorUTC: raw?.periodAnchorUTC ?? raw?.periodAnchor,
+          timeZone: raw?.timeZone,
+          totalBudgetLimitMinor: raw?.totalBudgetLimitMinor ?? null,
+          // ✅ 새 플랜의 통화로 UI도 자동 동기화
+          currency: raw?.currency,
+          budgetGoals: Array.isArray(raw?.budgetGoals)
+            ? raw.budgetGoals.map((g: any) => ({
+                id: g.id ?? null,
+                category: g.category,
+                limitMinor:
+                  typeof g.limitMinor === "number" ? g.limitMinor : null,
+              }))
+            : null,
+          savingsGoals: Array.isArray(raw?.savingsGoals)
+            ? raw.savingsGoals.map((g: any) => ({
+                id: g.id ?? null,
+                name: g.name,
+                targetMinor:
+                  typeof g.targetMinor === "number" ? g.targetMinor : null,
+              }))
+            : null,
+        });
+
+        return true;
+      } catch (err) {
+        console.error("[planStore] Error while switching period type", err);
+        return false;
+      }
+    },
+    [plan, applyServerPlan],
+  );
+
+  const refreshPeriodIfNeeded: Store["refreshPeriodIfNeeded"] =
+    useCallback(() => {
+      setPlan((p) => {
+        // Server-driven: keep UI date-only fields in sync with server UTC instants.
+        const tz =
+          p.timeZone ||
+          Intl.DateTimeFormat().resolvedOptions().timeZone ||
+          "UTC";
+
+        // If plan already ended, do nothing here. Rollover logic will create/apply next plan.
+        if (p.periodEndUTC) {
+          const endMs = Date.parse(p.periodEndUTC);
+          if (Number.isFinite(endMs) && Date.now() >= endMs) {
+            return p;
+          }
+        }
+
+        const nextStartISO = p.periodStartUTC
+          ? deriveLocalISOFromUTCInstant(p.periodStartUTC, tz)
+          : "";
+        const nextEndISO = p.periodEndUTC
+          ? deriveLocalISOFromUTCInstant(p.periodEndUTC, tz)
+          : "";
+
+        if (!nextStartISO && !nextEndISO) return p;
+        if (
+          (!nextStartISO || p.periodStartISO === nextStartISO) &&
+          (!nextEndISO || (p as any).periodEndISO === nextEndISO)
+        )
+          return p;
+
+        return {
+          ...p,
+          periodStartISO: nextStartISO || p.periodStartISO,
+          periodEndISO: nextEndISO || (p as any).periodEndISO,
+        };
+      });
+    }, []);
+
+  const initialize: Store["initialize"] = useCallback(async () => {
+    if (isInitialized || isLoading) return;
+    setIsLoading(true);
+    try {
+      // 1) 클라이언트 기준 기간 보정 (UI용)
+      refreshPeriodIfNeeded();
+
+      // 2) 서버 plan 로드 (중복 fetch 제거)
+      await refreshPlan();
+
+      // 3) 이미 기간이 끝났으면 즉시 rollover (앱 진입 시)
+      await tryRolloverIfNeeded("launch");
+    } finally {
+      setIsLoading(false);
+      setIsInitialized(true);
+    }
+  }, [
+    isInitialized,
+    isLoading,
+    refreshPeriodIfNeeded,
+    refreshPlan,
+    tryRolloverIfNeeded,
+  ]);
+
+  useEffect(() => {
+    refreshPeriodIfNeeded();
+  }, [refreshPeriodIfNeeded]);
+
+  const upsertBudgetGoalLimit: Store["upsertBudgetGoalLimit"] = (
+    category,
+    limitMinor,
+  ) => {
+    const cat = (category || "Other").toString().trim() || "Other";
+    const cleanLimit = Math.max(
+      0,
+      Number.isFinite(limitMinor) ? Math.round(limitMinor) : 0,
+    );
+
+    setPlan((p) => {
+      const idx = p.budgetGoals.findIndex((g) => g.category === cat);
+      let nextGoals = p.budgetGoals;
+
+      if (idx >= 0) {
+        nextGoals = p.budgetGoals.slice();
+        nextGoals[idx] = { ...nextGoals[idx], limitMinor: cleanLimit };
+      } else {
+        nextGoals = [
+          ...p.budgetGoals,
+          { id: uid(), category: cat, limitMinor: cleanLimit },
+        ];
+      }
+
+      const total = nextGoals.reduce(
+        (sum, g) => sum + (g.limitMinor > 0 ? g.limitMinor : 0),
+        0,
+      );
+
+      return {
+        ...p,
+        budgetGoals: nextGoals,
+        totalBudgetLimitMinor: total,
+      };
+    });
+  };
+
+  const upsertSavingsGoalTarget: Store["upsertSavingsGoalTarget"] = (
+    name,
+    targetMinor,
+  ) => {
+    const n = (name || "Other").toString().trim() || "Other";
+    const clean = Math.max(
+      0,
+      Number.isFinite(targetMinor) ? Math.round(targetMinor) : 0,
+    );
+
+    setPlan((p) => {
+      const idx = p.savingsGoals.findIndex((g) => g.name === n);
+
+      if (idx >= 0) {
+        const next = p.savingsGoals.slice();
+        next[idx] = { ...next[idx], targetMinor: clean };
+        return { ...p, savingsGoals: next };
+      }
+
+      if (clean <= 0) return p;
+
+      return {
+        ...p,
+        savingsGoals: [
+          ...p.savingsGoals,
+          { id: uid(), name: n, targetMinor: clean },
+        ],
+      };
+    });
+  };
+
+  const addSavingsGoal: Store["addSavingsGoal"] = (name, targetMinor) => {
+    const n = (name || "").trim();
+    const t = Math.max(
+      0,
+      Number.isFinite(targetMinor) ? Math.round(targetMinor) : 0,
+    );
+    if (!n || t <= 0) return;
+
+    setPlan((p) => ({
+      ...p,
+      savingsGoals: [...p.savingsGoals, { id: uid(), name: n, targetMinor: t }],
+    }));
+  };
+
+  const removeSavingsGoal: Store["removeSavingsGoal"] = (id) => {
+    setPlan((p) => ({
+      ...p,
+      savingsGoals: p.savingsGoals.filter((g) => g.id !== id),
+    }));
+  };
+
+  const applyBootstrapPlan: Store["applyBootstrapPlan"] = useCallback(
+    (bootstrap) => {
+      const planCandidate =
+        bootstrap?.activePlan ??
+        bootstrap?.plan ??
+        bootstrap?.data?.activePlan ??
+        bootstrap?.data?.plan ??
+        null;
+
+      if (planCandidate) {
+        applyServerPlan(planCandidate);
+        setIsInitialized(true);
+      } else {
+        // If bootstrap doesn't include a plan, keep app usable but mark initialized to unblock UI.
+        setIsInitialized(true);
+      }
+    },
+    [applyServerPlan],
+  );
+
+  const store = useMemo<Store>(
+    () => ({
+      plan,
+      refreshPlan,
+      setPeriodType,
+      switchPeriodType,
+      switchPlanCurrency,
+      refreshPeriodIfNeeded,
+      homeCurrency: plan.homeCurrency,
+      displayCurrency: plan.displayCurrency,
+      advancedCurrencyMode: !!plan.advancedCurrencyMode,
+      language: (plan.language ?? "en") as UILanguage,
+      setHomeCurrency,
+      setDisplayCurrency,
+      setAdvancedCurrencyMode,
+      setLanguage,
+      setTotalBudgetLimitMinor,
+      upsertBudgetGoalLimit,
+      upsertSavingsGoalTarget,
+      addSavingsGoal,
+      removeSavingsGoal,
+      applyServerPlan,
+      applyBootstrapPlan,
+      isInitialized,
+      isLoading,
+      initialize,
+    }),
+    [
+      plan,
+      refreshPlan, // ✅ deps 추가 (중요)
+      setPeriodType,
+      switchPeriodType,
+      refreshPeriodIfNeeded,
+      setHomeCurrency,
+      setDisplayCurrency,
+      switchPlanCurrency,
+      setAdvancedCurrencyMode,
+      setLanguage,
+      setTotalBudgetLimitMinor,
+      upsertBudgetGoalLimit,
+      upsertSavingsGoalTarget,
+      addSavingsGoal,
+      removeSavingsGoal,
+      applyServerPlan,
+      applyBootstrapPlan,
+      isInitialized,
+      isLoading,
+      initialize,
+    ],
+  );
+
+  return React.createElement(PlanContext.Provider, { value: store }, children);
+}
+
+export function usePlanStore() {
+  const ctx = useContext(PlanContext);
+  if (!ctx) throw new Error("usePlanStore must be used within PlanProvider");
+  return ctx;
+}
+
+// 기존 코드와의 호환성을 위해 usePlan도 그대로 export (alias)
+export const usePlan = usePlanStore;

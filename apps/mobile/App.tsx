@@ -3,10 +3,9 @@ import { StatusBar } from "expo-status-bar";
 import { NavigationContainer } from "@react-navigation/native";
 
 import RootNavigator from "./src/app/navigation/RootNavigator";
-import { AuthProvider } from "./src/app/lib/authStore";
-import { TransactionsProvider } from "./src/app/lib/transactionsStore";
-import { PlanProvider } from "./src/app/lib/planStore";
-import { CharacterProvider } from "./src/app/lib/characterStore";
+import { AuthProvider } from "./src/app/store/authStore";
+import { TransactionsProvider } from "./src/app/store/transactionsStore";
+import { PlanProvider } from "./src/app/store/planStore";
 
 // App.tsx (top-level)
 import { Platform } from "react-native";
@@ -37,12 +36,10 @@ export default function App() {
     <AuthProvider>
       <TransactionsProvider>
         <PlanProvider>
-          <CharacterProvider>
-            <NavigationContainer>
-              <RootNavigator />
-              <StatusBar style="auto" />
-            </NavigationContainer>
-          </CharacterProvider>
+          <NavigationContainer>
+            <RootNavigator />
+            <StatusBar style="auto" />
+          </NavigationContainer>
         </PlanProvider>
       </TransactionsProvider>
     </AuthProvider>
