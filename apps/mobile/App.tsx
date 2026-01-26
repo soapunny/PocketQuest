@@ -34,14 +34,14 @@ if (!anyGlobal.__GLOBAL_ERROR_HANDLER_INSTALLED__) {
 export default function App() {
   return (
     <AuthProvider>
-      <TransactionsProvider>
-        <PlanProvider>
+      <PlanProvider>
+        <TransactionsProvider>
           <NavigationContainer>
             <RootNavigator />
             <StatusBar style="auto" />
           </NavigationContainer>
-        </PlanProvider>
-      </TransactionsProvider>
+        </TransactionsProvider>
+      </PlanProvider>
     </AuthProvider>
   );
 }

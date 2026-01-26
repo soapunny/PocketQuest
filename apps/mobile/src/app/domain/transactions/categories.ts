@@ -1,35 +1,32 @@
-export const EXPENSE_CATEGORIES = [
-  "Groceries",
-  "Rent",
-  "Gas",
-  "Utilities",
-  "Car",
-  "Health Insurance",
-  "Other",
-] as const;
+// apps/mobile/src/app/domain/transactions/categories.ts
 
-export type ExpenseCategory = (typeof EXPENSE_CATEGORIES)[number];
+/**
+ * Transaction-level helpers related to category handling.
+ *
+ * Policy:
+ * - Canonical category keys are defined and owned by `domain/categories`.
+ * - This file must NOT define category lists or labels.
+ * - Keep only transaction-specific helpers (validation / normalization).
+ */
 
-export const INCOME_CATEGORIES = [
-  "Paycheck",
-  "Gift",
-  "Bonus",
-  "Interest",
-  "Other",
-] as const;
+import type { TxType } from "../../../../../../packages/shared/src/transactions/types";
 
-export type IncomeCategory = (typeof INCOME_CATEGORIES)[number];
+/**
+ * Normalize any incoming category value into a canonical key shape.
+ * - Trims whitespace
+ * - Lowercases
+ * - Falls back to "uncategorized"
+ */
+export function canonicalizeCategoryKey(input: unknown): string {
+  if (typeof input !== "string") return "uncategorized";
+  const key = input.trim().toLowerCase();
+  return key || "uncategorized";
+}
 
-// Savings goals (targets), NOT transaction categories
-export const SAVINGS_GOALS = [
-  "Emergency Fund",
-  "Rainy Day",
-  "Travel",
-  "Investment",
-  "Retirement",
-  "Other",
-] as const;
-
-export type SavingsGoal = (typeof SAVINGS_GOALS)[number];
-
-export type AnyCategory = ExpenseCategory | IncomeCategory;
+/**
+ * Narrow helper for transaction type checks.
+ * Useful for validation and conditional UI logic.
+ */
+export function isSavingType(type: TxType): boolean {
+  return type === "SAVING";
+}

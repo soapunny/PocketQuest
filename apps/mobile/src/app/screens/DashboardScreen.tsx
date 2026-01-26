@@ -12,8 +12,8 @@ import { CardSpacing } from "../components/Typography";
 import { getPeriodLabelKey } from "../domain/plan/period/index";
 import { periodLabelText } from "../domain/plan/period/periodLabels";
 import { categoryLabelText, getCategoryMeta } from "../domain/categories";
-import type { Currency } from "../domain/money/currency";
-import { formatMoney } from "../domain/money/currency";
+import type { Currency } from "../../../../../packages/shared/src/transactions/types";
+import { formatMoney } from "../domain/money/format";
 
 function getPlanPeriodType(plan: unknown): "WEEKLY" | "BIWEEKLY" | "MONTHLY" {
   if (!plan || typeof plan !== "object") return "MONTHLY";
@@ -48,7 +48,7 @@ export default function DashboardScreen() {
           <Text style={CardSpacing.description}>
             {tr(
               "Preparing dashboard from bootstrap…",
-              "부트스트랩에서 대시보드를 준비 중…",
+              "부트스트랩에서 대시보드를 준비 중…"
             )}
           </Text>
         </ScreenCard>
@@ -108,13 +108,13 @@ export default function DashboardScreen() {
           title={tr("Dashboard", "대시보드")}
           subtitle={tr(
             `${periodLabel} at a glance`,
-            `${periodLabel} 한눈에 보기`,
+            `${periodLabel} 한눈에 보기`
           )}
           description={
             warnings.length
               ? tr(
                   "Some items were excluded due to missing FX.",
-                  "환율(FX) 누락으로 일부 항목이 집계에서 제외됐어요.",
+                  "환율(FX) 누락으로 일부 항목이 집계에서 제외됐어요."
                 )
               : undefined
           }
@@ -179,7 +179,7 @@ export default function DashboardScreen() {
           <Text style={CardSpacing.description}>
             {tr(
               "No budget goals for this period.",
-              "이번 기간에 예산 목표가 없어요.",
+              "이번 기간에 예산 목표가 없어요."
             )}
           </Text>
         ) : (
@@ -208,7 +208,7 @@ export default function DashboardScreen() {
           <Text style={CardSpacing.description}>
             {tr(
               "No savings goals for this period.",
-              "이번 기간에 저축 목표가 없어요.",
+              "이번 기간에 저축 목표가 없어요."
             )}
           </Text>
         ) : (

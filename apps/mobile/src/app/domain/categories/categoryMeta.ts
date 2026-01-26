@@ -1,7 +1,5 @@
 // apps/mobile/src/app/domain/categories/categoryMeta.ts
 
-// apps/mobile/src/app/domain/categories/categoryMeta.ts
-
 /**
  * UI metadata for canonical category keys.
  *
@@ -15,13 +13,17 @@
  * - `colorToken` is a design token string (avoid hardcoded hex in domain when possible).
  */
 
+import type { TxType } from "../../../../../../packages/shared/src/transactions/types";
+
 export type CategoryGroup =
   | "essentials"
   | "transport"
   | "lifestyle"
   | "health"
   | "finance"
-  | "other";
+  | "other"
+  | "income"
+  | "savings";
 
 export type CategoryMeta = {
   /** Canonical key from server (lowercase). */
@@ -38,6 +40,12 @@ export type CategoryMeta = {
 
   /** Optional grouping for UI sections/filters. */
   group: CategoryGroup;
+
+  /**
+   * Which transaction types this category is allowed for.
+   * If omitted, treat as EXPENSE-safe (backward compatible with existing meta map).
+   */
+  txTypes?: readonly TxType[];
 };
 
 export const DEFAULT_CATEGORY_META: CategoryMeta = {
@@ -61,6 +69,50 @@ export const CATEGORY_META: Readonly<Record<string, CategoryMeta>> =
       colorToken: "gray-500",
       order: 9999,
       group: "other",
+    },
+
+    // Income
+    paycheck: {
+      key: "paycheck",
+      icon: "cash",
+      colorToken: "emerald-500",
+      order: 5,
+      group: "income",
+      txTypes: ["INCOME"],
+    },
+    gift: {
+      key: "gift",
+      icon: "gift",
+      colorToken: "fuchsia-500",
+      order: 6,
+      group: "income",
+      txTypes: ["INCOME"],
+    },
+    bonus: {
+      key: "bonus",
+      icon: "sparkles",
+      colorToken: "amber-500",
+      order: 7,
+      group: "income",
+      txTypes: ["INCOME"],
+    },
+    interest: {
+      key: "interest",
+      icon: "percent",
+      colorToken: "lime-500",
+      order: 8,
+      group: "income",
+      txTypes: ["INCOME"],
+    },
+
+    // Savings (transaction category; savings goal is a separate concept)
+    saving: {
+      key: "saving",
+      icon: "target",
+      colorToken: "teal-500",
+      order: 9,
+      group: "savings",
+      txTypes: ["SAVING"],
     },
 
     // Essentials
@@ -210,3 +262,42 @@ export function getCategoryMeta(categoryKey: unknown): CategoryMeta {
     }
   );
 }
+
+/**
+ * Get selectable canonical category keys for a given transaction type.
+ * - Ordered by `order`
+ * - Backward compatible: meta entries without `txTypes` are treated as EXPENSE-only
+ * - Excludes "uncategorized" (fallback-only)
+ */
+export function getSelectableCategoryKeysByTxType(txType: TxType): string[] {
+  const entries = Object.values(CATEGORY_META);
+
+  const filtered = entries.filter((m) => {
+    if (m.key === "uncategorized") return false;
+
+    const allowed = m.txTypes;
+    if (!allowed) return txType === "EXPENSE";
+    return allowed.includes(txType);
+  });
+
+  filtered.sort((a, b) => a.order - b.order);
+
+  // Ensure uniqueness and stable output
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const m of filtered) {
+    const k = m.key;
+    if (!seen.has(k)) {
+      seen.add(k);
+      out.push(k);
+    }
+  }
+  return out;
+}
+
+// Derived canonical key lists for common UI pickers.
+// NOTE: These are convenience exports; the source of truth remains CATEGORY_META.
+export const EXPENSE_CATEGORY_KEYS =
+  getSelectableCategoryKeysByTxType("EXPENSE");
+export const INCOME_CATEGORY_KEYS = getSelectableCategoryKeysByTxType("INCOME");
+export const SAVING_CATEGORY_KEYS = getSelectableCategoryKeysByTxType("SAVING");

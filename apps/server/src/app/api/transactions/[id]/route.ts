@@ -1,17 +1,63 @@
+// apps/server/src/app/api/transactions/[id]/route.ts
+
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthUser } from "@/lib/auth";
 import { z } from "zod";
+import {
+  transactionUpdateSchema,
+  TransactionDTO,
+  Currency,
+  TxType,
+} from "../../../../../../../packages/shared/src/transactions/types";
+import {
+  EXPENSE_CATEGORY_KEYS,
+  INCOME_CATEGORY_KEYS,
+  SAVING_CATEGORY_KEY,
+  expenseCategoryKeySchema,
+  incomeCategoryKeySchema,
+} from "@/lib/categories";
+import { DEFAULT_TIME_ZONE } from "@/lib/plan/defaults";
+import { toZonedTime } from "date-fns-tz";
+import { format } from "date-fns";
 
-const updateTransactionSchema = z.object({
-  type: z.enum(["EXPENSE", "INCOME", "SAVING"]).optional(),
-  amountMinor: z.number().int().nonnegative().optional(),
-  currency: z.enum(["USD", "KRW"]).optional(),
-  fxUsdKrw: z.number().optional().nullable(),
-  category: z.string().optional(),
-  occurredAtISO: z.string().datetime().optional(),
-  note: z.string().optional().nullable(),
-});
+// Use shared transactionUpdateSchema for basic update shape; server enforces extra rules.
+const updateTransactionSchema = transactionUpdateSchema;
+
+type TransactionRow = {
+  id: string;
+  userId: string;
+  type: TxType;
+  amountMinor: number;
+  currency: Currency;
+  fxUsdKrw: number | null;
+  category: string;
+  savingsGoalId: string | null;
+  occurredAt: Date;
+  note: string | null;
+  savingsGoal?: { name: string } | null;
+};
+
+function toTransactionDTO(t: TransactionRow, timeZone: string): TransactionDTO {
+  const zoned = toZonedTime(t.occurredAt, timeZone);
+  const occurredAtLocalISO = format(zoned, "yyyy-MM-dd'T'HH:mm:ss");
+  const savingsGoalName = t.savingsGoal?.name ?? null;
+
+  return {
+    id: t.id,
+    userId: t.userId,
+    type: t.type,
+    amountMinor: t.amountMinor,
+    currency: t.currency,
+    fxUsdKrw: t.fxUsdKrw ?? null,
+    category: t.category,
+    savingsGoalId: t.savingsGoalId ?? null,
+    occurredAt: t.occurredAt.toISOString(),
+    occurredAtLocalISO,
+    note: t.note ?? null,
+    savingsGoalName,
+  };
+}
 
 function getDevUserId(request: NextRequest, body?: unknown): string | null {
   if (process.env.NODE_ENV === "production") return null;
@@ -28,6 +74,49 @@ function getDevUserId(request: NextRequest, body?: unknown): string | null {
   }
 
   return null;
+}
+
+async function resolveUserPlanIdForGoals(
+  userId: string
+): Promise<string | null> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { activePlanId: true },
+  });
+  if (user?.activePlanId) return user.activePlanId;
+
+  const latestPlan = await prisma.plan.findFirst({
+    where: { userId },
+    orderBy: { periodStart: "desc" },
+    select: { id: true },
+  });
+
+  return latestPlan?.id ?? null;
+}
+
+async function assertSavingsGoalOwnership(params: {
+  userId: string;
+  savingsGoalId: string;
+}): Promise<{ id: string; name: string }> {
+  const planId = await resolveUserPlanIdForGoals(params.userId);
+  if (!planId) {
+    const e = new Error("Plan not found");
+    (e as any).code = "PLAN_NOT_FOUND";
+    throw e;
+  }
+
+  const goal = await prisma.savingsGoal.findFirst({
+    where: { id: params.savingsGoalId, planId },
+    select: { id: true, name: true },
+  });
+
+  if (!goal) {
+    const e = new Error("Invalid savingsGoalId for this user/plan");
+    (e as any).code = "SAVINGS_GOAL_FORBIDDEN";
+    throw e;
+  }
+
+  return goal;
 }
 
 // GET /api/transactions/[id] - Get single transaction
@@ -53,18 +142,39 @@ export async function GET(
   }
 
   try {
-    const transaction = await prisma.transaction.findFirst({
+    const dbUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { timeZone: true },
+    });
+    const timeZone = dbUser?.timeZone || DEFAULT_TIME_ZONE;
+
+    const transaction = (await prisma.transaction.findFirst({
       where: {
         id: params.id,
         userId,
       },
-    });
+      select: {
+        id: true,
+        userId: true,
+        type: true,
+        amountMinor: true,
+        currency: true,
+        fxUsdKrw: true,
+        category: true,
+        savingsGoalId: true,
+        occurredAt: true,
+        note: true,
+        savingsGoal: { select: { name: true } },
+      },
+    })) as TransactionRow | null;
 
     if (!transaction) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
-    return NextResponse.json(transaction);
+    return NextResponse.json({
+      transaction: toTransactionDTO(transaction, timeZone),
+    });
   } catch (error) {
     console.error("Get transaction error:", error);
     return NextResponse.json(
@@ -100,34 +210,147 @@ export async function PATCH(
       );
     }
 
+    const dbUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { timeZone: true },
+    });
+    const timeZone = dbUser?.timeZone || DEFAULT_TIME_ZONE;
+
     const data = updateTransactionSchema.parse(body);
 
     // Check if transaction exists and belongs to user
-    const existing = await prisma.transaction.findFirst({
+    const existing = (await prisma.transaction.findFirst({
       where: {
         id: params.id,
         userId,
       },
-    });
+      select: {
+        id: true,
+        userId: true,
+        type: true,
+        amountMinor: true,
+        currency: true,
+        fxUsdKrw: true,
+        category: true,
+        savingsGoalId: true,
+        occurredAt: true,
+        note: true,
+      },
+    })) as TransactionRow | null;
 
     if (!existing) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
-    // Never pass occurredAtISO directly to Prisma (model field is occurredAt)
-    const { occurredAtISO, ...rest } = data;
-    const updateData: any = { ...rest };
+    // compute next state
+    const nextType = data.type ?? existing.type;
+    const nextAmountMinor = data.amountMinor ?? existing.amountMinor;
+    const nextCurrency = data.currency ?? existing.currency;
+    const nextFxUsdKrw =
+      data.fxUsdKrw !== undefined ? data.fxUsdKrw : existing.fxUsdKrw;
+    const nextNote = data.note !== undefined ? data.note : existing.note;
+    const nextOccurredAt = data.occurredAtISO
+      ? new Date(data.occurredAtISO)
+      : existing.occurredAt;
+    const nextCategoryRaw = data.category ?? existing.category;
+    const nextSavingsGoalIdRaw = data.savingsGoalId ?? existing.savingsGoalId;
 
-    if (occurredAtISO) {
-      updateData.occurredAt = new Date(occurredAtISO);
+    let category = String(nextCategoryRaw ?? "").trim();
+    let savingsGoalId =
+      typeof nextSavingsGoalIdRaw === "string"
+        ? nextSavingsGoalIdRaw.trim()
+        : undefined;
+
+    if (nextType === "SAVING") {
+      if (!savingsGoalId) {
+        return NextResponse.json(
+          { error: "savingsGoalId is required for SAVING" },
+          { status: 400 }
+        );
+      }
+
+      try {
+        await assertSavingsGoalOwnership({ userId, savingsGoalId });
+      } catch (err: any) {
+        if (err?.code === "PLAN_NOT_FOUND") {
+          return NextResponse.json(
+            { error: "Plan not found" },
+            { status: 404 }
+          );
+        }
+        if (err?.code === "SAVINGS_GOAL_FORBIDDEN") {
+          return NextResponse.json(
+            { error: "savingsGoalId does not belong to you" },
+            { status: 403 }
+          );
+        }
+        throw err;
+      }
+
+      category = SAVING_CATEGORY_KEY;
+    } else {
+      // For non-saving types, savingsGoalId must be cleared (nullable field => set null, not undefined)
+      savingsGoalId = undefined;
+
+      if (nextType === "EXPENSE") {
+        const ok = expenseCategoryKeySchema.safeParse(category);
+        if (!ok.success) {
+          return NextResponse.json(
+            {
+              error: "Invalid expense category",
+              allowed: EXPENSE_CATEGORY_KEYS,
+            },
+            { status: 400 }
+          );
+        }
+        category = ok.data;
+      }
+
+      if (nextType === "INCOME") {
+        const ok = incomeCategoryKeySchema.safeParse(category);
+        if (!ok.success) {
+          return NextResponse.json(
+            { error: "Invalid income category", allowed: INCOME_CATEGORY_KEYS },
+            { status: 400 }
+          );
+        }
+        category = ok.data;
+      }
     }
 
-    const transaction = await prisma.transaction.update({
+    const updateData: any = {
+      type: nextType,
+      amountMinor: nextAmountMinor,
+      currency: nextCurrency,
+      fxUsdKrw: nextFxUsdKrw ?? undefined,
+      category,
+      // Nullable in Prisma schema: clear to null for non-saving types
+      savingsGoalId: nextType === "SAVING" ? savingsGoalId : null,
+      occurredAt: nextOccurredAt,
+      note: nextNote ?? undefined,
+    };
+
+    const transaction = (await prisma.transaction.update({
       where: { id: params.id },
       data: updateData,
-    });
+      select: {
+        id: true,
+        userId: true,
+        type: true,
+        amountMinor: true,
+        currency: true,
+        fxUsdKrw: true,
+        category: true,
+        savingsGoalId: true,
+        occurredAt: true,
+        note: true,
+        savingsGoal: { select: { name: true } },
+      },
+    })) as TransactionRow;
 
-    return NextResponse.json({ transaction });
+    return NextResponse.json({
+      transaction: toTransactionDTO(transaction, timeZone),
+    });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(
@@ -173,6 +396,7 @@ export async function DELETE(
         id: params.id,
         userId,
       },
+      select: { id: true },
     });
 
     if (!existing) {

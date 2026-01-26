@@ -1,64 +1,59 @@
-import React, { createContext, useContext, useMemo, useState } from "react";
-import type { Currency } from "../domain/money/currency";
+import React, {
+  createContext,
+  useContext,
+  useMemo,
+  useState,
+  useCallback,
+} from "react";
+import type {
+  Currency,
+  Transaction,
+  TransactionDTO,
+  TransactionsSummary,
+  TransactionsFilterInfo,
+  Range,
+  TxType,
+  CreateTransactionDTO,
+  UpdateTransactionDTO,
+} from "../../../../../packages/shared/src/transactions/types";
+import { transactionsApi } from "../api/transactionsApi";
+import { useAuth } from "./authStore";
+import { useBootStrap } from "../hooks/useBootStrap";
 
-// EXPENSE: normal spending that counts against Budget
-// INCOME: money coming in (paycheck, gift, bonus)
-// SAVING: money moved into savings goals (not an expense)
-export type TxType = "EXPENSE" | "INCOME" | "SAVING";
-
-export type Transaction = {
-  id: string;
-  type: TxType;
-
-  // New: multi-currency money storage
-  // Store in MINOR units:
-  // - USD: cents
-  // - KRW: won
-  amountMinor: number;
-  currency: Currency;
-
-  // Optional FX rate snapshot: 1 USD = fxUsdKrw KRW
-  // Only needed when converting between USD/KRW for reporting.
-  fxUsdKrw?: number;
-
-  // Back-compat: older code may still read amountCents.
-  // Keep it optional and mirror USD cents.
-  amountCents?: number;
-
-  category: string;
-  occurredAtISO: string;
-  note?: string;
-  itemTags?: string[];
-};
+// Use shared transaction types (SSOT)
 
 type Store = {
   transactions: Transaction[];
-  addTransaction: (tx: Omit<Transaction, "id">) => void;
-  updateTransaction: (
-    id: string,
-    patch: Partial<Omit<Transaction, "id">>,
-  ) => void;
-  deleteTransaction: (id: string) => void;
+  range: Range;
+  loading: boolean;
+  error?: string | null;
+  summary?: TransactionsSummary | null;
+  filterInfo?: TransactionsFilterInfo | null;
+
+  load: (range?: Range) => Promise<void>;
+  setRange: (range: Range) => void;
+  refresh: () => Promise<void>;
+
+  createTransaction: (tx: CreateTransactionDTO) => Promise<void>;
+  updateTransaction: (id: string, patch: UpdateTransactionDTO) => Promise<void>;
+  deleteTransaction: (id: string) => Promise<void>;
 };
 
 const TransactionsContext = createContext<Store | null>(null);
 
-function uid() {
-  return Math.random().toString(36).slice(2) + Date.now().toString(36);
-}
+function normalizeTx(tx: Transaction | TransactionDTO): Transaction {
+  const anyTx = tx as any;
 
-function normalizeTx(tx: Omit<Transaction, "id">): Omit<Transaction, "id"> {
-  // If old callers pass amountCents only, treat as USD cents.
-  const hasMinor = typeof (tx as any).amountMinor === "number";
-  const hasCents = typeof (tx as any).amountCents === "number";
+  const currency: Currency = anyTx?.currency === "KRW" ? "KRW" : "USD";
 
-  const currency: Currency = (tx as any).currency === "KRW" ? "KRW" : "USD";
+  const hasMinor = typeof anyTx?.amountMinor === "number";
+  const hasCents = typeof anyTx?.amountCents === "number";
 
   let amountMinor: number;
   if (hasMinor) {
-    amountMinor = Number((tx as any).amountMinor) || 0;
+    amountMinor = Number(anyTx.amountMinor) || 0;
   } else if (hasCents) {
-    amountMinor = Number((tx as any).amountCents) || 0;
+    amountMinor = Number(anyTx.amountCents) || 0;
   } else {
     amountMinor = 0;
   }
@@ -66,11 +61,60 @@ function normalizeTx(tx: Omit<Transaction, "id">): Omit<Transaction, "id"> {
   // Mirror amountCents for USD for legacy reads.
   const amountCents = currency === "USD" ? amountMinor : undefined;
 
+  // Normalize timestamps: server may return `occurredAt` on reads.
+  const occurredAtISO =
+    typeof anyTx?.occurredAtISO === "string" && anyTx.occurredAtISO
+      ? String(anyTx.occurredAtISO)
+      : typeof anyTx?.occurredAt === "string" && anyTx.occurredAt
+      ? String(anyTx.occurredAt)
+      : "";
+
+  // Build a clean domain Transaction (id/userId required)
   return {
-    ...tx,
-    currency,
+    id: String(anyTx?.id ?? ""),
+    userId: String(anyTx?.userId ?? ""),
+    type: (anyTx?.type ?? "EXPENSE") as TxType,
+
     amountMinor,
+    currency,
     amountCents,
+
+    fxUsdKrw: anyTx?.fxUsdKrw ?? null,
+
+    category: String(anyTx?.category ?? ""),
+
+    occurredAtISO,
+    occurredAtLocalISO:
+      typeof anyTx?.occurredAtLocalISO === "string"
+        ? String(anyTx.occurredAtLocalISO)
+        : undefined,
+
+    note:
+      anyTx?.note === undefined
+        ? undefined
+        : anyTx.note === null
+        ? null
+        : String(anyTx.note),
+
+    savingsGoalId:
+      anyTx?.savingsGoalId === undefined
+        ? undefined
+        : anyTx.savingsGoalId === null
+        ? null
+        : String(anyTx.savingsGoalId),
+
+    savingsGoalName:
+      anyTx?.savingsGoalName === undefined
+        ? undefined
+        : anyTx.savingsGoalName === null
+        ? null
+        : String(anyTx.savingsGoalName),
+
+    // Keep server-read field optional for debugging/compat if present
+    occurredAt:
+      typeof anyTx?.occurredAt === "string"
+        ? String(anyTx.occurredAt)
+        : undefined,
   };
 }
 
@@ -80,54 +124,169 @@ export function TransactionsProvider({
   children: React.ReactNode;
 }) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [range, setRangeState] = useState<Range>("ALL");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [summary, setSummary] = useState<TransactionsSummary | null>(null);
+  const [filterInfo, setFilterInfo] = useState<TransactionsFilterInfo | null>(
+    null
+  );
 
-  const addTransaction: Store["addTransaction"] = (tx) => {
-    const occurredAtISO = tx.occurredAtISO
-      ? new Date(tx.occurredAtISO).toISOString()
-      : new Date().toISOString();
+  const { user } = useAuth();
+  const { runBootstrap } = useBootStrap();
 
-    const normalized = normalizeTx({ ...tx, occurredAtISO });
-    setTransactions((prev) => [{ ...normalized, id: uid() }, ...prev]);
-  };
+  const token = (user as any)?.token ? String((user as any).token) : "";
 
-  const updateTransaction: Store["updateTransaction"] = (id, patch) => {
-    setTransactions((prev) =>
-      prev.map((tx) => {
-        if (tx.id !== id) return tx;
+  const load = useCallback(
+    async (nextRange?: Range) => {
+      const r = nextRange ?? range;
+      setLoading(true);
+      setError(null);
+      try {
+        const resp = await transactionsApi.getList({
+          token,
+          range: r,
+          includeSummary: true,
+        });
 
-        const nextOccurredAtISO = patch.occurredAtISO
-          ? new Date(patch.occurredAtISO).toISOString()
-          : tx.occurredAtISO;
+        const list = (resp.transactions ?? []) as TransactionDTO[];
+        setTransactions(list.map((t) => normalizeTx(t)));
+        setSummary((resp.summary ?? null) as TransactionsSummary | null);
+        setFilterInfo((resp.filter ?? null) as TransactionsFilterInfo | null);
+        setRangeState(r);
+      } catch (e: any) {
+        setError(
+          e?.message ? String(e.message) : "Failed to load transactions"
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [range, token]
+  );
 
-        // Build a candidate tx (without id) so we can normalize currency/amount fields.
-        const candidate: Omit<Transaction, "id"> = {
+  const refresh = useCallback(async () => {
+    await load(range);
+  }, [load, range]);
+
+  const setRange = useCallback(
+    (r: Range) => {
+      void load(r);
+    },
+    [load]
+  );
+
+  const createTransaction = useCallback(
+    async (tx: CreateTransactionDTO) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const payload: CreateTransactionDTO = {
           ...tx,
-          ...patch,
-          occurredAtISO: nextOccurredAtISO,
-        } as any;
-
-        const normalized = normalizeTx(candidate);
-
-        return {
-          ...normalized,
-          id: tx.id,
+          currency: tx.currency ?? "USD",
         };
-      }),
-    );
-  };
+        await transactionsApi.create(token, payload);
+        await refresh();
+        await runBootstrap();
+      } catch (e: any) {
+        setError(e?.message ? String(e.message) : "Create failed");
+        throw e;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [token, refresh, runBootstrap]
+  );
 
-  const deleteTransaction: Store["deleteTransaction"] = (id) => {
-    setTransactions((prev) => prev.filter((tx) => tx.id !== id));
-  };
+  const updateTransaction = useCallback(
+    async (id: string, patch: UpdateTransactionDTO) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const normalizedPatch: UpdateTransactionDTO = { ...patch };
+        if (
+          typeof patch.amountMinor === "number" ||
+          typeof patch.currency === "string"
+        ) {
+          const current = transactions.find((t) => t.id === id) as any;
+          const base: Transaction = {
+            ...(current ?? {
+              id,
+              userId: "",
+              type: "EXPENSE",
+              amountMinor: 0,
+              currency: "USD",
+              category: "",
+              occurredAtISO: "",
+            }),
+            ...patch,
+          };
+          const normalized = normalizeTx(base);
+          normalizedPatch.amountMinor = normalized.amountMinor;
+          normalizedPatch.currency = normalized.currency;
+        }
+
+        await transactionsApi.update(token, id, normalizedPatch);
+        await refresh();
+        await runBootstrap();
+      } catch (e: any) {
+        setError(e?.message ? String(e.message) : "Update failed");
+        throw e;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [token, refresh, runBootstrap, transactions]
+  );
+
+  const deleteTransaction = useCallback(
+    async (id: string) => {
+      setLoading(true);
+      setError(null);
+      try {
+        await transactionsApi.delete(token, id);
+        await refresh();
+        await runBootstrap();
+      } catch (e: any) {
+        setError(e?.message ? String(e.message) : "Delete failed");
+        throw e;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [token, refresh, runBootstrap]
+  );
 
   const value = useMemo(
     () => ({
       transactions,
-      addTransaction,
+      range,
+      loading,
+      error,
+      summary,
+      filterInfo,
+      load,
+      setRange,
+      refresh,
+      createTransaction,
       updateTransaction,
       deleteTransaction,
     }),
-    [transactions],
+    [
+      transactions,
+      range,
+      loading,
+      error,
+      summary,
+      filterInfo,
+      load,
+      setRange,
+      refresh,
+      createTransaction,
+      updateTransaction,
+      deleteTransaction,
+    ]
   );
 
   return React.createElement(TransactionsContext.Provider, { value }, children);

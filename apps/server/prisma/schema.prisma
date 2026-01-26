@@ -53,10 +53,10 @@ model User {
   timeZone        String  @default("America/New_York") //default value: America/New_York
 
   // Preferred display / planning currency for this user (used as a default for new plans).
-  currency        CurrencyCode @default(USD)
+  currency CurrencyCode @default(USD)
 
   // Preferred UI language for this user.
-  language        LanguageCode @default(en)
+  language LanguageCode @default(en)
 
   provider   AuthProvider //auth provider type(GOOGLE, KAKAO, etc.)
   providerId String //auth provider id(google id, kakao id, etc. external id)
@@ -67,14 +67,18 @@ model User {
   transactions Transaction[] //relations: one to many(one user can have many transactions)
   plans        Plan[] //relations: one to many(one user can have many plans)
 
-  activePlanId    String? @unique
-  activePlan      Plan?   @relation("ActivePlan", fields: [activePlanId], references: [id], onDelete: SetNull)
+  activePlanId String? @unique
+  activePlan   Plan?   @relation("ActivePlan", fields: [activePlanId], references: [id], onDelete: SetNull)
 }
 
 model Transaction {
   id     String @id @default(cuid()) //auto-create unique id(cuid)
   userId String //user id(foreign key)
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // For SAVING transactions, link to a specific savings goal (required by app policy).
+  savingsGoalId String?
+  savingsGoal   SavingsGoal? @relation("SavingsGoalTransactions", fields: [savingsGoalId], references: [id], onDelete: Restrict)
 
   type TxType //transaction type(EXPENSE, INCOME, SAVING)
 
@@ -96,6 +100,8 @@ model Transaction {
   @@index([userId, occurredAt]) //index for querying transactions by user id and occurred at
   @@index([userId, type]) //index for querying transactions by user id and type
   @@index([userId, category]) //index for querying transactions by user id and category
+  @@index([savingsGoalId])
+  @@index([userId, savingsGoalId, occurredAt])
 }
 
 // Plan represents a budget/savings setup for a specific period.
@@ -108,23 +114,23 @@ model Plan {
 
   activeForUser User? @relation("ActivePlan")
 
-  periodType PeriodType //period type(WEEKLY, BIWEEKLY, MONTHLY)
+  periodType   PeriodType //period type(WEEKLY, BIWEEKLY, MONTHLY)
   // Snapshot of the user's timezone at plan creation.
   // Policy A: period boundaries for this plan must be computed using THIS timezone
   // even if the user later changes their profile timezone.
-  timeZone   String @default("America/New_York")
+  timeZone     String     @default("America/New_York")
   // For BIWEEKLY: optional anchor date (e.g., Monday) used to compute biweekly boundaries.
-  periodAnchor DateTime? @db.Timestamptz(6) //optional anchor date(e.g., Monday) used to compute biweekly boundaries.
+  periodAnchor DateTime?  @db.Timestamptz(6) //optional anchor date(e.g., Monday) used to compute biweekly boundaries.
   // Start of the plan period (e.g., first day of month/week)
-  periodStart DateTime @db.Timestamptz(6) //start of the plan period(e.g., first day of month/week)
+  periodStart  DateTime   @db.Timestamptz(6) //start of the plan period(e.g., first day of month/week)
   // Optional end of the period (can be derived, but keeping it helps querying/ranges)
-  periodEnd DateTime? @db.Timestamptz(6)
+  periodEnd    DateTime?  @db.Timestamptz(6)
 
   // Single app currency preference (your UX decision to keep it simple)
-  currency CurrencyCode @default(USD)
-  language LanguageCode @default(en)
+  currency              CurrencyCode @default(USD)
+  language              LanguageCode @default(en)
   // 0 = disabled
-  totalBudgetLimitMinor Int @default(0)
+  totalBudgetLimitMinor Int          @default(0)
 
   createdAt DateTime @default(now()) @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @db.Timestamptz(6)
@@ -160,6 +166,9 @@ model SavingsGoal {
   id     String @id @default(cuid())
   planId String
   plan   Plan   @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  // Transactions linked to this savings goal (only for SAVING type by app policy).
+  transactions Transaction[] @relation("SavingsGoalTransactions")
 
   name        String
   targetMinor Int

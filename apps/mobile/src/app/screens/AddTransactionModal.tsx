@@ -7,20 +7,19 @@ import {
   Pressable,
   Platform,
   StyleSheet,
-  ScrollView,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 
-import type { TxType } from "../store/transactionsStore";
-import { transactionsApi } from "../api/transactionsApi";
-import { useBootStrap } from "../hooks/useBootStrap";
+import type { TxType } from "../../../../../packages/shared/src/transactions/types";
+import { useTransactions } from "../store/transactionsStore";
 import {
-  EXPENSE_CATEGORIES,
-  INCOME_CATEGORIES,
-  SAVINGS_GOALS,
-} from "../domain/transactions/categories";
+  categoryLabelText,
+  EXPENSE_CATEGORY_KEYS,
+  INCOME_CATEGORY_KEYS,
+  SAVING_CATEGORY_KEYS,
+} from "../domain/categories";
 import { usePlan } from "../store/planStore";
-import type { Currency } from "../domain/money/currency";
+import type { Currency } from "../../../../../packages/shared/src/transactions/types";
 import CurrencyInput from "react-native-currency-input";
 import { CardSpacing } from "../components/Typography";
 
@@ -30,7 +29,7 @@ import ScreenCard from "../components/layout/ScreenCard";
 
 export default function AddTransactionModal() {
   const navigation = useNavigation();
-  const { runBootstrap } = useBootStrap();
+  const txStore = useTransactions();
 
   const { homeCurrency, displayCurrency, language } = usePlan();
   const isKo = language === "ko";
@@ -49,7 +48,9 @@ export default function AddTransactionModal() {
   const [type, setType] = useState<TxType>("EXPENSE");
   const [amountValue, setAmountValue] = useState<number | null>(null);
 
-  const [category, setCategory] = useState<string>(EXPENSE_CATEGORIES[0]);
+  const [categoryKey, setCategoryKey] = useState<string>(
+    EXPENSE_CATEGORY_KEYS[0] ?? "uncategorized"
+  );
   const [note, setNote] = useState<string>("");
 
   const [fxUsdKrwText, setFxUsdKrwText] = useState<string>("");
@@ -59,22 +60,23 @@ export default function AddTransactionModal() {
     homeCurrency ??
     "USD") as Currency;
 
-  const categoryOptions = useMemo(() => {
-    if (type === "EXPENSE") return EXPENSE_CATEGORIES;
-    if (type === "INCOME") return INCOME_CATEGORIES;
-    return SAVINGS_GOALS; // SAVING
+  const categoryOptions = useMemo<readonly string[]>(() => {
+    if (type === "EXPENSE") return EXPENSE_CATEGORY_KEYS;
+    if (type === "INCOME") return INCOME_CATEGORY_KEYS;
+    return SAVING_CATEGORY_KEYS; // SAVING
   }, [type]);
 
   useEffect(() => {
     // When the type changes, ensure the currently selected category is valid.
-    const options = categoryOptions as readonly string[];
-    if (options.includes(category)) return;
+    if (categoryOptions.includes(categoryKey)) return;
 
     // Default per type (keeps things predictable)
-    if (type === "EXPENSE") setCategory(EXPENSE_CATEGORIES[0]);
-    else if (type === "INCOME") setCategory(INCOME_CATEGORIES[0]);
-    else setCategory(SAVINGS_GOALS[0]); // SAVING
-  }, [type, categoryOptions, category]);
+    if (type === "EXPENSE")
+      setCategoryKey(EXPENSE_CATEGORY_KEYS[0] ?? "uncategorized");
+    else if (type === "INCOME")
+      setCategoryKey(INCOME_CATEGORY_KEYS[0] ?? "uncategorized");
+    else setCategoryKey(SAVING_CATEGORY_KEYS[0] ?? "uncategorized"); // SAVING
+  }, [type, categoryOptions, categoryKey]);
 
   useEffect(() => {
     // If the user changes currency in Settings, clear the FX snapshot input.
@@ -98,7 +100,7 @@ export default function AddTransactionModal() {
     // 항상 양수(또는 0 이상)로 minor 단위를 저장하고,
     // EXPENSE/INCOME/SAVING 구분은 type으로 처리합니다.
     const absMinor = Math.round(
-      (amountValue ?? 0) * (currency === "USD" ? 100 : 1),
+      (amountValue ?? 0) * (currency === "USD" ? 100 : 1)
     );
     const amountMinor = absMinor;
 
@@ -106,31 +108,28 @@ export default function AddTransactionModal() {
 
     try {
       setIsSaving(true);
-      await transactionsApi.create("", {
+      await txStore.createTransaction({
         type,
         amountMinor,
         currency,
         fxUsdKrw: fxNeeded ? fxUsdKrw : undefined,
-        category,
+        category: categoryKey,
         occurredAtISO: new Date().toISOString(),
-        note: noteTrimmed ? noteTrimmed : null,
+        note: noteTrimmed || undefined,
       });
-
-      // MVP: after mutation, refresh bootstrap so Dashboard stays bootstrap-only.
-      await runBootstrap();
 
       navigation.goBack();
     } catch (error) {
       console.error(
         "[AddTransactionModal] failed to create transaction",
-        error,
+        error
       );
       Alert.alert(
         tr("Save failed", "저장 실패"),
         tr(
           "Could not save this transaction. Please try again.",
-          "거래를 저장하지 못했어요. 다시 시도해 주세요.",
-        ),
+          "거래를 저장하지 못했어요. 다시 시도해 주세요."
+        )
       );
     } finally {
       setIsSaving(false);
@@ -145,7 +144,7 @@ export default function AddTransactionModal() {
           title={tr("Add Transaction", "거래 추가")}
           subtitle={tr(
             "Quick entry • Currency comes from Settings",
-            "빠른 입력 • 통화는 설정에서 가져와요",
+            "빠른 입력 • 통화는 설정에서 가져와요"
           )}
           compact
         />
@@ -177,8 +176,8 @@ export default function AddTransactionModal() {
                   {t === "EXPENSE"
                     ? tr("Expense", "지출")
                     : t === "INCOME"
-                      ? tr("Income", "수입")
-                      : tr("Saving", "저축")}
+                    ? tr("Income", "수입")
+                    : tr("Saving", "저축")}
                 </Text>
               </Pressable>
             ))}
@@ -205,7 +204,7 @@ export default function AddTransactionModal() {
           <Text style={[CardSpacing.fieldHelp, styles.helper]}>
             {tr(
               "Enter an amount (numbers only). Currency is set from Settings.",
-              "금액을 입력하세요(숫자만). 통화는 설정에서 정해져요.",
+              "금액을 입력하세요(숫자만). 통화는 설정에서 정해져요."
             )}
           </Text>
         </View>
@@ -219,7 +218,7 @@ export default function AddTransactionModal() {
             <Text style={[CardSpacing.fieldHelp, styles.helper]}>
               {tr(
                 `Used for totals in ${homeCurrency}. Enter: 1 USD = ___ KRW`,
-                `기준 합계 통화(${homeCurrency})로 계산할 때 사용돼요. 입력: 1 USD = ___ KRW`,
+                `기준 합계 통화(${homeCurrency})로 계산할 때 사용돼요. 입력: 1 USD = ___ KRW`
               )}
             </Text>
             <TextInput
@@ -239,7 +238,7 @@ export default function AddTransactionModal() {
               <Text style={styles.errorText}>
                 {tr(
                   "Please enter a valid exchange rate.",
-                  "올바른 환율을 입력해 주세요.",
+                  "올바른 환율을 입력해 주세요."
                 )}
               </Text>
             )}
@@ -252,17 +251,19 @@ export default function AddTransactionModal() {
             {type === "SAVING"
               ? tr("Savings Goal", "저축 목표")
               : type === "INCOME"
-                ? tr("Income Category", "수입 카테고리")
-                : tr("Category", "카테고리")}
+              ? tr("Income Category", "수입 카테고리")
+              : tr("Category", "카테고리")}
           </Text>
           <View style={styles.chipRow}>
             {categoryOptions.map((c) => (
               <Pressable
                 key={c}
-                onPress={() => setCategory(c)}
-                style={chipStyle(category === c)}
+                onPress={() => setCategoryKey(c)}
+                style={chipStyle(categoryKey === c)}
               >
-                <Text style={chipTextStyle(category === c)}>{c}</Text>
+                <Text style={chipTextStyle(categoryKey === c)}>
+                  {categoryLabelText(c, language)}
+                </Text>
               </Pressable>
             ))}
           </View>

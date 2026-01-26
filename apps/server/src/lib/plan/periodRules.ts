@@ -47,7 +47,7 @@ export function isoLocalDayToUTCDate(timeZone: string, iso: unknown): Date {
 
 /** Parse monthly "at" helper (YYYY-MM). */
 export function parseMonthlyAtOrNull(
-  at: unknown,
+  at: unknown
 ): { year: number; monthIndex: number } | null {
   if (typeof at !== "string") return null;
   const s = at.trim();
@@ -65,7 +65,7 @@ export function parseMonthlyAtOrNull(
  */
 export function getMonthlyPeriodStartUTCForAt(
   timeZone: string,
-  at: { year: number; monthIndex: number },
+  at: { year: number; monthIndex: number }
 ): Date {
   const tz = normalizeTimeZone(timeZone);
   const y = at.year;
@@ -108,7 +108,7 @@ function buildMonthlyStartListUTC(params: {
       0,
       0,
       0,
-      0,
+      0
     );
     starts.push(fromZonedTime(d, tz));
   }
@@ -142,7 +142,7 @@ function buildWeeklyStartListUTC(params: {
     0,
     0,
     0,
-    0,
+    0
   );
 
   const starts: Date[] = [];
@@ -179,7 +179,7 @@ function buildBiweeklyStartListUTC(params: {
     0,
     0,
     0,
-    0,
+    0
   );
 
   const starts: Date[] = [];
@@ -231,8 +231,8 @@ function utcDayStart(d: Date): Date {
       0,
       0,
       0,
-      0,
-    ),
+      0
+    )
   );
 }
 
@@ -281,7 +281,7 @@ export function getNextPeriodStartUTC(params: {
 // (이상한 날짜이면 UTC를 기준으로 반환)
 export function getMonthlyPeriodStartUTC(
   timeZone: string,
-  now: Date = new Date(),
+  now: Date = new Date()
 ): Date {
   const tz = normalizeTimeZone(timeZone);
   const base = isValidDate(now) ? now : new Date();
@@ -304,7 +304,7 @@ export function getMonthlyPeriodStartUTC(
  */
 export function getNextMonthlyPeriodStartUTC(
   timeZone: string,
-  now: Date = new Date(),
+  now: Date = new Date()
 ): Date {
   const tz = normalizeTimeZone(timeZone);
   const base = isValidDate(now) ? now : new Date();
@@ -323,12 +323,64 @@ export function getNextMonthlyPeriodStartUTC(
 }
 
 /**
+ * Year period start (UTC) for user's timezone: local Jan 1 00:00 -> UTC instant
+ */
+export function getYearPeriodStartUTC(
+  timeZone: string,
+  now: Date = new Date()
+): Date {
+  const tz = normalizeTimeZone(timeZone);
+  const base = isValidDate(now) ? now : new Date();
+
+  try {
+    const zonedNow = toZonedTime(base, tz);
+    const zonedStart = new Date(zonedNow.getFullYear(), 0, 1, 0, 0, 0, 0);
+    const utc = fromZonedTime(zonedStart, tz);
+    if (!isValidDate(utc) || !assertReasonableYear(utc))
+      return new Date(Date.UTC(base.getUTCFullYear(), 0, 1, 0, 0, 0, 0));
+    return utc;
+  } catch {
+    return new Date(Date.UTC(base.getUTCFullYear(), 0, 1, 0, 0, 0, 0));
+  }
+}
+
+/**
+ * Next year period start (UTC) aligned to user's timezone.
+ */
+export function getNextYearPeriodStartUTC(
+  timeZone: string,
+  now: Date = new Date()
+): Date {
+  const tz = normalizeTimeZone(timeZone);
+  const base = isValidDate(now) ? now : new Date();
+
+  try {
+    const zonedNow = toZonedTime(base, tz);
+    const zonedNextStart = new Date(
+      zonedNow.getFullYear() + 1,
+      0,
+      1,
+      0,
+      0,
+      0,
+      0
+    );
+    const utc = fromZonedTime(zonedNextStart, tz);
+    if (!isValidDate(utc) || !assertReasonableYear(utc))
+      return new Date(Date.UTC(base.getUTCFullYear() + 1, 0, 1, 0, 0, 0, 0));
+    return utc;
+  } catch {
+    return new Date(Date.UTC(base.getUTCFullYear() + 1, 0, 1, 0, 0, 0, 0));
+  }
+}
+
+/**
  * Monthly next periodStart (UTC) given a current monthly periodStartUTC.
  * This is intentionally explicit for callers that already have a period boundary.
  */
 export function getNextMonthlyPeriodStartFromStartUTC(
   timeZone: string,
-  periodStartUTC: Date,
+  periodStartUTC: Date
 ): Date {
   return getNextMonthlyPeriodStartUTC(timeZone, periodStartUTC);
 }
@@ -339,7 +391,7 @@ export function getNextMonthlyPeriodStartFromStartUTC(
  */
 export function getPreviousMonthlyPeriodStartUTC(
   timeZone: string,
-  now: Date = new Date(),
+  now: Date = new Date()
 ): Date {
   const tz = normalizeTimeZone(timeZone);
   const base = isValidDate(now) ? now : new Date();
@@ -365,7 +417,7 @@ export function getPreviousMonthlyPeriodStartUTC(
 export function getWeeklyPeriodStartUTC(
   timeZone: string,
   now: Date = new Date(),
-  weekStartsOn: 0 | 1 | 2 | 3 | 4 | 5 | 6,
+  weekStartsOn: 0 | 1 | 2 | 3 | 4 | 5 | 6
 ): Date {
   const tz = normalizeTimeZone(timeZone);
   const base = isValidDate(now) ? now : new Date();
@@ -380,7 +432,7 @@ export function getWeeklyPeriodStartUTC(
       0,
       0,
       0,
-      0,
+      0
     );
 
     const day = localMidnight.getDay();
@@ -406,7 +458,7 @@ export function getWeeklyPeriodStartUTC(
  */
 export function getNextWeeklyPeriodStartUTC(
   timeZone: string,
-  periodStartUTC: Date,
+  periodStartUTC: Date
 ): Date {
   const tz = normalizeTimeZone(timeZone);
   const base = isValidDate(periodStartUTC) ? periodStartUTC : new Date();
@@ -420,7 +472,7 @@ export function getNextWeeklyPeriodStartUTC(
       0,
       0,
       0,
-      0,
+      0
     );
 
     const endLocal = addDays(startLocalMidnight, WEEK_DAYS);
@@ -444,7 +496,7 @@ export function getBiweeklyPeriodStartUTC(
   timeZone: string,
   anchorUTC: Date,
   now: Date = new Date(),
-  weekStartsOn: 0 | 1 | 2 | 3 | 4 | 5 | 6,
+  weekStartsOn: 0 | 1 | 2 | 3 | 4 | 5 | 6
 ): Date {
   const tz = normalizeTimeZone(timeZone);
   const baseNow = isValidDate(now) ? now : new Date();
@@ -455,7 +507,7 @@ export function getBiweeklyPeriodStartUTC(
     const anchorWeekStartUTC = getWeeklyPeriodStartUTC(
       tz,
       baseAnchor,
-      weekStartsOn,
+      weekStartsOn
     );
 
     const thisWeekDayNum = zonedDayNumber(thisWeekStartUTC, tz);
@@ -489,7 +541,7 @@ export function getBiweeklyPeriodStartUTC(
  */
 export function getNextBiweeklyPeriodStartUTC(
   timeZone: string,
-  periodStartUTC: Date,
+  periodStartUTC: Date
 ): Date {
   const tz = normalizeTimeZone(timeZone);
   const base = isValidDate(periodStartUTC) ? periodStartUTC : new Date();
@@ -503,7 +555,7 @@ export function getNextBiweeklyPeriodStartUTC(
       0,
       0,
       0,
-      0,
+      0
     );
 
     const endLocal = addDays(startLocalMidnight, BIWEEK_DAYS);
@@ -542,7 +594,7 @@ function legacyNextPeriodEnd(base: Date, periodType: PeriodType): Date {
 export function calcNextPeriodEnd(
   periodStart: Date,
   periodType: PeriodType,
-  timeZone?: string,
+  timeZone?: string
 ): Date {
   const base = isValidDate(periodStart) ? periodStart : new Date();
 
@@ -581,7 +633,7 @@ export function ensurePeriodEnd(
   periodStart: Date,
   periodEnd: Date | null | undefined,
   periodType: PeriodType,
-  timeZone?: string,
+  timeZone?: string
 ): Date {
   return periodEnd ?? calcNextPeriodEnd(periodStart, periodType, timeZone);
 }

@@ -14,10 +14,10 @@ import React, {
 import { AppState, AppStateStatus } from "react-native";
 
 import { API_BASE_URL, DEV_USER_ID } from "../config/env";
-import { EXPENSE_CATEGORIES } from "../domain/transactions/categories";
+import { EXPENSE_CATEGORY_KEYS } from "../domain/categories";
 import type { Currency } from "../domain/money/currency";
 
-export type BudgetCategory = (typeof EXPENSE_CATEGORIES)[number] | string;
+export type BudgetCategory = (typeof EXPENSE_CATEGORY_KEYS)[number] | string;
 
 export type BudgetGoal = {
   id: string;
@@ -174,7 +174,7 @@ function safeParseISODateTime(iso: any): Date | null {
 
 function deriveLocalISOFromUTCInstant(
   utcISO: string,
-  timeZone: string,
+  timeZone: string
 ): string {
   const d = safeParseISODateTime(utcISO);
   if (!d) return "";
@@ -189,7 +189,7 @@ function stableIdForKey(prefix: string, key: string) {
 }
 
 function buildDefaultBudgetGoals(): BudgetGoal[] {
-  return EXPENSE_CATEGORIES.map((c) => ({
+  return EXPENSE_CATEGORY_KEYS.map((c) => ({
     id: stableIdForKey("budget", String(c)),
     category: c,
     limitMinor: 0,
@@ -212,7 +212,7 @@ function mergeBudgetGoalsWithDefaults(
     id?: string | null;
     category: string;
     limitMinor?: number | null;
-  }[],
+  }[]
 ): BudgetGoal[] {
   // Map by normalized category: { limit, id? }
   const byCat = new Map<string, { limit: number; id?: string }>();
@@ -259,7 +259,7 @@ function mergeSavingsGoals(
     id?: string | null;
     name: string;
     targetMinor?: number | null;
-  }[],
+  }[]
 ): SavingsGoal[] {
   const byName = new Map<string, { target: number; id?: string }>();
   serverGoals.forEach((g) => {
@@ -287,7 +287,7 @@ function mergeSavingsGoals(
 function sumBudgetLimits(goals: BudgetGoal[]) {
   return goals.reduce(
     (sum, g) => sum + (g.limitMinor > 0 ? g.limitMinor : 0),
-    0,
+    0
   );
 }
 
@@ -332,7 +332,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   >(async () => {});
 
   const setTotalBudgetLimitMinor: Store["setTotalBudgetLimitMinor"] = (
-    minor,
+    minor
   ) => {
     const clean = Math.max(0, Number.isFinite(minor) ? Math.round(minor) : 0);
     setPlan((p) => ({ ...p, totalBudgetLimitMinor: clean }));
@@ -349,7 +349,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   };
 
   const setAdvancedCurrencyMode: Store["setAdvancedCurrencyMode"] = (
-    enabled,
+    enabled
   ) => {
     const on = !!enabled;
 
@@ -449,12 +449,12 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         const defaults = buildDefaultBudgetGoals();
         const nextBudgetGoals = mergeBudgetGoalsWithDefaults(
           defaults,
-          serverBudgetGoals,
+          serverBudgetGoals
         );
 
         const nextSavingsGoals = mergeSavingsGoals(
           p.savingsGoals,
-          serverSavingsGoals,
+          serverSavingsGoals
         );
 
         const computedTotal = sumBudgetLimits(nextBudgetGoals);
@@ -467,8 +467,8 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
           serverPlan?.language == null
             ? undefined
             : String(serverPlan.language) === "ko"
-              ? "ko"
-              : "en";
+            ? "ko"
+            : "en";
 
         const next = {
           ...p,
@@ -515,7 +515,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         return next;
       });
     },
-    [],
+    []
   );
 
   const refreshPlan: Store["refreshPlan"] = useCallback(async () => {
@@ -586,7 +586,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
           console.warn(
             "[planStore] Failed to create monthly plan",
             createRes.status,
-            text,
+            text
           );
           return false;
         }
@@ -602,7 +602,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         console.warn(
           "[planStore] Failed to refresh plan from server",
           res.status,
-          text,
+          text
         );
         return false;
       }
@@ -782,7 +782,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       plan.periodEndUTC,
       postRollover,
       refreshPlan,
-    ],
+    ]
   );
 
   useEffect(() => {
@@ -887,7 +887,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
           console.warn(
             "[planStore] switchPlanCurrency failed",
             res.status,
-            text,
+            text
           );
           return false;
         }
@@ -927,7 +927,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
     },
-    [plan, applyServerPlan],
+    [plan, applyServerPlan]
   );
 
   const switchPeriodType: Store["switchPeriodType"] = useCallback(
@@ -962,7 +962,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
           console.warn(
             "[planStore] Failed to switch period type",
             res.status,
-            text,
+            text
           );
           return false;
         }
@@ -1004,7 +1004,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
     },
-    [plan, applyServerPlan],
+    [plan, applyServerPlan]
   );
 
   const refreshPeriodIfNeeded: Store["refreshPeriodIfNeeded"] =
@@ -1076,12 +1076,12 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
   const upsertBudgetGoalLimit: Store["upsertBudgetGoalLimit"] = (
     category,
-    limitMinor,
+    limitMinor
   ) => {
     const cat = (category || "Other").toString().trim() || "Other";
     const cleanLimit = Math.max(
       0,
-      Number.isFinite(limitMinor) ? Math.round(limitMinor) : 0,
+      Number.isFinite(limitMinor) ? Math.round(limitMinor) : 0
     );
 
     setPlan((p) => {
@@ -1100,7 +1100,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
       const total = nextGoals.reduce(
         (sum, g) => sum + (g.limitMinor > 0 ? g.limitMinor : 0),
-        0,
+        0
       );
 
       return {
@@ -1113,12 +1113,12 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
   const upsertSavingsGoalTarget: Store["upsertSavingsGoalTarget"] = (
     name,
-    targetMinor,
+    targetMinor
   ) => {
     const n = (name || "Other").toString().trim() || "Other";
     const clean = Math.max(
       0,
-      Number.isFinite(targetMinor) ? Math.round(targetMinor) : 0,
+      Number.isFinite(targetMinor) ? Math.round(targetMinor) : 0
     );
 
     setPlan((p) => {
@@ -1146,7 +1146,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     const n = (name || "").trim();
     const t = Math.max(
       0,
-      Number.isFinite(targetMinor) ? Math.round(targetMinor) : 0,
+      Number.isFinite(targetMinor) ? Math.round(targetMinor) : 0
     );
     if (!n || t <= 0) return;
 
@@ -1180,7 +1180,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         setIsInitialized(true);
       }
     },
-    [applyServerPlan],
+    [applyServerPlan]
   );
 
   const store = useMemo<Store>(
@@ -1231,7 +1231,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       isInitialized,
       isLoading,
       initialize,
-    ],
+    ]
   );
 
   return React.createElement(PlanContext.Provider, { value: store }, children);
