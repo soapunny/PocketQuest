@@ -1,4 +1,5 @@
-import { Currency, minorUnitScale } from "./currency";
+import { minorUnitScale } from "./currency";
+import type { Currency } from "../../../../../../packages/shared/src/money/types";
 
 /**
  * Convert between currencies using a USD<->KRW fx rate.
@@ -10,7 +11,7 @@ export function convertMinor(
   amountMinor: number,
   from: Currency,
   to: Currency,
-  fxUsdKrw: number
+  fxUsdKrw: number,
 ): number {
   if (from === to) return amountMinor;
 
@@ -37,38 +38,4 @@ export function convertMinor(
 
   // Return integer minor units.
   return Math.round(convertedMajor * toScale);
-}
-
-/**
- * Safe parse for numeric input strings.
- * - Strips commas/spaces.
- * - Allows digits and at most one dot for USD.
- * - Returns minor units (integer).
- */
-export function parseInputToMinor(input: string, currency: Currency): number {
-  const raw = (input ?? "").trim();
-  if (!raw) return 0;
-
-  // Keep digits and dot only (for USD). Remove commas/spaces/currency symbols.
-  const cleaned = raw.replace(/[^0-9.\-]/g, "");
-
-  // Avoid just '-' or '.'
-  if (cleaned === "-" || cleaned === "." || cleaned === "-.") return 0;
-
-  const scale = minorUnitScale(currency);
-
-  if (currency === "USD") {
-    // Limit to one dot
-    const parts = cleaned.split(".");
-    const normalized =
-      parts.length <= 2 ? cleaned : `${parts[0]}.${parts.slice(1).join("")}`;
-    const n = Number(normalized);
-    if (!Number.isFinite(n)) return 0;
-    return Math.round(n * scale);
-  }
-
-  // KRW: integer only
-  const n = Number(cleaned.replace(/\./g, ""));
-  if (!Number.isFinite(n)) return 0;
-  return Math.trunc(n);
 }

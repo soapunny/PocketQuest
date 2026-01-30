@@ -1,4 +1,6 @@
-export type PeriodType = "WEEKLY" | "BIWEEKLY" | "MONTHLY";
+// apps/mobile/src/app/domain/plan/period/types.ts
+
+import type { PeriodType } from "../../../../../../../packages/shared/src/plans/types";
 
 export type PeriodRange = {
   startISO: string; // YYYY-MM-DD (local date)
@@ -7,4 +9,3 @@ export type PeriodRange = {
 };
 
 export type PeriodLabelKey = "this_week" | "this_2_weeks" | "this_month";
-

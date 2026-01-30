@@ -1,103 +1,132 @@
+// apps/src/app/api/plans/[id]/actions/switch-currency/route.ts
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/prisma";
-import { PeriodType, CurrencyCode } from "@prisma/client";
+import { CurrencyCode, PeriodType } from "@prisma/client";
 
+import { getAuthUser } from "@/lib/auth";
 import { ensureActivePlan } from "@/lib/plan/activePlan";
 import { buildPeriodForNowUTC } from "@/lib/plan/periodFactory";
+import { convertPlanMinorPayload } from "@/lib/plan/goalsPolicy";
+
 import {
-  convertPlanMinorPayload,
+  serverPlanDTOSchema,
+  switchCurrencyRequestSchema,
   type GoalsMode,
-} from "@/lib/plan/goalsPolicy";
+  type SwitchMode,
+} from "../../../../../../../../../packages/shared/src/plans/types";
+import type {
+  ServerPlanDTO,
+  SwitchCurrencyRequestDTO,
+} from "../../../../../../../../../packages/shared/src/plans/types";
+import { ZodError } from "zod";
 
 export const runtime = "nodejs";
-
-type SwitchMode = "PERIOD_ONLY" | "CURRENCY_ONLY" | "PERIOD_AND_CURRENCY";
 
 function jsonError(status: number, error: string, hint?: string) {
   return NextResponse.json({ error, ...(hint ? { hint } : {}) }, { status });
 }
 
-function parseCurrency(v: unknown): CurrencyCode | null {
-  if (v === CurrencyCode.USD || v === CurrencyCode.KRW)
-    return v as CurrencyCode;
-  if (v === "USD") return CurrencyCode.USD;
-  if (v === "KRW") return CurrencyCode.KRW;
-  return null;
+function toPrismaCurrency(c: string | undefined): CurrencyCode | undefined {
+  if (c === "USD") return CurrencyCode.USD;
+  if (c === "KRW") return CurrencyCode.KRW;
+  return undefined;
 }
 
-function parsePeriodType(v: unknown): PeriodType | null {
-  if (
-    v === PeriodType.WEEKLY ||
-    v === PeriodType.BIWEEKLY ||
-    v === PeriodType.MONTHLY
-  )
-    return v as PeriodType;
-  if (v === "WEEKLY") return PeriodType.WEEKLY;
-  if (v === "BIWEEKLY") return PeriodType.BIWEEKLY;
-  if (v === "MONTHLY") return PeriodType.MONTHLY;
-  return null;
+function toPrismaPeriodType(p: string | undefined): PeriodType | undefined {
+  if (p === "WEEKLY") return PeriodType.WEEKLY;
+  if (p === "BIWEEKLY") return PeriodType.BIWEEKLY;
+  if (p === "MONTHLY") return PeriodType.MONTHLY;
+  return undefined;
 }
 
-function parseGoalsMode(v: unknown): GoalsMode {
-  if (v === "CONVERT_USING_FX" || v === "RESET_EMPTY" || v === "COPY_AS_IS")
-    return v;
-  return "COPY_AS_IS";
-}
+function toServerPlanDTO(plan: any, timeZone: string): ServerPlanDTO {
+  const budgetGoals = Array.isArray(plan?.budgetGoals)
+    ? plan.budgetGoals.map((g: any) => ({
+        id: g.id,
+        category: String(g.category ?? "")
+          .trim()
+          .toLowerCase(), // ⭐ canonical key
+        limitMinor: g.limitMinor ?? null,
+      }))
+    : null;
 
-function parseSwitchMode(v: unknown): SwitchMode {
-  if (
-    v === "PERIOD_ONLY" ||
-    v === "CURRENCY_ONLY" ||
-    v === "PERIOD_AND_CURRENCY"
-  )
-    return v;
-  return "PERIOD_AND_CURRENCY";
-}
+  const savingsGoals = Array.isArray(plan?.savingsGoals)
+    ? plan.savingsGoals.map((s: any) => ({
+        id: s.id,
+        name: s.name,
+        targetMinor: s.targetMinor ?? null,
+      }))
+    : null;
 
-function requireString(v: unknown): string | null {
-  return typeof v === "string" && v.trim().length ? v.trim() : null;
+  const payload: ServerPlanDTO = {
+    id: String(plan.id),
+    periodType: plan?.periodType,
+    periodStartUTC:
+      plan?.periodStart instanceof Date
+        ? plan.periodStart.toISOString()
+        : undefined,
+    periodEndUTC:
+      plan?.periodEnd instanceof Date
+        ? plan.periodEnd.toISOString()
+        : undefined,
+    periodAnchorUTC:
+      plan?.periodAnchor instanceof Date
+        ? plan.periodAnchor.toISOString()
+        : undefined,
+    timeZone,
+    totalBudgetLimitMinor:
+      typeof plan?.totalBudgetLimitMinor === "number"
+        ? plan.totalBudgetLimitMinor
+        : (plan?.totalBudgetLimitMinor ?? null),
+    currency: plan?.currency,
+    homeCurrency: plan?.currency,
+    displayCurrency: plan?.currency,
+    budgetGoals,
+    savingsGoals,
+  };
+
+  return serverPlanDTOSchema.parse(payload);
 }
 
 export async function POST(req: Request) {
   try {
-    const body = (await req.json().catch(() => ({}))) as Record<
-      string,
-      unknown
-    >;
-
-    // DEV auth pattern used elsewhere in this repo:
-    const devUserId = req.headers.get("x-dev-user-id");
-    const userId = requireString(devUserId) ?? requireString(body.userId);
-
-    if (!userId) {
-      return jsonError(
-        401,
-        "Unauthorized",
-        "DEV: pass x-dev-user-id header or include userId in body",
-      );
+    const auth = getAuthUser(req as any);
+    if (!auth?.userId) {
+      return jsonError(401, "Unauthorized");
     }
 
-    const requestedPeriodType = parsePeriodType(body.periodType);
-    const requestedCurrency = parseCurrency(body.currency);
-    const switchMode = parseSwitchMode(body.switchMode);
-    const goalsMode = parseGoalsMode(body.goalsMode);
+    const rawBody = (await req.json().catch(() => ({}))) as unknown;
+    let body: SwitchCurrencyRequestDTO;
+    try {
+      body = switchCurrencyRequestSchema.parse(rawBody);
+    } catch (err: unknown) {
+      if (err instanceof ZodError) {
+        return NextResponse.json(
+          { error: "Bad Request", details: err.flatten() },
+          { status: 400 },
+        );
+      }
+      return jsonError(400, "Bad Request", "Invalid request body");
+    }
+
+    const switchMode: SwitchMode = body.switchMode ?? "PERIOD_AND_CURRENCY";
+    const goalsMode: GoalsMode = body.goalsMode ?? "COPY_AS_IS";
 
     // Active plan (with goals)
-    const activePlan = await ensureActivePlan(prisma, userId);
+    const activePlan = await ensureActivePlan(prisma, auth.userId);
 
     // Timezone source of truth: request -> user -> UTC
     const user = await prisma.user.findUnique({
-      where: { id: userId },
+      where: { id: auth.userId },
       select: { timeZone: true },
     });
 
-    const timeZone =
-      (typeof body.timeZone === "string" && body.timeZone.trim()) ||
-      user?.timeZone ||
-      "UTC";
+    const timeZone = body.timeZone || user?.timeZone || "UTC";
 
-    // Decide targets
+    const requestedPeriodType = toPrismaPeriodType(body.periodType);
+    const requestedCurrency = toPrismaCurrency(body.currency);
+
     const targetPeriodType: PeriodType =
       switchMode === "CURRENCY_ONLY"
         ? (activePlan.periodType as PeriodType)
@@ -119,20 +148,17 @@ export async function POST(req: Request) {
 
     const { periodStartUTC, periodEndUTC, periodAnchorUTC } = period;
 
-    // Create (or reuse) the plan for this exact periodStart.
-    // Note: this relies on your schema having a unique constraint like:
-    // @@unique([userId, periodType, periodStart])
     const result = await prisma.$transaction(async (tx) => {
       const plan = await tx.plan.upsert({
         where: {
           userId_periodType_periodStart: {
-            userId,
+            userId: auth.userId,
             periodType: targetPeriodType,
             periodStart: periodStartUTC,
           },
         },
         create: {
-          userId,
+          userId: auth.userId,
           periodType: targetPeriodType,
           periodAnchor: periodAnchorUTC,
           periodStart: periodStartUTC,
@@ -141,7 +167,6 @@ export async function POST(req: Request) {
           totalBudgetLimitMinor: Number(activePlan.totalBudgetLimitMinor ?? 0),
         },
         update: {
-          // Keep periodStart stable, allow anchor/end/currency to reflect current settings.
           currency: targetCurrency,
           periodAnchor: periodAnchorUTC,
           periodEnd: periodEndUTC,
@@ -196,9 +221,8 @@ export async function POST(req: Request) {
         }
       }
 
-      // Set active plan
       await tx.user.update({
-        where: { id: userId },
+        where: { id: auth.userId },
         data: { activePlanId: plan.id },
       });
 
@@ -208,9 +232,29 @@ export async function POST(req: Request) {
       });
     });
 
-    return NextResponse.json({ plan: result });
-  } catch (e: any) {
-    const msg = e?.message ? String(e.message) : "Unknown error";
-    return jsonError(400, "Bad Request", msg);
+    if (!result) {
+      return jsonError(
+        500,
+        "Internal Server Error",
+        "Plan not found after upsert",
+      );
+    }
+
+    const payload = toServerPlanDTO(result, timeZone);
+    return NextResponse.json({ plan: payload });
+  } catch (e: unknown) {
+    if (e instanceof ZodError) {
+      return NextResponse.json(
+        { error: "Bad Request", details: e.flatten() },
+        { status: 400 },
+      );
+    }
+
+    const msg =
+      e && typeof e === "object" && "message" in e
+        ? String((e as any).message)
+        : "Unknown error";
+    console.error("[PLAN_SWITCH_CURRENCY_ERROR]", e);
+    return jsonError(500, "Internal Server Error", msg);
   }
 }

@@ -1,18 +1,7 @@
-import type { Currency } from "../../money/currency";
-import { convertMinor } from "../../money/currency";
+// apps/mobile/src/app/domain/plan/progress/tx.ts
 
-export function isSavingsTx(tx: any): boolean {
-  const cat = String(tx?.category || "").toLowerCase();
-  if (tx?.type === "EXPENSE") return false;
-  if (cat.includes("savings") || cat.includes("save")) return true;
-  return tx?.type === "SAVING" || tx?.type === "SAVINGS";
-}
-
-export function absMinor(n: any): number {
-  const v = typeof n === "number" ? n : Number(n);
-  if (!Number.isFinite(v)) return 0;
-  return Math.abs(v);
-}
+import type { Currency } from "../../../../../../../packages/shared/src/money/types";
+import { absMinor, convertMinor } from "../../money";
 
 export function txToHomeMinor(tx: any, homeCurrency: Currency): number {
   const raw = String(tx?.currency ?? "").toUpperCase();
@@ -36,3 +25,6 @@ export function txToHomeMinor(tx: any, homeCurrency: Currency): number {
   return absMinor(convertMinor(absAmount, currency, homeCurrency, fx));
 }
 
+export function txToHomeAbsMinor(tx: any, homeCurrency: Currency): number {
+  return absMinor(txToHomeMinor(tx, homeCurrency));
+}

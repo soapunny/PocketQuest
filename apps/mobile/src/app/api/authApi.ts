@@ -1,17 +1,13 @@
-import { request } from "./http";
+import { supabase } from "../lib/supabase";
 
 export const authApi = {
-  signIn: async (data: {
-    provider: "google" | "kakao";
-    providerId: string;
-    email: string;
-    name: string;
-    profileImageUri?: string | null;
-  }) => {
-    return request<{ token: string; user: any }>("/api/auth/sign-in", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
+  signIn(email: string, password: string) {
+    return supabase.auth.signInWithPassword({ email, password });
+  },
+  signOut() {
+    return supabase.auth.signOut();
+  },
+  getSession() {
+    return supabase.auth.getSession();
   },
 };
-

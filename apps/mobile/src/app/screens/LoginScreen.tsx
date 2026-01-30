@@ -1,171 +1,196 @@
+// apps/mobile/src/app/screens/LoginScreen.tsx
+
 import { useState } from "react";
-import { View, Text, StyleSheet, Pressable } from "react-native";
-import { useAuth } from "../store/authStore";
-import { useUserPrefsStore } from "../store/userPrefsStore";
+import { View, Text, Pressable, StyleSheet } from "react-native";
+
+import * as Linking from "expo-linking";
+import * as WebBrowser from "expo-web-browser";
+
 import ScreenLayout from "../components/layout/ScreenLayout";
 import ScreenHeader from "../components/layout/ScreenHeader";
-import LoadingButton from "../components/LoadingButton";
-import { CardSpacing } from "../components/Typography";
-import ScreenCard from "../components/layout/ScreenCard";
+import { supabase } from "../lib/supabase";
+
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../config/env";
+
+import { request } from "../api/http";
+import { useAuthStore } from "../store/authStore";
+
+WebBrowser.maybeCompleteAuthSession();
+
+type Provider = "google" | "kakao";
 
 export default function LoginScreen() {
-  const { signIn } = useAuth();
-  const language = useUserPrefsStore((s) => s.language);
-  const isKo = language === "ko";
-  const tr = (en: string, ko: string) => (isKo ? ko : en);
+  const [loading, setLoading] = useState<Provider | null>(null);
+  const auth = useAuthStore();
 
-  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
-  const [isKakaoLoading, setIsKakaoLoading] = useState(false);
-  const [keepSignedIn, setKeepSignedIn] = useState(true);
+  const handleOAuth = async (provider: Provider) => {
+    if (loading) return;
+    setLoading(provider);
 
-  const handleOAuthLogin = async (
-    provider: "google" | "kakao",
-    setLoading: (v: boolean) => void,
-  ) => {
-    if (isGoogleLoading || isKakaoLoading) return;
-
-    setLoading(true);
     try {
-      const mockUser = {
-        id: `${provider}_` + Date.now(),
-        email: provider === "google" ? "user@gmail.com" : "user@kakao.com",
-        name: provider === "google" ? "Google User" : "카카오 사용자",
-        profileImageUri: null,
-        provider,
-      };
+      // In Expo Go, redirect back to the expo-router route `/oauth`.
+      const redirectTo = Linking.createURL("oauth");
+      console.log("redirectTo:", redirectTo);
 
-      await signIn(mockUser, keepSignedIn);
-    } catch (error) {
-      console.error(`${provider} login failed:`, error);
+      console.log(
+        "SUPABASE_URL:",
+        SUPABASE_URL,
+        "SUPABASE_ANON_KEY:",
+        SUPABASE_ANON_KEY,
+      );
+
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo,
+          skipBrowserRedirect: true,
+        },
+      });
+
+      if (error) {
+        console.error("signInWithOAuth error:", error);
+        return;
+      }
+
+      const authUrl = data?.url;
+      if (!authUrl) {
+        console.error("Missing auth URL from Supabase");
+        return;
+      }
+
+      // Use an auth session so the redirect is captured (prevents falling back to Site URL/localhost).
+      const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectTo);
+      console.log("oauth result:", result);
+
+      if (result.type === "success" && result.url) {
+        // Tokens are returned in the URL fragment (#access_token=...)
+        const parsed = new URL(result.url.replace("#", "?"));
+
+        const access_token = parsed.searchParams.get("access_token");
+        const refresh_token = parsed.searchParams.get("refresh_token");
+
+        if (!access_token || !refresh_token) {
+          console.error("OAuth success but tokens missing in callback URL");
+          return;
+        }
+
+        const { error } = await supabase.auth.setSession({
+          access_token,
+          refresh_token,
+        });
+
+        if (error) {
+          console.error("setSession error:", error);
+          return;
+        }
+
+        // Exchange Supabase identity for our SERVER JWT (required for /api/bootstrap, /api/plans, ...)
+        const { data: userRes, error: userErr } = await supabase.auth.getUser();
+        if (userErr || !userRes?.user) {
+          console.error("getUser error:", userErr);
+          return;
+        }
+
+        const u = userRes.user;
+
+        const payload = {
+          provider,
+          providerId: u.id,
+          email: u.email ?? "",
+          name:
+            (u.user_metadata?.full_name as string) ||
+            (u.user_metadata?.name as string) ||
+            u.email ||
+            "User",
+          profileImageUri: (u.user_metadata?.avatar_url as string) ?? null,
+        };
+
+        try {
+          const res = await request<{ token: string }>("/api/auth/sign-in", {
+            method: "POST",
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+          });
+
+          if (!res?.token) {
+            console.error("/api/auth/sign-in did not return token");
+            return;
+          }
+
+          await auth.setServerToken(res.token);
+          console.log("[auth] serverToken length:", res.token.length);
+        } catch (e) {
+          console.error("/api/auth/sign-in failed:", e);
+          return;
+        }
+      } else {
+        console.warn("OAuth cancelled/failed:", result);
+      }
+    } catch (e) {
+      console.error("OAuth start failed:", e);
     } finally {
-      setLoading(false);
+      setLoading(null);
     }
   };
 
-  const handleGoogleLogin = () =>
-    handleOAuthLogin("google", setIsGoogleLoading);
-
-  const handleKakaoLogin = () => handleOAuthLogin("kakao", setIsKakaoLoading);
-
   return (
     <ScreenLayout
-      header={
-        <ScreenHeader
-          title={tr("Welcome", "환영합니다")}
-          subtitle={tr("Sign in to continue", "로그인하여 계속하세요")}
-        />
-      }
-      contentContainerStyle={{
-        flexGrow: 1,
-        justifyContent: "center",
-      }}
+      header={<ScreenHeader title="Welcome" subtitle="Sign in to continue" />}
+      contentContainerStyle={{ flexGrow: 1, justifyContent: "center" }}
     >
-      <ScreenCard>
-        <Text style={CardSpacing.cardTitle}>{tr("Sign In", "로그인")}</Text>
-        <Text style={CardSpacing.description}>
-          {tr(
-            "Choose a sign-in method to get started",
-            "시작하려면 로그인 방법을 선택하세요",
-          )}
+      <View style={styles.card}>
+        <Text style={styles.title}>Sign In</Text>
+        <Text style={styles.subTitle}>
+          Choose a sign-in method to get started
         </Text>
 
-        <View style={styles.buttonContainer}>
-          <LoadingButton
-            onPress={handleGoogleLogin}
-            isLoading={isGoogleLoading}
-            disabled={isKakaoLoading}
-            title={tr("Continue with Google", "구글로 계속하기")}
-            style={styles.loginButton}
-            textStyle={styles.loginButtonText}
-            loadingColor="#4285F4"
-            disabledStyle={styles.buttonDisabled}
-          />
-
-          <LoadingButton
-            onPress={handleKakaoLogin}
-            isLoading={isKakaoLoading}
-            disabled={isGoogleLoading}
-            title={tr("Continue with Kakao", "카카오로 계속하기")}
-            style={[styles.loginButton, styles.kakaoButton]}
-            textStyle={[styles.loginButtonText, styles.kakaoButtonText]}
-            loadingColor="#FEE500"
-            disabledStyle={styles.buttonDisabled}
-          />
-        </View>
-
         <Pressable
-          onPress={() => setKeepSignedIn(!keepSignedIn)}
-          style={styles.keepSignedInContainer}
+          onPress={() => handleOAuth("google")}
+          style={[styles.button, styles.google, loading && styles.disabled]}
+          disabled={!!loading}
         >
-          <View
-            style={[styles.checkbox, keepSignedIn && styles.checkboxChecked]}
-          >
-            {keepSignedIn && <Text style={styles.checkmark}>✓</Text>}
-          </View>
-          <Text style={styles.keepSignedInText}>
-            {tr("Keep me signed in", "로그인 상태 유지")}
+          <Text style={styles.buttonText}>
+            {loading === "google" ? "Signing in…" : "Continue with Google"}
           </Text>
         </Pressable>
-      </ScreenCard>
+
+        <Pressable
+          onPress={() => handleOAuth("kakao")}
+          style={[styles.button, styles.kakao, loading && styles.disabled]}
+          disabled={!!loading}
+        >
+          <Text style={[styles.buttonText, styles.kakaoText]}>
+            {loading === "kakao" ? "Signing in…" : "Continue with Kakao"}
+          </Text>
+        </Pressable>
+      </View>
     </ScreenLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  buttonContainer: {
-    marginTop: 24,
-    gap: 12,
-  },
-  loginButton: {
-    width: "100%",
-    height: 56,
+  card: {
+    marginHorizontal: 16,
+    padding: 16,
     borderRadius: 12,
-    backgroundColor: "#4285F4",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  kakaoButton: {
-    backgroundColor: "#FEE500",
-  },
-  loginButtonText: {
-    color: "white",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  kakaoButtonText: {
-    color: "#000000",
-  },
-  buttonDisabled: {
-    opacity: 0.5,
-  },
-  keepSignedInContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 24,
+    borderWidth: 1,
+    borderColor: "#e5e5e5",
     gap: 12,
   },
-  checkbox: {
-    width: 24,
-    height: 24,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: "#ddd",
-    justifyContent: "center",
+  title: { fontSize: 18, fontWeight: "700" },
+  subTitle: { fontSize: 13, opacity: 0.7, marginBottom: 8 },
+  button: {
+    height: 54,
+    borderRadius: 12,
     alignItems: "center",
-    backgroundColor: "white",
+    justifyContent: "center",
   },
-  checkboxChecked: {
-    backgroundColor: "#4285F4",
-    borderColor: "#4285F4",
-  },
-  checkmark: {
-    color: "white",
-    fontSize: 16,
-    fontWeight: "700",
-  },
-  keepSignedInText: {
-    fontSize: 14,
-    color: "#666",
-    fontWeight: "600",
-  },
+  google: { backgroundColor: "#4285F4" },
+  kakao: { backgroundColor: "#FEE500" },
+  buttonText: { color: "#fff", fontWeight: "700" },
+  kakaoText: { color: "#000" },
+  disabled: { opacity: 0.6 },
 });

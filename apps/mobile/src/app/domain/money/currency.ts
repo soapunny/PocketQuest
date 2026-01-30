@@ -3,7 +3,7 @@
 import type {
   Currency,
   CURRENCY_VALUES as CURRENCIES,
-} from "../../../../../../packages/shared/src/transactions/types";
+} from "../../../../../../packages/shared/src/money/types";
 
 // Minor unit scale for each currency.
 // e.g., 1 USD = 100 cents, 1 KRW = 1 won
@@ -20,6 +20,6 @@ export function minorUnitScale(currency: Currency): number {
   return MINOR_UNIT_SCALE[currency];
 }
 
-export function currencySymbol(currency: Currency): string {
+export function getCurrencySymbol(currency: Currency): string {
   return currency === "USD" ? "$" : "₩";
 }

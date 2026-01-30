@@ -1,16 +1,24 @@
 import { useEffect, useRef } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { useNavigation } from "@react-navigation/native";
 
-import { useAuth } from "../store/authStore";
+import { useAuthStore } from "../store/authStore";
 import { usePlanStore } from "../store/planStore";
-import { useBootStrap } from "../hooks/useBootStrap";
 import { useUserPrefsStore } from "../store/userPrefsStore";
 import { useDashboardStore } from "../store/dashboardStore";
 
+import { useBootStrap } from "../hooks/useBootStrap";
+
 export default function BootstrapScreen() {
   const navigation = useNavigation<any>();
-  const { isAuthenticated } = useAuth();
+  const auth = useAuthStore();
+  const isAuthenticated = (auth as any)?.isAuthenticated;
   const { isInitialized: isPlanHydrated } = usePlanStore();
   const isPrefsHydrated = useUserPrefsStore((s) => s.isHydrated);
   const isDashboardHydrated = useDashboardStore((s) => s.isHydrated);
@@ -99,4 +107,3 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
 });
-

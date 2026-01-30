@@ -1,6 +1,6 @@
 // apps/mobile/src/app/api/bootstrapApi.ts
 
-import { API_BASE_URL } from "../config/env";
+import { request } from "./http";
 
 export type BootstrapResponse = {
   user: {
@@ -19,21 +19,23 @@ export type BootstrapResponse = {
   recentTransactions?: any[];
 };
 
-export async function fetchBootstrap(token?: string): Promise<any> {
-  const res = await fetch(`${API_BASE_URL}/api/bootstrap`, {
-    method: "GET",
-    headers: {
-      Accept: "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
+export async function fetchBootstrap(
+  token: string,
+): Promise<BootstrapResponse> {
+  if (!token) {
     throw new Error(
-      `bootstrap failed: ${res.status} ${res.statusText}${text ? ` - ${text}` : ""}`,
+      "bootstrap failed: missing auth token (expected server JWT)",
     );
   }
 
-  return (await res.json()) as BootstrapResponse;
+  // Helpful debug (does not print the token)
+  console.log("[bootstrapApi] GET /api/bootstrap (auth: yes)");
+
+  return await request<BootstrapResponse>("/api/bootstrap", {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+  });
 }

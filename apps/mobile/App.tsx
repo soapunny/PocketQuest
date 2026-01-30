@@ -38,8 +38,8 @@ export default function App() {
         <TransactionsProvider>
           <NavigationContainer>
             <RootNavigator />
-            <StatusBar style="auto" />
           </NavigationContainer>
+          <StatusBar style="auto" />
         </TransactionsProvider>
       </PlanProvider>
     </AuthProvider>

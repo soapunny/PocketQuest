@@ -1,4 +1,9 @@
+// packages/shared/src/transactions/types.ts
+
 import { z } from "zod";
+
+import type { Currency } from "../money/types";
+import { CURRENCY_VALUES } from "../money/types";
 
 // 2.1 Common enum/union (const arrays + types)
 export const RANGE_VALUES = [
@@ -8,9 +13,6 @@ export const RANGE_VALUES = [
   "ALL",
 ] as const;
 export type Range = (typeof RANGE_VALUES)[number];
-
-export const CURRENCY_VALUES = ["USD", "KRW"] as const;
-export type Currency = (typeof CURRENCY_VALUES)[number];
 
 export const TX_TYPE_VALUES = ["EXPENSE", "INCOME", "SAVING"] as const;
 export type TxType = (typeof TX_TYPE_VALUES)[number];
@@ -119,13 +121,13 @@ export type DeleteTransactionResponseDTO = { success: boolean };
 
 // 2.4 Zod schemas (basic shapes only, no server-only category enforcement)
 export const rangeSchema = z.enum(
-  RANGE_VALUES as unknown as [string, ...string[]]
+  RANGE_VALUES as unknown as [string, ...string[]],
 );
 export const currencySchema = z.enum(
-  CURRENCY_VALUES as unknown as [string, ...string[]]
+  CURRENCY_VALUES as unknown as [string, ...string[]],
 );
 export const txTypeSchema = z.enum(
-  TX_TYPE_VALUES as unknown as [string, ...string[]]
+  TX_TYPE_VALUES as unknown as [string, ...string[]],
 );
 
 export const transactionCreateSchema = z.object({

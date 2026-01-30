@@ -1,6 +1,6 @@
 import { View, ActivityIndicator, StyleSheet } from "react-native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
-import { useAuth } from "../store/authStore";
+import { useAuthStore } from "../store/authStore";
 import TabNavigator from "./TabNavigator";
 import LoginScreen from "../screens/LoginScreen";
 import BootstrapScreen from "../screens/BootstrapScreen";
@@ -23,10 +23,10 @@ export type RootStackParamList = {
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function RootNavigator() {
-  const { isAuthenticated, isLoading: isAuthLoading } = useAuth();
+  const { isAuthenticated, isLoading } = useAuthStore();
 
   // Auth restore gate
-  if (isAuthLoading) {
+  if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#4285F4" />

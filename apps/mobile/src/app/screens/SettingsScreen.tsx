@@ -1,9 +1,12 @@
 import React, { useMemo } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
-import { usePlan, type PeriodType, type UILanguage  } from "../store/planStore";
-import type { Currency } from "../domain/money/currency";
+
 import ScreenHeader from "../components/layout/ScreenHeader";
 import ScreenLayout from "../components/layout/ScreenLayout";
+
+import type { Currency } from "../../../../../packages/shared/src/money/types";
+
+import { usePlan, type PeriodType, type UILanguage } from "../store/planStore";
 
 const OPTIONS: Array<{ label: string; value: PeriodType; help: string }> = [
   { label: "Weekly", value: "WEEKLY", help: "Resets every Monday." },
@@ -50,7 +53,10 @@ export default function SettingsScreen() {
 
   const combinedCurrency = useMemo<Currency>(() => {
     const planCurrency = (plan as any)?.currency as Currency | undefined;
-    return (planCurrency ?? displayCurrency ?? homeCurrency ?? "USD") as Currency;
+    return (planCurrency ??
+      displayCurrency ??
+      homeCurrency ??
+      "USD") as Currency;
   }, [plan, displayCurrency, homeCurrency]);
 
   const lang = (language ?? "en") as UILanguage;
@@ -322,7 +328,7 @@ export default function SettingsScreen() {
                       if (!ok) {
                         // 실패해도 일단 UI는 유지 (원하면 여기서 revert도 가능)
                         console.warn(
-                          "[SettingsScreen] switchPlanCurrency failed; kept local currency"
+                          "[SettingsScreen] switchPlanCurrency failed; kept local currency",
                         );
                       }
                     }}

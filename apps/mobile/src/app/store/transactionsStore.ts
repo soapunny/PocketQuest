@@ -4,9 +4,9 @@ import React, {
   useMemo,
   useState,
   useCallback,
+  useEffect,
 } from "react";
 import type {
-  Currency,
   Transaction,
   TransactionDTO,
   TransactionsSummary,
@@ -16,8 +16,9 @@ import type {
   CreateTransactionDTO,
   UpdateTransactionDTO,
 } from "../../../../../packages/shared/src/transactions/types";
+import type { Currency } from "../../../../../packages/shared/src/money/types";
 import { transactionsApi } from "../api/transactionsApi";
-import { useAuth } from "./authStore";
+import { useAuthStore } from "./authStore";
 import { useBootStrap } from "../hooks/useBootStrap";
 
 // Use shared transaction types (SSOT)
@@ -66,8 +67,8 @@ function normalizeTx(tx: Transaction | TransactionDTO): Transaction {
     typeof anyTx?.occurredAtISO === "string" && anyTx.occurredAtISO
       ? String(anyTx.occurredAtISO)
       : typeof anyTx?.occurredAt === "string" && anyTx.occurredAt
-      ? String(anyTx.occurredAt)
-      : "";
+        ? String(anyTx.occurredAt)
+        : "";
 
   // Build a clean domain Transaction (id/userId required)
   return {
@@ -93,22 +94,22 @@ function normalizeTx(tx: Transaction | TransactionDTO): Transaction {
       anyTx?.note === undefined
         ? undefined
         : anyTx.note === null
-        ? null
-        : String(anyTx.note),
+          ? null
+          : String(anyTx.note),
 
     savingsGoalId:
       anyTx?.savingsGoalId === undefined
         ? undefined
         : anyTx.savingsGoalId === null
-        ? null
-        : String(anyTx.savingsGoalId),
+          ? null
+          : String(anyTx.savingsGoalId),
 
     savingsGoalName:
       anyTx?.savingsGoalName === undefined
         ? undefined
         : anyTx.savingsGoalName === null
-        ? null
-        : String(anyTx.savingsGoalName),
+          ? null
+          : String(anyTx.savingsGoalName),
 
     // Keep server-read field optional for debugging/compat if present
     occurredAt:
@@ -129,19 +130,27 @@ export function TransactionsProvider({
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<TransactionsSummary | null>(null);
   const [filterInfo, setFilterInfo] = useState<TransactionsFilterInfo | null>(
-    null
+    null,
   );
 
-  const { user } = useAuth();
+  const { token } = useAuthStore();
   const { runBootstrap } = useBootStrap();
-
-  const token = (user as any)?.token ? String((user as any).token) : "";
 
   const load = useCallback(
     async (nextRange?: Range) => {
       const r = nextRange ?? range;
-      setLoading(true);
       setError(null);
+
+      if (!token) {
+        setTransactions([]);
+        setSummary(null);
+        setFilterInfo(null);
+        setRangeState(r);
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
       try {
         const resp = await transactionsApi.getList({
           token,
@@ -156,14 +165,13 @@ export function TransactionsProvider({
         setRangeState(r);
       } catch (e: any) {
         setError(
-          e?.message ? String(e.message) : "Failed to load transactions"
+          e?.message ? String(e.message) : "Failed to load transactions",
         );
       } finally {
         setLoading(false);
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [range, token]
+    [range, token],
   );
 
   const refresh = useCallback(async () => {
@@ -174,13 +182,34 @@ export function TransactionsProvider({
     (r: Range) => {
       void load(r);
     },
-    [load]
+    [load],
   );
+
+  useEffect(() => {
+    // When logging out: immediately clear sensitive state.
+    if (!token) {
+      setTransactions([]);
+      setSummary(null);
+      setFilterInfo(null);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    // When logging in (token becomes available): load current range.
+    void load(range);
+  }, [token]);
 
   const createTransaction = useCallback(
     async (tx: CreateTransactionDTO) => {
       setLoading(true);
       setError(null);
+      if (!token) {
+        const e = new Error("Missing auth token");
+        setError(e.message);
+        setLoading(false);
+        throw e;
+      }
       try {
         const payload: CreateTransactionDTO = {
           ...tx,
@@ -196,13 +225,19 @@ export function TransactionsProvider({
         setLoading(false);
       }
     },
-    [token, refresh, runBootstrap]
+    [token, refresh, runBootstrap],
   );
 
   const updateTransaction = useCallback(
     async (id: string, patch: UpdateTransactionDTO) => {
       setLoading(true);
       setError(null);
+      if (!token) {
+        const e = new Error("Missing auth token");
+        setError(e.message);
+        setLoading(false);
+        throw e;
+      }
       try {
         const normalizedPatch: UpdateTransactionDTO = { ...patch };
         if (
@@ -237,13 +272,19 @@ export function TransactionsProvider({
         setLoading(false);
       }
     },
-    [token, refresh, runBootstrap, transactions]
+    [token, refresh, runBootstrap, transactions],
   );
 
   const deleteTransaction = useCallback(
     async (id: string) => {
       setLoading(true);
       setError(null);
+      if (!token) {
+        const e = new Error("Missing auth token");
+        setError(e.message);
+        setLoading(false);
+        throw e;
+      }
       try {
         await transactionsApi.delete(token, id);
         await refresh();
@@ -255,7 +296,7 @@ export function TransactionsProvider({
         setLoading(false);
       }
     },
-    [token, refresh, runBootstrap]
+    [token, refresh, runBootstrap],
   );
 
   const value = useMemo(
@@ -286,7 +327,7 @@ export function TransactionsProvider({
       createTransaction,
       updateTransaction,
       deleteTransaction,
-    ]
+    ],
   );
 
   return React.createElement(TransactionsContext.Provider, { value }, children);

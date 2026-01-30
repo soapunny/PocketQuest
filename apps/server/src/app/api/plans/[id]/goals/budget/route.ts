@@ -1,68 +1,104 @@
 // apps/server/src/app/api/plans/[id]/goals/budget/route.ts
 
-import { z } from "zod";
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthUser } from "@/lib/auth";
+import {
+  patchBudgetGoalsRequestSchema,
+  serverPlanDTOSchema,
+  upsertBudgetGoalRequestSchema,
+} from "../../../../../../../../../packages/shared/src/plans/types";
+import type {
+  PatchBudgetGoalsRequestDTO,
+  ServerPlanDTO,
+} from "../../../../../../../../../packages/shared/src/plans/types";
+import { ZodError } from "zod";
 
 type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
-function resolveActorUserId(
-  request: NextRequest,
-  bodyUserId?: string,
-): string | null {
+function requireActorUserId(request: NextRequest): string | null {
   const user = getAuthUser(request);
-  if (user?.userId) return user.userId;
-  return bodyUserId && bodyUserId.trim() ? bodyUserId.trim() : null;
+  return user?.userId ?? null;
 }
 
-const patchBudgetGoalsSchema = z
-  .object({
-    // NOTE: DEV ONLY. In prod, validate plan belongs to authed user.
-    userId: z.string().min(1).optional(),
+function normalizeCategoryKey(v: unknown) {
+  return (
+    String(v ?? "uncategorized")
+      .trim()
+      .toLowerCase() || "uncategorized"
+  );
+}
 
-    // New shape
-    budgetGoals: z
-      .array(
-        z.object({
-          category: z.string().min(1),
-          limitMinor: z.number().int().optional(),
-          // Legacy field name
-          limitCents: z.number().int().optional(),
-        }),
-      )
-      .optional(),
+function toServerPlanDTO(plan: any): ServerPlanDTO {
+  const timeZone =
+    typeof plan?.timeZone === "string" && plan.timeZone.trim()
+      ? plan.timeZone.trim()
+      : "UTC";
 
-    // Legacy shape used by older clients
-    goals: z
-      .array(
-        z.object({
-          category: z.string().min(1),
-          // Legacy field name
-          limitCents: z.number().int().optional(),
-          // Some older code may already send limitMinor
-          limitMinor: z.number().int().optional(),
-        }),
-      )
-      .optional(),
-  })
-  .superRefine((val, ctx) => {
-    if (!val.budgetGoals && !val.goals) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "budgetGoals (or legacy goals) is required",
-        path: ["budgetGoals"],
-      });
+  const toFiniteNumberOrNull = (v: any): number | null => {
+    if (typeof v === "number") return Number.isFinite(v) ? v : null;
+    if (typeof v === "bigint") {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
     }
-  });
+    if (typeof v === "string") {
+      const cleaned = v.trim().replace(/[,\s]/g, "");
+      const n = Number(cleaned);
+      return Number.isFinite(n) ? n : null;
+    }
+    try {
+      // Decimal-like objects (e.g., Prisma.Decimal) often stringify cleanly
+      const s = String(v?.toString?.() ?? "")
+        .trim()
+        .replace(/[,\s]/g, "");
+      const n = Number(s);
+      return Number.isFinite(n) ? n : null;
+    } catch {
+      return null;
+    }
+  };
 
-const singleBudgetGoalSchema = z.object({
-  // Legacy clients may send one goal at a time
-  category: z.string().min(1),
-  limitMinor: z.number().int().optional(),
-  // Legacy field name
-  limitCents: z.number().int().optional(),
-});
+  const dto: ServerPlanDTO = {
+    id: String(plan.id),
+    language: plan?.language ?? null,
+    periodType: plan?.periodType,
+    periodStartUTC:
+      plan?.periodStart instanceof Date
+        ? plan.periodStart.toISOString()
+        : undefined,
+    periodEndUTC:
+      plan?.periodEnd instanceof Date
+        ? plan.periodEnd.toISOString()
+        : undefined,
+    periodAnchorUTC:
+      plan?.periodAnchor instanceof Date
+        ? plan.periodAnchor.toISOString()
+        : undefined,
+    timeZone,
+    totalBudgetLimitMinor: toFiniteNumberOrNull(plan?.totalBudgetLimitMinor),
+    currency: plan?.currency,
+    homeCurrency: plan?.currency,
+    displayCurrency: plan?.currency,
+    budgetGoals: Array.isArray(plan?.budgetGoals)
+      ? plan.budgetGoals.map((g: any) => ({
+          id: g.id ?? null,
+          category: String(g.category ?? "Other")
+            .trim()
+            .toLowerCase(),
+          limitMinor: toFiniteNumberOrNull(g.limitMinor),
+        }))
+      : null,
+    savingsGoals: Array.isArray(plan?.savingsGoals)
+      ? plan.savingsGoals.map((g: any) => ({
+          id: g.id ?? null,
+          name: String(g.name ?? "Other"),
+          targetMinor: toFiniteNumberOrNull(g.targetMinor),
+        }))
+      : null,
+  };
+
+  return serverPlanDTOSchema.parse(dto);
+}
 
 // GET /api/plans/[id]/goals/budget - Get budget goals for a specific plan
 export async function GET(
@@ -71,7 +107,7 @@ export async function GET(
 ) {
   const planId = params.id;
 
-  const actorUserId = resolveActorUserId(request);
+  const actorUserId = requireActorUserId(request);
   if (!actorUserId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -82,8 +118,12 @@ export async function GET(
       select: { id: true, userId: true, budgetGoals: true },
     });
 
-    if (!plan || plan.userId !== actorUserId) {
+    if (!plan) {
       return NextResponse.json({ error: "Plan not found" }, { status: 404 });
+    }
+
+    if (plan.userId !== actorUserId) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     return NextResponse.json(plan.budgetGoals ?? []);
@@ -104,7 +144,7 @@ export async function POST(
   const planId = params.id;
 
   const body: unknown = await request.json().catch(() => ({}));
-  const parsedBody = singleBudgetGoalSchema.safeParse(body);
+  const parsedBody = upsertBudgetGoalRequestSchema.safeParse(body);
   if (!parsedBody.success) {
     return NextResponse.json(
       { error: "Invalid request data", details: parsedBody.error.flatten() },
@@ -112,20 +152,13 @@ export async function POST(
     );
   }
 
-  const actorUserId = resolveActorUserId(request, (body as any)?.userId);
+  const actorUserId = requireActorUserId(request);
   if (!actorUserId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const category = String(parsedBody.data.category).trim();
-  const rawLimit =
-    typeof parsedBody.data.limitMinor === "number"
-      ? parsedBody.data.limitMinor
-      : typeof parsedBody.data.limitCents === "number"
-        ? parsedBody.data.limitCents
-        : 0;
-
-  const limitMinor = Math.trunc(Number(rawLimit) || 0);
+  const categoryKey = normalizeCategoryKey(parsedBody.data.category);
+  const limitMinor = Math.trunc(Number(parsedBody.data.limitMinor) || 0);
 
   try {
     // Ensure plan exists + ownership
@@ -134,28 +167,65 @@ export async function POST(
       select: { id: true, userId: true },
     });
 
-    if (!plan || plan.userId !== actorUserId) {
+    if (!plan) {
       return NextResponse.json({ error: "Plan not found" }, { status: 404 });
+    }
+
+    if (plan.userId !== actorUserId) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     // If limit <= 0, treat as delete for back-compat convenience
     if (limitMinor <= 0) {
-      await prisma.budgetGoal.deleteMany({ where: { planId, category } });
+      await prisma.budgetGoal.deleteMany({
+        where: {
+          planId,
+          category: { equals: categoryKey, mode: "insensitive" },
+        },
+      });
       return NextResponse.json({ ok: true }, { status: 200 });
     }
 
-    const budgetGoal = await prisma.budgetGoal.upsert({
+    const matches = await prisma.budgetGoal.findMany({
       where: {
-        planId_category: {
-          planId,
-          category,
-        },
+        planId,
+        category: { equals: categoryKey, mode: "insensitive" },
       },
-      update: { limitMinor },
-      create: { planId, category, limitMinor },
+      select: { id: true, category: true },
+      orderBy: { id: "asc" },
     });
 
-    return NextResponse.json(budgetGoal, { status: 201 });
+    const keep = matches[0];
+    const extras = matches.slice(1);
+
+    if (extras.length) {
+      await prisma.budgetGoal.deleteMany({
+        where: { id: { in: extras.map((x) => x.id) } },
+      });
+    }
+
+    if (keep?.id) {
+      await prisma.budgetGoal.update({
+        where: { id: keep.id },
+        data: { limitMinor, category: categoryKey },
+      });
+    } else {
+      await prisma.budgetGoal.create({
+        data: { planId, category: categoryKey, limitMinor },
+      });
+    }
+
+    const updated = await prisma.plan.findUnique({
+      where: { id: planId },
+      include: { budgetGoals: true, savingsGoals: true },
+    });
+
+    if (!updated) {
+      return NextResponse.json({ error: "Plan not found" }, { status: 404 });
+    }
+
+    const dto = toServerPlanDTO(updated);
+    return NextResponse.json({ plan: dto }, { status: 201 });
   } catch (error) {
     console.error("Upsert budget goal error:", error);
     return NextResponse.json(
@@ -172,78 +242,125 @@ export async function PATCH(
   const planId = params.id;
 
   const body: unknown = await request.json().catch(() => ({}));
-  const parsed = patchBudgetGoalsSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Invalid body", details: parsed.error.flatten() },
-      { status: 400 },
-    );
+  let parsed: PatchBudgetGoalsRequestDTO;
+  try {
+    parsed = patchBudgetGoalsRequestSchema.parse(body);
+  } catch (e: unknown) {
+    if (e instanceof ZodError) {
+      return NextResponse.json(
+        { error: "Invalid body", details: e.flatten() },
+        { status: 400 },
+      );
+    }
+    return NextResponse.json({ error: "Invalid body" }, { status: 400 });
   }
 
-  const actorUserId = resolveActorUserId(request, parsed.data.userId);
+  const actorUserId = requireActorUserId(request);
   if (!actorUserId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const result = await prisma.$transaction(async (tx: TxClient) => {
-    const plan = await tx.plan.findUnique({
-      where: { id: planId },
-      select: { id: true, userId: true },
-    });
-    if (!plan) return null;
+  try {
+    const result = await prisma.$transaction(async (tx: TxClient) => {
+      const plan = await tx.plan.findUnique({
+        where: { id: planId },
+        select: { id: true, userId: true },
+      });
+      if (!plan) return { kind: "NOT_FOUND" } as const;
 
-    if (plan.userId !== actorUserId) {
-      return null;
-    }
-
-    const incoming = parsed.data.budgetGoals ?? parsed.data.goals ?? [];
-
-    // Normalize + dedupe by category (last write wins)
-    const byCategory = new Map<string, number>();
-    for (const g of incoming) {
-      const category = String(g.category ?? "").trim();
-
-      const rawLimit =
-        typeof (g as any).limitMinor === "number"
-          ? (g as any).limitMinor
-          : typeof (g as any).limitCents === "number"
-            ? (g as any).limitCents
-            : 0;
-
-      const limitMinor = Math.max(0, Math.trunc(Number(rawLimit) || 0));
-
-      if (!category) continue;
-      byCategory.set(category, limitMinor);
-    }
-
-    for (const [category, limitMinor] of byCategory.entries()) {
-      if (limitMinor <= 0) {
-        await tx.budgetGoal.deleteMany({ where: { planId, category } });
-        continue;
+      if (plan.userId !== actorUserId) {
+        return { kind: "FORBIDDEN" } as const;
       }
 
-      const existing = await tx.budgetGoal.findFirst({
-        where: { planId, category },
-        select: { id: true },
+      const incoming = parsed.budgetGoals;
+
+      // Normalize + dedupe by category (last write wins)
+      const byCategory = new Map<string, number>();
+      for (const g of incoming) {
+        const category = normalizeCategoryKey(g.category);
+        const limitMinor = Math.max(
+          0,
+          Math.trunc(Number((g as any).limitMinor) || 0),
+        );
+        if (!category) continue;
+        byCategory.set(category, limitMinor);
+      }
+
+      const ops: Promise<unknown>[] = [];
+      for (const [categoryKey, limitMinor] of byCategory.entries()) {
+        if (limitMinor <= 0) {
+          ops.push(
+            tx.budgetGoal.deleteMany({
+              where: {
+                planId,
+                category: { equals: categoryKey, mode: "insensitive" },
+              },
+            }),
+          );
+          continue;
+        }
+
+        ops.push(
+          (async () => {
+            const matches = await tx.budgetGoal.findMany({
+              where: {
+                planId,
+                category: { equals: categoryKey, mode: "insensitive" },
+              },
+              select: { id: true },
+              orderBy: { id: "asc" },
+            });
+
+            const keep = matches[0];
+            const extras = matches.slice(1);
+
+            if (extras.length) {
+              await tx.budgetGoal.deleteMany({
+                where: { id: { in: extras.map((x) => x.id) } },
+              });
+            }
+
+            if (keep?.id) {
+              await tx.budgetGoal.update({
+                where: { id: keep.id },
+                data: { limitMinor, category: categoryKey },
+              });
+              return;
+            }
+
+            await tx.budgetGoal.create({
+              data: { planId, category: categoryKey, limitMinor },
+            });
+          })(),
+        );
+      }
+
+      await Promise.all(ops);
+
+      const updated = await tx.plan.findUnique({
+        where: { id: planId },
+        include: { budgetGoals: true, savingsGoals: true },
       });
 
-      if (existing?.id) {
-        await tx.budgetGoal.update({
-          where: { id: existing.id },
-          data: { limitMinor },
-        });
-      } else {
-        await tx.budgetGoal.create({ data: { planId, category, limitMinor } });
-      }
+      return { kind: "OK", plan: updated } as const;
+    });
+
+    if ((result as any)?.kind === "NOT_FOUND") {
+      return NextResponse.json({ error: "Plan not found" }, { status: 404 });
     }
 
-    return tx.plan.findUnique({
-      where: { id: planId },
-      include: { budgetGoals: true, savingsGoals: true },
-    });
-  });
+    if ((result as any)?.kind === "FORBIDDEN") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
 
-  if (!result)
-    return NextResponse.json({ error: "Plan not found" }, { status: 404 });
-  return NextResponse.json({ plan: result });
+    const plan = (result as any).plan;
+    const dto = toServerPlanDTO(plan);
+    return NextResponse.json({ plan: dto });
+  } catch (error) {
+    console.error("Patch budget goals error:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 },
+    );
+  }
 }

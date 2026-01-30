@@ -1,7 +1,4 @@
-const DEBUG_PLAN = __DEV__;
-const dlog = (...args: any[]) => {
-  if (DEBUG_PLAN) console.log(...args);
-};
+// apps/mobile/src/app/store/planStore.ts
 import React, {
   createContext,
   useCallback,
@@ -13,78 +10,42 @@ import React, {
 } from "react";
 import { AppState, AppStateStatus } from "react-native";
 
-import { API_BASE_URL, DEV_USER_ID } from "../config/env";
+import { useAuthStore } from "./authStore";
+import { plansApi } from "../api/plansApi";
+import type { Currency } from "../../../../../packages/shared/src/money/types";
+import type {
+  Plan,
+  ServerPlanDTO,
+  PlanPeriodType,
+  Language,
+  BudgetGoal,
+  SavingsGoal,
+  PatchPlanDTO,
+  PatchBudgetGoalsRequestDTO,
+  PatchSavingsGoalsRequestDTO,
+  SwitchCurrencyRequestDTO,
+} from "../../../../../packages/shared/src/plans/types";
+
 import { EXPENSE_CATEGORY_KEYS } from "../domain/categories";
-import type { Currency } from "../domain/money/currency";
 
 export type BudgetCategory = (typeof EXPENSE_CATEGORY_KEYS)[number] | string;
 
-export type BudgetGoal = {
-  id: string;
-  category: BudgetCategory;
-  limitMinor: number;
-};
-
-export type SavingsGoal = {
-  id: string;
-  name: string;
-  targetMinor: number;
-};
-
-export type PeriodType = "WEEKLY" | "BIWEEKLY" | "MONTHLY";
-
-export type UILanguage = "en" | "ko";
-
-export type Plan = {
-  // Period type
-  periodType: PeriodType;
-
-  // Start of the current period (week / 2-week block / calendar month) as YYYY-MM-DD.
-  periodStartISO: string;
-  // End of the current period as YYYY-MM-DD (inclusive, local date).
-  periodEndISO: string;
-  // Server-source-of-truth period boundaries (UTC instants as ISO strings)
-  periodStartUTC?: string;
-  periodEndUTC?: string;
-
-  // For BIWEEKLY, server may provide an anchor instant (UTC ISO)
-  periodAnchorUTC?: string;
-  // Optional timezone (IANA). If not provided by server, device timezone is used.
-  timeZone?: string;
-
-  // Currency preferences
-  // Home currency is the base for totals/progress calculations.
-  homeCurrency: Currency;
-  // Display currency controls how amounts are shown in the UI.
-  displayCurrency: Currency;
-
-  // Advanced currency mode (when false, treat currency as a single setting)
-  advancedCurrencyMode?: boolean;
-
-  // UI language
-  language?: UILanguage;
-
-  totalBudgetLimitMinor: number; // 0 = disabled
-  budgetGoals: BudgetGoal[];
-  savingsGoals: SavingsGoal[];
-};
-
 type Store = {
   plan: Plan;
-  setPeriodType: (type: PeriodType) => void;
+  setPeriodType: (type: PlanPeriodType) => void;
   // Switch period type on the server and set the returned plan as active.
   // Returns true on success.
-  switchPeriodType: (type: PeriodType) => Promise<boolean>;
+  switchPeriodType: (type: PlanPeriodType) => Promise<boolean>;
   refreshPeriodIfNeeded: () => void;
   homeCurrency: Currency;
   displayCurrency: Currency;
   switchPlanCurrency: (currency: Currency) => Promise<boolean>;
   advancedCurrencyMode: boolean;
-  language: UILanguage;
+  language: Language;
   setHomeCurrency: (c: Currency) => void;
   setDisplayCurrency: (c: Currency) => void;
   setAdvancedCurrencyMode: (enabled: boolean) => void;
-  setLanguage: (lang: UILanguage) => void;
+  setLanguage: (lang: Language) => void;
   setTotalBudgetLimitMinor: (minor: number) => void;
   upsertBudgetGoalLimit: (category: BudgetCategory, limitMinor: number) => void;
   upsertSavingsGoalTarget: (name: string, targetMinor: number) => void;
@@ -92,46 +53,22 @@ type Store = {
   removeSavingsGoal: (id: string) => void;
 
   refreshPlan: () => Promise<boolean>;
-  applyServerPlan: (serverPlan: {
-    language?: UILanguage | string | null;
-    periodType?: PeriodType;
-    // server may send DateTime ISO under either key
-    periodStartUTC?: string;
-    periodStart?: string;
+  activePlanId: string | null;
 
-    // server may send period end under either key
-    periodEndUTC?: string;
-    periodEnd?: string;
+  // Persist current budget goals to server using SSOT DTOs.
+  // Prefers /api/plans/[id]/goals/budget when activePlanId is known.
+  saveBudgetGoals: () => Promise<boolean>;
 
-    periodAnchorUTC?: string;
-    periodAnchor?: string;
+  // Single-goal upsert helper (POST /api/plans/[id]/goals/budget)
+  saveBudgetGoal: (
+    category: BudgetCategory,
+    limitMinor: number,
+  ) => Promise<boolean>;
 
-    // optional user timezone
-    timeZone?: string;
-
-    // totals are in minor units
-    totalBudgetLimitMinor?: number | null;
-
-    currency?: Currency;
-    homeCurrency?: Currency;
-    displayCurrency?: Currency;
-
-    // goals use minor units
-    budgetGoals?:
-      | {
-          id?: string | null;
-          category: string;
-          limitMinor?: number | null;
-        }[]
-      | null;
-    savingsGoals?:
-      | {
-          id?: string | null;
-          name: string;
-          targetMinor?: number | null;
-        }[]
-      | null;
-  }) => void;
+  // Persist current savings goals to server using SSOT DTOs.
+  // Prefers /api/plans/[id]/goals/savings when activePlanId is known.
+  saveSavingsGoals: () => Promise<boolean>;
+  applyServerPlan: (serverPlan: ServerPlanDTO) => void;
 
   // Bootstrap hydrate (plan only). Prefs source is userPrefsStore; these fields are deprecated.
   applyBootstrapPlan: (bootstrap: any) => void;
@@ -151,6 +88,11 @@ let _latestPlanSnapshot: { plan: Plan } | null = null;
 export function getPlanState() {
   return _latestPlanSnapshot;
 }
+
+// --- Module-level constants for defaults ---
+const DEFAULT_PERIOD_TYPE: PlanPeriodType = "MONTHLY";
+const DEFAULT_HOME_CURRENCY: Currency = "USD";
+const DEFAULT_DISPLAY_CURRENCY: Currency = "USD";
 
 function uid() {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
@@ -174,7 +116,7 @@ function safeParseISODateTime(iso: any): Date | null {
 
 function deriveLocalISOFromUTCInstant(
   utcISO: string,
-  timeZone: string
+  timeZone: string,
 ): string {
   const d = safeParseISODateTime(utcISO);
   if (!d) return "";
@@ -191,12 +133,17 @@ function stableIdForKey(prefix: string, key: string) {
 function buildDefaultBudgetGoals(): BudgetGoal[] {
   return EXPENSE_CATEGORY_KEYS.map((c) => ({
     id: stableIdForKey("budget", String(c)),
-    category: c,
+    category: String(c),
     limitMinor: 0,
   }));
 }
 
-function normalizeCategory(x: any): string {
+function normalizeCategoryKey(x: any): string {
+  const v = (x ?? "uncategorized").toString().trim();
+  return (v || "uncategorized").toLowerCase();
+}
+
+function normalizeName(x: any): string {
   return (x ?? "Other").toString().trim() || "Other";
 }
 
@@ -206,18 +153,127 @@ function normalizePositiveInt(n: any): number {
   return Math.max(0, Math.round(v));
 }
 
+function normalizeLanguage(v: any): Language {
+  return String(v) === "ko" ? "ko" : "en";
+}
+
+function normalizeCurrency(v: any): Currency {
+  return String(v).toUpperCase() === "KRW" ? "KRW" : "USD";
+}
+
+function normalizePlan(
+  server: ServerPlanDTO | null | undefined,
+  fallback: { existing: Plan },
+): Plan {
+  const existing = fallback.existing;
+  const timeZone =
+    (server?.timeZone && String(server.timeZone)) ||
+    existing.timeZone ||
+    Intl.DateTimeFormat().resolvedOptions().timeZone ||
+    "UTC";
+
+  const periodType: PlanPeriodType =
+    (server?.periodType as PlanPeriodType | undefined) ||
+    existing.periodType ||
+    DEFAULT_PERIOD_TYPE;
+
+  const language: Language =
+    server?.language == null
+      ? existing.language || "en"
+      : normalizeLanguage(server.language);
+
+  const currency: Currency =
+    server?.currency != null
+      ? normalizeCurrency(server.currency)
+      : server?.homeCurrency != null
+        ? normalizeCurrency(server.homeCurrency)
+        : server?.displayCurrency != null
+          ? normalizeCurrency(server.displayCurrency)
+          : existing.currency || existing.displayCurrency || "USD";
+
+  const homeCurrency: Currency =
+    server?.homeCurrency != null
+      ? normalizeCurrency(server.homeCurrency)
+      : server?.currency != null
+        ? currency
+        : existing.homeCurrency;
+
+  const displayCurrency: Currency =
+    server?.displayCurrency != null
+      ? normalizeCurrency(server.displayCurrency)
+      : server?.currency != null
+        ? currency
+        : existing.displayCurrency;
+
+  const periodStartUTC = server?.periodStartUTC || existing.periodStartUTC;
+  const periodEndUTC = server?.periodEndUTC || existing.periodEndUTC;
+  const periodAnchorUTC = server?.periodAnchorUTC || existing.periodAnchorUTC;
+
+  const periodStartISO =
+    periodStartUTC != null && String(periodStartUTC)
+      ? deriveLocalISOFromUTCInstant(String(periodStartUTC), timeZone) ||
+        String(periodStartUTC).slice(0, 10)
+      : existing.periodStartISO;
+
+  const periodEndISO =
+    periodEndUTC != null && String(periodEndUTC)
+      ? deriveLocalISOFromUTCInstant(String(periodEndUTC), timeZone) ||
+        String(periodEndUTC).slice(0, 10)
+      : existing.periodEndISO;
+
+  const serverBudgetGoals = Array.isArray(server?.budgetGoals)
+    ? (server?.budgetGoals ?? [])
+    : [];
+  const serverSavingsGoals = Array.isArray(server?.savingsGoals)
+    ? (server?.savingsGoals ?? [])
+    : [];
+
+  const nextBudgetGoals = mergeBudgetGoalsWithDefaults(
+    buildDefaultBudgetGoals(),
+    serverBudgetGoals,
+  );
+  const nextSavingsGoals = mergeSavingsGoals(
+    existing.savingsGoals,
+    serverSavingsGoals,
+  );
+
+  const serverTotalClean = normalizePositiveInt(server?.totalBudgetLimitMinor);
+  const computedTotal = sumBudgetLimits(nextBudgetGoals);
+  const totalBudgetLimitMinor =
+    serverTotalClean > 0 ? serverTotalClean : computedTotal;
+
+  return {
+    ...existing,
+    periodType,
+    currency,
+    language,
+    timeZone,
+    periodStartISO,
+    periodEndISO,
+    periodStartUTC: periodStartUTC || existing.periodStartUTC,
+    periodEndUTC: periodEndUTC || existing.periodEndUTC,
+    periodAnchorUTC: periodAnchorUTC || existing.periodAnchorUTC,
+    totalBudgetLimitMinor,
+    // keep multi-currency fields aligned unless server provides something else
+    homeCurrency,
+    displayCurrency,
+    budgetGoals: nextBudgetGoals,
+    savingsGoals: nextSavingsGoals,
+  };
+}
+
 function mergeBudgetGoalsWithDefaults(
   defaults: BudgetGoal[],
   serverGoals: {
     id?: string | null;
     category: string;
     limitMinor?: number | null;
-  }[]
+  }[],
 ): BudgetGoal[] {
-  // Map by normalized category: { limit, id? }
+  // Map by normalized category key: { limit, id? }
   const byCat = new Map<string, { limit: number; id?: string }>();
   serverGoals.forEach((g) => {
-    const cat = normalizeCategory(g.category);
+    const cat = normalizeCategoryKey(g.category);
     const raw = g.limitMinor ?? 0;
     const limit = normalizePositiveInt(raw);
     const id = g.id ? String(g.id) : undefined;
@@ -227,24 +283,30 @@ function mergeBudgetGoalsWithDefaults(
   // Start with defaults (keeps ordering + stable IDs), but if server provides an id for
   // a default category we accept it.
   const merged: BudgetGoal[] = defaults.map((d) => {
-    const key = String(d.category);
+    const key = normalizeCategoryKey(d.category);
     const hit = byCat.get(key);
     if (!hit) return d;
 
     return {
       ...d,
+      // Keep client-stable IDs; accept server id if it exists
       id: hit.id || d.id,
+      // Ensure category stays canonical
+      category: key,
       limitMinor: hit.limit,
     };
   });
 
   // Append any server categories not in defaults
   byCat.forEach((val, cat) => {
-    const exists = merged.some((m) => String(m.category) === cat);
+    const exists = merged.some(
+      (m) => normalizeCategoryKey(m.category) === normalizeCategoryKey(cat),
+    );
     if (!exists) {
+      const key = normalizeCategoryKey(cat);
       merged.push({
-        id: val.id || stableIdForKey("budget", cat),
-        category: cat,
+        id: val.id || stableIdForKey("budget", key),
+        category: key,
         limitMinor: val.limit,
       });
     }
@@ -259,11 +321,11 @@ function mergeSavingsGoals(
     id?: string | null;
     name: string;
     targetMinor?: number | null;
-  }[]
+  }[],
 ): SavingsGoal[] {
   const byName = new Map<string, { target: number; id?: string }>();
   serverGoals.forEach((g) => {
-    const name = normalizeCategory(g.name);
+    const name = normalizeName(g.name);
     const raw = g.targetMinor ?? 0;
     const target = normalizePositiveInt(raw);
     const id = g.id ? String(g.id) : undefined;
@@ -287,22 +349,20 @@ function mergeSavingsGoals(
 function sumBudgetLimits(goals: BudgetGoal[]) {
   return goals.reduce(
     (sum, g) => sum + (g.limitMinor > 0 ? g.limitMinor : 0),
-    0
+    0,
   );
 }
 
 export function PlanProvider({ children }: { children: React.ReactNode }) {
-  const DEFAULT_PERIOD_TYPE: PeriodType = "MONTHLY";
+  const { token } = useAuthStore();
 
-  const DEFAULT_HOME_CURRENCY: Currency = "USD";
-  const DEFAULT_DISPLAY_CURRENCY: Currency = "USD";
-
-  const [plan, setPlan] = useState<Plan>(() => {
+  const makeInitialPlan = useCallback((): Plan => {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
     const todayISO = toISODateInTimeZone(new Date(), tz);
 
     return {
       periodType: DEFAULT_PERIOD_TYPE,
+      currency: DEFAULT_DISPLAY_CURRENCY,
       // Server-driven: we don't compute boundaries client-side.
       // Initialize with today's local date as a placeholder; will be replaced by server plan/bundle.
       periodStartISO: todayISO,
@@ -315,7 +375,10 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       budgetGoals: buildDefaultBudgetGoals(),
       savingsGoals: [],
     };
-  });
+  }, []);
+
+  const [plan, setPlan] = useState<Plan>(() => makeInitialPlan());
+  const [activePlanId, setActivePlanId] = useState<string | null>(null);
 
   // Keep module-level snapshot in sync for non-hook reads.
   useEffect(() => {
@@ -324,6 +387,9 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
   const [isInitialized, setIsInitialized] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const setErrorSafe = useCallback(() => {
+    // planStore currently does not expose an error field; keep as a no-op for future.
+  }, []);
   // `applyServerPlan` is memoized with [], so anything it calls can become stale.
   // Keep a ref to the latest rollover callback so we can trigger rollover right after
   // applying a server plan without stale-closure issues.
@@ -332,7 +398,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   >(async () => {});
 
   const setTotalBudgetLimitMinor: Store["setTotalBudgetLimitMinor"] = (
-    minor
+    minor,
   ) => {
     const clean = Math.max(0, Number.isFinite(minor) ? Math.round(minor) : 0);
     setPlan((p) => ({ ...p, totalBudgetLimitMinor: clean }));
@@ -349,7 +415,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   };
 
   const setAdvancedCurrencyMode: Store["setAdvancedCurrencyMode"] = (
-    enabled
+    enabled,
   ) => {
     const on = !!enabled;
 
@@ -374,7 +440,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   };
 
   const setLanguage: Store["setLanguage"] = (lang) => {
-    const next: UILanguage = lang === "ko" ? "ko" : "en";
+    const next: Language = lang === "ko" ? "ko" : "en";
     setPlan((p) => ({
       ...p,
       language: next,
@@ -382,7 +448,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   };
 
   const setPeriodType: Store["setPeriodType"] = (type) => {
-    const nextType: PeriodType = type ?? DEFAULT_PERIOD_TYPE;
+    const nextType: PlanPeriodType = type ?? DEFAULT_PERIOD_TYPE;
     setPlan((p) => {
       return {
         ...p,
@@ -397,234 +463,56 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
    */
   const applyServerPlan: Store["applyServerPlan"] = useCallback(
     (serverPlan) => {
-      const periodType: PeriodType = (serverPlan?.periodType ??
-        DEFAULT_PERIOD_TYPE) as PeriodType;
+      const maybeId = serverPlan?.id;
+      if (typeof maybeId === "string" && maybeId.trim()) {
+        setActivePlanId(maybeId.trim());
+      }
 
-      const timeZone = (serverPlan as any)?.timeZone
-        ? String((serverPlan as any).timeZone)
-        : undefined;
-
-      const periodStartUTC = (
-        serverPlan?.periodStartUTC ??
-        (serverPlan as any)?.periodStart ??
-        ""
-      ).toString();
-
-      const periodEndUTC = (
-        (serverPlan as any)?.periodEndUTC ??
-        (serverPlan as any)?.periodEnd ??
-        ""
-      ).toString();
-
-      const periodAnchorUTC = (
-        (serverPlan as any)?.periodAnchorUTC ??
-        (serverPlan as any)?.periodAnchor ??
-        ""
-      ).toString();
-
-      // Derive YYYY-MM-DD strings for UI from UTC instants when possible
-      const tzForDerive =
-        timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-
-      const periodStartISO =
-        deriveLocalISOFromUTCInstant(periodStartUTC, tzForDerive) ||
-        (periodStartUTC ? periodStartUTC.slice(0, 10) : "");
-
-      const periodEndISO =
-        deriveLocalISOFromUTCInstant(periodEndUTC, tzForDerive) ||
-        (periodEndUTC ? periodEndUTC.slice(0, 10) : "");
-
-      const serverBudgetGoals = Array.isArray(serverPlan?.budgetGoals)
-        ? serverPlan.budgetGoals
-        : [];
-
-      const serverSavingsGoals = Array.isArray(serverPlan?.savingsGoals)
-        ? serverPlan.savingsGoals
-        : [];
-
-      const serverTotalRaw = serverPlan?.totalBudgetLimitMinor;
-      const serverTotalClean = normalizePositiveInt(serverTotalRaw);
-
-      setPlan((p) => {
-        const defaults = buildDefaultBudgetGoals();
-        const nextBudgetGoals = mergeBudgetGoalsWithDefaults(
-          defaults,
-          serverBudgetGoals
-        );
-
-        const nextSavingsGoals = mergeSavingsGoals(
-          p.savingsGoals,
-          serverSavingsGoals
-        );
-
-        const computedTotal = sumBudgetLimits(nextBudgetGoals);
-        const totalBudgetLimitMinor =
-          serverTotalClean > 0 ? serverTotalClean : computedTotal;
-
-        const nextPeriodStartISO = periodStartISO || p.periodStartISO;
-
-        const normalizedLang: UILanguage | undefined =
-          serverPlan?.language == null
-            ? undefined
-            : String(serverPlan.language) === "ko"
-            ? "ko"
-            : "en";
-
-        const next = {
-          ...p,
-          language: normalizedLang ?? p.language ?? "en",
-          periodType,
-          periodStartISO: nextPeriodStartISO,
-          periodEndISO: periodEndISO || (p as any).periodEndISO,
-          periodStartUTC: periodStartUTC || p.periodStartUTC,
-          periodEndUTC: periodEndUTC || p.periodEndUTC,
-          periodAnchorUTC: periodAnchorUTC || p.periodAnchorUTC,
-          timeZone: timeZone ?? p.timeZone,
-          totalBudgetLimitMinor,
-          homeCurrency:
-            serverPlan.homeCurrency ?? serverPlan.currency ?? p.homeCurrency,
-          displayCurrency:
-            serverPlan.displayCurrency ??
-            serverPlan.currency ??
-            p.displayCurrency,
-          budgetGoals: nextBudgetGoals,
-          savingsGoals: nextSavingsGoals,
-        };
-
-        dlog("[applyServerPlan] applied:", {
-          language: serverPlan.language,
-          periodType: next.periodType,
-          currencyFromServer: serverPlan.currency,
-          homeCurrency: next.homeCurrency,
-          displayCurrency: next.displayCurrency,
-          periodStartISO: next.periodStartISO,
-          periodEndISO: (next as any).periodEndISO,
-          periodStartUTC: next.periodStartUTC,
-          periodEndUTC: next.periodEndUTC,
-          periodAnchorUTC: next.periodAnchorUTC,
-          timeZone: next.timeZone,
-        });
-
-        dlog("[planStore] post-apply rollover check queued");
-
+      setPlan((prev) => {
+        const next = normalizePlan(serverPlan, { existing: prev });
         setTimeout(() => {
-          dlog("[planStore] post-apply rollover check running");
           void tryRolloverIfNeededRef.current("resume");
         }, 0);
-
         return next;
       });
     },
-    []
+    [],
   );
 
   const refreshPlan: Store["refreshPlan"] = useCallback(async () => {
-    const endpoint = `${API_BASE_URL}/api/plans`;
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      "x-dev-user-id": DEV_USER_ID,
-    };
-
-    // Helper to map raw server plan to applyServerPlan
-    const applyRawPlan = (raw: any) => {
-      applyServerPlan({
-        language: raw?.language,
-        periodType: raw?.periodType,
-        // server may send DateTime ISO under either key
-        periodStartUTC: raw?.periodStartUTC ?? raw?.periodStart,
-        periodEndUTC: raw?.periodEndUTC ?? raw?.periodEnd,
-        periodAnchorUTC: raw?.periodAnchorUTC ?? raw?.periodAnchor,
-        timeZone: raw?.timeZone,
-        totalBudgetLimitMinor: raw?.totalBudgetLimitMinor ?? null,
-        currency: raw?.currency,
-        budgetGoals: Array.isArray(raw?.budgetGoals)
-          ? raw.budgetGoals.map((g: any) => ({
-              id: g.id ?? null,
-              category: g.category,
-              limitMinor:
-                typeof g.limitMinor === "number" ? g.limitMinor : null,
-            }))
-          : null,
-        savingsGoals: Array.isArray(raw?.savingsGoals)
-          ? raw.savingsGoals.map((g: any) => ({
-              id: g.id ?? null,
-              name: g.name,
-              targetMinor:
-                typeof g.targetMinor === "number" ? g.targetMinor : null,
-            }))
-          : null,
-      });
-    };
+    if (!token) {
+      console.warn("[planStore] Missing auth token. Cannot refresh plan.");
+      return false;
+    }
 
     try {
-      // 1) active plan 조회
-      const res = await fetch(endpoint, {
-        method: "GET",
-        headers,
-      });
-
-      // 404면 최초 생성 흐름으로 넘어감
-      if (res.status === 404) {
-        console.log("[planStore] No plan found. Creating monthly plan...");
-
-        const createRes = await fetch(endpoint, {
-          method: "PATCH",
-          headers,
-          body: JSON.stringify({
+      const resp = await plansApi.getActive(token);
+      applyServerPlan(resp.plan);
+      return true;
+    } catch (err: any) {
+      // If server reports no plan yet, create a default active plan.
+      if (err?.status === 404) {
+        try {
+          const created = await plansApi.update(token, {
             periodType: DEFAULT_PERIOD_TYPE,
-            // 기본값=MONTHLY+ 즉시 active로 전환
             setActive: true,
             useCurrentPeriod: true,
             currency: "USD",
             language: "en",
             totalBudgetLimitMinor: 0,
-          }),
-        });
-
-        if (!createRes.ok) {
-          const text = await createRes.text().catch(() => "");
-          console.warn(
-            "[planStore] Failed to create monthly plan",
-            createRes.status,
-            text
-          );
+          });
+          applyServerPlan(created.plan);
+          return true;
+        } catch (e) {
+          console.warn("[planStore] Failed to create default plan", e);
           return false;
         }
-
-        const raw = await createRes.json();
-        applyRawPlan(raw);
-        return true;
       }
 
-      // 그 외 에러는 실패 처리
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        console.warn(
-          "[planStore] Failed to refresh plan from server",
-          res.status,
-          text
-        );
-        return false;
-      }
-
-      // 2) 정상 조회면 plan 적용
-      const raw = await res.json();
-
-      dlog("[switchPeriodType] server raw:", {
-        periodType: raw?.periodType,
-        currency: raw?.currency,
-        periodStartUTC: raw?.periodStartUTC ?? raw?.periodStart,
-        periodEndUTC: raw?.periodEndUTC ?? raw?.periodEnd,
-        timeZone: raw?.timeZone,
-        periodAnchorUTC: raw?.periodAnchorUTC ?? raw?.periodAnchor,
-      });
-      applyRawPlan(raw);
-      return true;
-    } catch (err) {
       console.error("[planStore] Error while refreshing plan", err);
       return false;
     }
-  }, [applyServerPlan]);
+  }, [applyServerPlan, token]);
 
   // ---------------------------------------------------------------------------
   // Global rollover orchestration (works from any screen)
@@ -647,20 +535,29 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const postRollover = useCallback(async () => {
-    const endpoint = `${API_BASE_URL}/api/plans/rollover`;
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      "x-dev-user-id": DEV_USER_ID,
-    };
-
-    const res = await fetch(endpoint, { method: "POST", headers });
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`rollover failed: ${res.status} ${text}`);
+  useEffect(() => {
+    // When logging out, clear sensitive plan state and reset initialization.
+    if (!token) {
+      clearRolloverTimer();
+      lastRolloverAttemptAtRef.current = 0;
+      lastRolloverKeyRef.current = null;
+      setErrorSafe();
+      setPlan(makeInitialPlan());
+      setIsInitialized(false);
+      setIsLoading(false);
+      return;
     }
-    return res.json();
-  }, []);
+
+    // When logging in (token becomes available), refresh the active plan.
+    void refreshPlan();
+  }, [token, clearRolloverTimer, makeInitialPlan, refreshPlan, setErrorSafe]);
+
+  const postRollover = useCallback(async () => {
+    if (!token) {
+      throw new Error("Missing auth token");
+    }
+    return plansApi.rollover(token);
+  }, [token]);
 
   const getUserTimeZone = useCallback((): string => {
     return (
@@ -684,33 +581,22 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       // Need server plan info first
       // initialize 중(isLoading=true)에도 launch 체크는 허용
       if (!isInitialized && !isLoading && reason !== "launch") {
-        dlog("[planStore] rollover skip (not ready)", {
-          reason,
-          isInitialized,
-          isLoading,
-        });
         return;
       }
 
       const endISO = plan.periodEndUTC;
       if (!endISO) {
-        dlog("[planStore] rollover skip (no periodEndUTC)", { reason });
         return;
       }
 
       // Session-level de-dupe key (prevents repeated attempts for the same server period)
       const key = `${plan.periodType}|${plan.periodStartUTC ?? ""}|${endISO}`;
       if (lastRolloverKeyRef.current === key) {
-        dlog("[planStore] rollover skip (same key)", { reason, key });
         return;
       }
 
       const endMs = Date.parse(endISO);
       if (!Number.isFinite(endMs)) {
-        dlog("[planStore] rollover skip (bad endMs)", {
-          reason,
-          endISO,
-        });
         return;
       }
 
@@ -718,11 +604,6 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
       // Only rollover after the plan has actually ended
       if (nowMs < endMs) {
-        dlog("[planStore] rollover skip (not ended yet)", {
-          reason,
-          endISO,
-          msUntilEnd: endMs - nowMs,
-        });
         return;
       }
 
@@ -733,10 +614,6 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         reason !== "timer" &&
         nowMs - lastRolloverAttemptAtRef.current < 2 * 60 * 1000
       ) {
-        dlog("[planStore] rollover skip (cooldown)", {
-          reason,
-          msSinceLast: nowMs - lastRolloverAttemptAtRef.current,
-        });
         return;
       }
 
@@ -746,20 +623,8 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       // Mark key as in-flight for this session (prevents back-to-back double calls)
       lastRolloverKeyRef.current = key;
 
-      dlog("[planStore] rollover attempt", {
-        reason,
-        key,
-        endISO,
-      });
-
       try {
         const r = await postRollover();
-        dlog("[planStore] rollover response", {
-          reason,
-          key,
-          rolled: !!r?.rolled,
-        });
-
         if (r?.rolled) {
           await refreshPlan();
         } else {
@@ -782,7 +647,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       plan.periodEndUTC,
       postRollover,
       refreshPlan,
-    ]
+    ],
   );
 
   useEffect(() => {
@@ -857,69 +722,37 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
   const switchPlanCurrency = useCallback(
     async (nextCurrency: "USD" | "KRW") => {
-      const endpoint = `${API_BASE_URL}/api/plans`;
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        "x-dev-user-id": DEV_USER_ID,
-      };
+      if (!token) {
+        console.warn(
+          "[planStore] Missing auth token. Cannot switch plan currency.",
+        );
+        return false;
+      }
 
-      const currentType: PeriodType = (plan.periodType ??
-        DEFAULT_PERIOD_TYPE) as PeriodType;
-
-      const body: any = {
-        periodType: currentType,
-        setActive: true,
-        useCurrentPeriod: true,
-        currency: nextCurrency,
-        language: plan.language ?? "en",
-        totalBudgetLimitMinor: plan.totalBudgetLimitMinor ?? 0,
-      };
+      const currentType: PlanPeriodType = (plan.periodType ??
+        DEFAULT_PERIOD_TYPE) as PlanPeriodType;
 
       try {
-        const res = await fetch(endpoint, {
-          method: "PATCH",
-          headers,
-          body: JSON.stringify(body),
-        });
-
-        if (!res.ok) {
-          const text = await res.text().catch(() => "");
-          console.warn(
-            "[planStore] switchPlanCurrency failed",
-            res.status,
-            text
-          );
-          return false;
+        if (activePlanId) {
+          const dto: SwitchCurrencyRequestDTO = {
+            periodType: currentType,
+            currency: nextCurrency,
+          };
+          const resp = await plansApi.switchCurrency(token, activePlanId, dto);
+          applyServerPlan(resp.plan);
+          return true;
         }
 
-        const raw = await res.json();
-
-        applyServerPlan({
-          language: raw?.language,
-          periodType: raw?.periodType,
-          periodStartUTC: raw?.periodStartUTC ?? raw?.periodStart,
-          periodEndUTC: raw?.periodEndUTC ?? raw?.periodEnd,
-          periodAnchorUTC: raw?.periodAnchorUTC ?? raw?.periodAnchor,
-          timeZone: raw?.timeZone,
-          totalBudgetLimitMinor: raw?.totalBudgetLimitMinor ?? null,
-          currency: raw?.currency,
-          budgetGoals: Array.isArray(raw?.budgetGoals)
-            ? raw.budgetGoals.map((g: any) => ({
-                id: g.id ?? null,
-                category: g.category,
-                limitMinor:
-                  typeof g.limitMinor === "number" ? g.limitMinor : null,
-              }))
-            : null,
-          savingsGoals: Array.isArray(raw?.savingsGoals)
-            ? raw.savingsGoals.map((g: any) => ({
-                id: g.id ?? null,
-                name: g.name,
-                targetMinor:
-                  typeof g.targetMinor === "number" ? g.targetMinor : null,
-              }))
-            : null,
+        // Fallback: patch active plan until we know planId
+        const serverPlan = await plansApi.update(token, {
+          periodType: currentType,
+          setActive: true,
+          useCurrentPeriod: true,
+          currency: nextCurrency,
+          language: plan.language ?? "en",
+          totalBudgetLimitMinor: plan.totalBudgetLimitMinor ?? 0,
         });
+        applyServerPlan(serverPlan.plan);
 
         return true;
       } catch (err) {
@@ -927,20 +760,22 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
     },
-    [plan, applyServerPlan]
+    [plan, activePlanId, applyServerPlan, token],
   );
 
   const switchPeriodType: Store["switchPeriodType"] = useCallback(
     async (type) => {
-      const nextType: PeriodType = (type ?? DEFAULT_PERIOD_TYPE) as PeriodType;
+      const nextType: PlanPeriodType = (type ??
+        DEFAULT_PERIOD_TYPE) as PlanPeriodType;
 
-      const endpoint = `${API_BASE_URL}/api/plans`;
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-        "x-dev-user-id": DEV_USER_ID,
-      };
+      if (!token) {
+        console.warn(
+          "[planStore] Missing auth token. Cannot switch period type.",
+        );
+        return false;
+      }
 
-      const body: any = {
+      const body: PatchPlanDTO = {
         periodType: nextType,
         setActive: true,
         useCurrentPeriod: true,
@@ -948,55 +783,11 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         // currency: plan.homeCurrency,
         language: plan.language ?? "en",
         totalBudgetLimitMinor: plan.totalBudgetLimitMinor ?? 0,
-      };
+      } as any;
 
       try {
-        const res = await fetch(endpoint, {
-          method: "PATCH",
-          headers,
-          body: JSON.stringify(body),
-        });
-
-        if (!res.ok) {
-          const text = await res.text().catch(() => "");
-          console.warn(
-            "[planStore] Failed to switch period type",
-            res.status,
-            text
-          );
-          return false;
-        }
-
-        const raw = await res.json();
-
-        // Apply server plan (source of truth)
-        applyServerPlan({
-          language: raw?.language,
-          periodType: raw?.periodType,
-          periodStartUTC: raw?.periodStartUTC ?? raw?.periodStart,
-          periodEndUTC: raw?.periodEndUTC ?? raw?.periodEnd,
-          periodAnchorUTC: raw?.periodAnchorUTC ?? raw?.periodAnchor,
-          timeZone: raw?.timeZone,
-          totalBudgetLimitMinor: raw?.totalBudgetLimitMinor ?? null,
-          // ✅ 새 플랜의 통화로 UI도 자동 동기화
-          currency: raw?.currency,
-          budgetGoals: Array.isArray(raw?.budgetGoals)
-            ? raw.budgetGoals.map((g: any) => ({
-                id: g.id ?? null,
-                category: g.category,
-                limitMinor:
-                  typeof g.limitMinor === "number" ? g.limitMinor : null,
-              }))
-            : null,
-          savingsGoals: Array.isArray(raw?.savingsGoals)
-            ? raw.savingsGoals.map((g: any) => ({
-                id: g.id ?? null,
-                name: g.name,
-                targetMinor:
-                  typeof g.targetMinor === "number" ? g.targetMinor : null,
-              }))
-            : null,
-        });
+        const serverPlan = await plansApi.update(token, body);
+        applyServerPlan(serverPlan.plan);
 
         return true;
       } catch (err) {
@@ -1004,7 +795,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
     },
-    [plan, applyServerPlan]
+    [plan, applyServerPlan, token],
   );
 
   const refreshPeriodIfNeeded: Store["refreshPeriodIfNeeded"] =
@@ -1048,12 +839,16 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
   const initialize: Store["initialize"] = useCallback(async () => {
     if (isInitialized || isLoading) return;
+    if (!token) {
+      // Not authenticated yet; wait for login.
+      return;
+    }
     setIsLoading(true);
     try {
       // 1) 클라이언트 기준 기간 보정 (UI용)
       refreshPeriodIfNeeded();
 
-      // 2) 서버 plan 로드 (중복 fetch 제거)
+      // 2) 서버 plan 로드 (중복 요청 제거)
       await refreshPlan();
 
       // 3) 이미 기간이 끝났으면 즉시 rollover (앱 진입 시)
@@ -1065,6 +860,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   }, [
     isInitialized,
     isLoading,
+    token,
     refreshPeriodIfNeeded,
     refreshPlan,
     tryRolloverIfNeeded,
@@ -1076,21 +872,29 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
   const upsertBudgetGoalLimit: Store["upsertBudgetGoalLimit"] = (
     category,
-    limitMinor
+    limitMinor,
   ) => {
-    const cat = (category || "Other").toString().trim() || "Other";
+    const cat = normalizeCategoryKey(category);
     const cleanLimit = Math.max(
       0,
-      Number.isFinite(limitMinor) ? Math.round(limitMinor) : 0
+      Number.isFinite(limitMinor) ? Math.round(limitMinor) : 0,
     );
 
     setPlan((p) => {
-      const idx = p.budgetGoals.findIndex((g) => g.category === cat);
+      // Compare using normalized keys to avoid casing mismatches
+      const idx = p.budgetGoals.findIndex(
+        (g) => normalizeCategoryKey(g.category) === cat,
+      );
+
       let nextGoals = p.budgetGoals;
 
       if (idx >= 0) {
         nextGoals = p.budgetGoals.slice();
-        nextGoals[idx] = { ...nextGoals[idx], limitMinor: cleanLimit };
+        nextGoals[idx] = {
+          ...nextGoals[idx],
+          category: cat,
+          limitMinor: cleanLimit,
+        };
       } else {
         nextGoals = [
           ...p.budgetGoals,
@@ -1100,25 +904,178 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
       const total = nextGoals.reduce(
         (sum, g) => sum + (g.limitMinor > 0 ? g.limitMinor : 0),
-        0
+        0,
       );
 
-      return {
+      const nextPlan = {
         ...p,
         budgetGoals: nextGoals,
         totalBudgetLimitMinor: total,
       };
+
+      // IMPORTANT: keep module-level snapshot in sync immediately.
+      // useEffect runs after render, so without this an immediate save can read stale goals.
+      _latestPlanSnapshot = { plan: nextPlan };
+
+      return nextPlan;
     });
   };
+  const saveBudgetGoals: Store["saveBudgetGoals"] = useCallback(async () => {
+    if (!token) {
+      console.warn("[planStore] Missing auth token. Cannot save budget goals.");
+      return false;
+    }
+
+    // Build from the freshest snapshot to avoid stale-closure/state timing issues
+    // (e.g., saving immediately after `upsertBudgetGoalLimit`)
+    const latest = getPlanState()?.plan ?? plan;
+
+    const payload: PatchBudgetGoalsRequestDTO = {
+      budgetGoals: (latest.budgetGoals ?? []).map((g) => ({
+        category: normalizeCategoryKey(g.category),
+        limitMinor: Math.max(0, Math.trunc(Number(g.limitMinor) || 0)),
+      })),
+    };
+
+    console.log(
+      "[planStore] PATCH budget goals payload:",
+      JSON.stringify(payload),
+    );
+
+    try {
+      if (activePlanId) {
+        const resp = await plansApi.patchBudgetGoals(
+          token,
+          activePlanId,
+          payload,
+        );
+        if (resp?.plan) {
+          applyServerPlan(resp.plan);
+        }
+        return true;
+      }
+
+      // Fallback: patch the active plan via /api/plans (until we know planId)
+      const latest = getPlanState()?.plan ?? plan;
+      const resp = await plansApi.update(token, {
+        periodType: latest.periodType,
+        budgetGoals: payload.budgetGoals.map((g) => ({
+          category: g.category,
+          limitMinor: g.limitMinor,
+        })),
+        setActive: true,
+        useCurrentPeriod: true,
+      } as any);
+      applyServerPlan(resp.plan);
+      return true;
+    } catch (e) {
+      console.warn("[planStore] saveBudgetGoals error", e);
+      return false;
+    }
+  }, [token, plan.budgetGoals, plan.periodType, activePlanId, applyServerPlan]);
+
+  const saveBudgetGoal: Store["saveBudgetGoal"] = useCallback(
+    async (category, limitMinor) => {
+      if (!token) {
+        console.warn(
+          "[planStore] Missing auth token. Cannot save budget goal.",
+        );
+        return false;
+      }
+
+      const planId = activePlanId;
+      if (!planId) {
+        // If we don't know planId yet, fall back to bulk save.
+        return saveBudgetGoals();
+      }
+
+      const payload = {
+        category: normalizeCategoryKey(category),
+        limitMinor: Math.max(0, Math.trunc(Number(limitMinor) || 0)),
+      };
+
+      console.log(
+        "[planStore] POST budget goal payload:",
+        JSON.stringify(payload),
+      );
+
+      try {
+        const resp = await plansApi.upsertBudgetGoal(token, planId, payload);
+        if (resp?.plan) {
+          applyServerPlan(resp.plan);
+        }
+        return true;
+      } catch (e) {
+        console.warn("[planStore] saveBudgetGoal error", e);
+        return false;
+      }
+    },
+    [token, activePlanId, applyServerPlan, saveBudgetGoals],
+  );
+
+  const saveSavingsGoals: Store["saveSavingsGoals"] = useCallback(async () => {
+    if (!token) {
+      console.warn(
+        "[planStore] Missing auth token. Cannot save savings goals.",
+      );
+      return false;
+    }
+
+    // Build from the freshest snapshot to avoid stale-closure/state timing issues
+    // (e.g., saving immediately after `upsertSavingsGoalTarget`)
+    const latest = getPlanState()?.plan ?? plan;
+
+    const payload: PatchSavingsGoalsRequestDTO = {
+      savingsGoals: (latest.savingsGoals ?? []).map((g) => ({
+        name: normalizeName(g.name),
+        targetMinor: Math.max(0, Math.trunc(Number(g.targetMinor) || 0)),
+      })),
+    };
+
+    console.log(
+      "[planStore] PATCH savings goals payload:",
+      JSON.stringify(payload),
+    );
+
+    try {
+      if (activePlanId) {
+        const resp = await plansApi.patchSavingsGoals(
+          token,
+          activePlanId,
+          payload,
+        );
+        if (resp?.plan) {
+          applyServerPlan(resp.plan);
+        }
+        return true;
+      }
+
+      // Fallback: patch the active plan via /api/plans (until we know planId)
+      const resp = await plansApi.update(token, {
+        periodType: latest.periodType,
+        savingsGoals: payload.savingsGoals.map((g) => ({
+          name: g.name,
+          targetMinor: g.targetMinor,
+        })),
+        setActive: true,
+        useCurrentPeriod: true,
+      } as any);
+      applyServerPlan(resp.plan);
+      return true;
+    } catch (e) {
+      console.warn("[planStore] saveSavingsGoals error", e);
+      return false;
+    }
+  }, [token, plan, activePlanId, applyServerPlan]);
 
   const upsertSavingsGoalTarget: Store["upsertSavingsGoalTarget"] = (
     name,
-    targetMinor
+    targetMinor,
   ) => {
     const n = (name || "Other").toString().trim() || "Other";
     const clean = Math.max(
       0,
-      Number.isFinite(targetMinor) ? Math.round(targetMinor) : 0
+      Number.isFinite(targetMinor) ? Math.round(targetMinor) : 0,
     );
 
     setPlan((p) => {
@@ -1127,18 +1084,24 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       if (idx >= 0) {
         const next = p.savingsGoals.slice();
         next[idx] = { ...next[idx], targetMinor: clean };
-        return { ...p, savingsGoals: next };
+
+        const nextPlan = { ...p, savingsGoals: next };
+        _latestPlanSnapshot = { plan: nextPlan };
+        return nextPlan;
       }
 
       if (clean <= 0) return p;
 
-      return {
+      const nextPlan = {
         ...p,
         savingsGoals: [
           ...p.savingsGoals,
           { id: uid(), name: n, targetMinor: clean },
         ],
       };
+
+      _latestPlanSnapshot = { plan: nextPlan };
+      return nextPlan;
     });
   };
 
@@ -1146,21 +1109,32 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     const n = (name || "").trim();
     const t = Math.max(
       0,
-      Number.isFinite(targetMinor) ? Math.round(targetMinor) : 0
+      Number.isFinite(targetMinor) ? Math.round(targetMinor) : 0,
     );
     if (!n || t <= 0) return;
 
-    setPlan((p) => ({
-      ...p,
-      savingsGoals: [...p.savingsGoals, { id: uid(), name: n, targetMinor: t }],
-    }));
+    setPlan((p) => {
+      const nextPlan = {
+        ...p,
+        savingsGoals: [
+          ...p.savingsGoals,
+          { id: uid(), name: n, targetMinor: t },
+        ],
+      };
+      _latestPlanSnapshot = { plan: nextPlan };
+      return nextPlan;
+    });
   };
 
   const removeSavingsGoal: Store["removeSavingsGoal"] = (id) => {
-    setPlan((p) => ({
-      ...p,
-      savingsGoals: p.savingsGoals.filter((g) => g.id !== id),
-    }));
+    setPlan((p) => {
+      const nextPlan = {
+        ...p,
+        savingsGoals: p.savingsGoals.filter((g) => g.id !== id),
+      };
+      _latestPlanSnapshot = { plan: nextPlan };
+      return nextPlan;
+    });
   };
 
   const applyBootstrapPlan: Store["applyBootstrapPlan"] = useCallback(
@@ -1180,12 +1154,16 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         setIsInitialized(true);
       }
     },
-    [applyServerPlan]
+    [applyServerPlan],
   );
 
   const store = useMemo<Store>(
     () => ({
       plan,
+      activePlanId,
+      saveBudgetGoals,
+      saveBudgetGoal,
+      saveSavingsGoals,
       refreshPlan,
       setPeriodType,
       switchPeriodType,
@@ -1194,7 +1172,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       homeCurrency: plan.homeCurrency,
       displayCurrency: plan.displayCurrency,
       advancedCurrencyMode: !!plan.advancedCurrencyMode,
-      language: (plan.language ?? "en") as UILanguage,
+      language: (plan.language ?? "en") as Language,
       setHomeCurrency,
       setDisplayCurrency,
       setAdvancedCurrencyMode,
@@ -1212,6 +1190,10 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     }),
     [
       plan,
+      activePlanId,
+      saveBudgetGoals,
+      saveBudgetGoal,
+      saveSavingsGoals,
       refreshPlan, // ✅ deps 추가 (중요)
       setPeriodType,
       switchPeriodType,
@@ -1231,7 +1213,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       isInitialized,
       isLoading,
       initialize,
-    ]
+    ],
   );
 
   return React.createElement(PlanContext.Provider, { value: store }, children);
@@ -1245,3 +1227,7 @@ export function usePlanStore() {
 
 // 기존 코드와의 호환성을 위해 usePlan도 그대로 export (alias)
 export const usePlan = usePlanStore;
+
+// Back-compat type aliases (some screens import these from planStore)
+export type PeriodType = PlanPeriodType;
+export type UILanguage = Language;

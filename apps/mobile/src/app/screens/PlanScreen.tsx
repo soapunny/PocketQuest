@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -9,194 +9,89 @@ import {
   Alert,
 } from "react-native";
 
-import { usePlan, getPlanState } from "../store/planStore";
-import { plansApi } from "../api/plansApi";
-import { useTransactions } from "../store/transactionsStore";
-import {
-  EXPENSE_CATEGORIES,
-  SAVINGS_GOALS,
-} from "../domain/transactions/categories";
-
-import { computePlanProgressPercent } from "../domain/plan/progress";
-import { getPlanPeriodRange, isISOInRange } from "../domain/plan/period/index";
-
-import type { Currency } from "../domain/money/currency";
-import {
-  convertMinor,
-  formatMoney,
-  parseInputToMinor,
-} from "../domain/money/currency";
+// UI components and layout
 import { CardSpacing } from "../components/Typography";
 import ScreenHeader from "../components/layout/ScreenHeader";
 import ScreenLayout from "../components/layout/ScreenLayout";
 
-// DEV logging and warning helpers
-const DEBUG_PLAN = __DEV__;
-const dlog = (...args: any[]) => {
-  if (DEBUG_PLAN) console.log(...args);
-};
+// types
+import type { Currency } from "../../../../../packages/shared/src/money/types";
 
-let __warnedPlanDev = false;
-function warnPlanDevOnce(msg: string) {
-  if (__DEV__ && !__warnedPlanDev) {
-    __warnedPlanDev = true;
-    console.warn(msg);
+import { usePlan } from "../store/planStore";
+
+import { EXPENSE_CATEGORY_KEYS } from "../domain/categories";
+import { categoryLabelText } from "../domain/categories/categoryLabels";
+import {
+  parseInputToMinor,
+  formatMoney,
+  formatMoneyNoSymbol,
+  getCurrencySymbol,
+  getPlaceholderForCurrency,
+} from "../domain/money";
+
+// --- Helpers for robust category key matching and number coercion ---
+function normKey(v: unknown) {
+  return String(v ?? "")
+    .trim()
+    .toLowerCase();
+}
+
+function toMinorNumber(v: unknown): number {
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  if (typeof v === "string") {
+    // Accept numeric strings ("1200"), and ignore commas/spaces.
+    const cleaned = v.replace(/[,\s]/g, "");
+    const n = Number(cleaned);
+    return Number.isFinite(n) ? n : 0;
   }
-}
-
-function absMinor(n: any) {
-  const v = typeof n === "number" ? n : Number(n);
-  if (!Number.isFinite(v)) return 0;
-  return Math.abs(v);
-}
-
-function txToHomeMinor(tx: any, homeCurrency: Currency): number {
-  const currency: Currency = tx?.currency === "KRW" ? "KRW" : "USD";
-
-  // Prefer new field; fallback to legacy amountCents
-  const amountMinor =
-    typeof tx?.amountMinor === "number"
-      ? tx.amountMinor
-      : typeof tx?.amountCents === "number"
-        ? tx.amountCents
-        : 0;
-
-  const absAmount = absMinor(amountMinor);
-  if (currency === homeCurrency) return absAmount;
-
-  const fx = typeof tx?.fxUsdKrw === "number" ? tx.fxUsdKrw : NaN;
-  if (!Number.isFinite(fx) || fx <= 0) return 0;
-
-  return absMinor(convertMinor(absAmount, currency, homeCurrency, fx));
-}
-
-function placeholderForCurrency(currency: Currency) {
-  return currency === "KRW" ? "0" : "0.00";
-}
-
-function currencyPrefix(currency: Currency) {
-  return currency === "KRW" ? "₩" : "$";
-}
-
-function formatMoneyNoSymbol(minor: number, currency: Currency) {
-  const s = formatMoney(minor, currency);
-  if (currency === "KRW") return s.replace(/^₩\s?/, "");
-  return s.replace(/^\$\s?/, "");
+  // Defensive: Prisma/Decimal-like objects sometimes have `.toString()`
+  try {
+    const s = String((v as any)?.toString?.() ?? "");
+    const cleaned = s.replace(/[,\s]/g, "");
+    const n = Number(cleaned);
+    return Number.isFinite(n) ? n : 0;
+  } catch {
+    return 0;
+  }
 }
 
 export default function PlanScreen() {
   const {
     plan,
-    homeCurrency,
     upsertBudgetGoalLimit,
     upsertSavingsGoalTarget,
-    applyServerPlan,
+    refreshPlan,
+    saveBudgetGoals,
+    saveBudgetGoal,
+    saveSavingsGoals,
   } = usePlan();
   // Keep isKo/tr logic as-is for translation
-  const isKo = (plan as any)?.language === "ko" || false;
+  const isKo = plan.language === "ko";
   const tr = (en: string, ko: string) => (isKo ? ko : en);
-  const baseCurrency: Currency = ((plan as any)?.currency ??
-    homeCurrency ??
-    (plan as any).homeCurrency ??
-    "USD") as Currency;
-  const { transactions } = useTransactions();
+  const baseCurrency: Currency = plan.currency;
 
   const [serverHydrating, setServerHydrating] = useState(true);
 
-  const lastHydrateKeyRef = useRef<string>("");
-
-  const { startISO, endISO, periodType } = useMemo(
-    () => getPlanPeriodRange(plan as any),
-    [plan],
-  );
-
-  const periodStartUTC = useMemo(() => {
-    const fromPlan = String((plan as any)?.periodStartUTC || "");
-    if (fromPlan) return fromPlan;
-    return new Date(String(startISO || new Date().toISOString())).toISOString();
-  }, [plan, startISO]);
-
-  const periodAnchorUTC = useMemo(() => {
-    const fromPlan = String((plan as any)?.periodAnchorUTC || "");
-    if (fromPlan) return fromPlan;
-
-    // For biweekly, if no anchor is present yet, use the current period start as the anchor.
-    if (periodType === "BIWEEKLY") return periodStartUTC;
-
-    return "";
-  }, [plan, periodType, periodStartUTC]);
-
-  // Initial server sync (period-aware)
   useEffect(() => {
     let mounted = true;
-    const hydrateKey = `${periodType}|${startISO || ""}`;
-    if (lastHydrateKeyRef.current === hydrateKey) return;
-    lastHydrateKeyRef.current = hydrateKey;
-
-    const load = async () => {
+    const run = async () => {
       try {
         setServerHydrating(true);
-        const res: any = await plansApi.get("");
-        if (!mounted) return;
-
-        const sp = res;
-        if (!sp) return;
-
-        // Normalize server fields -> app store shape
-        const budgetGoals = Array.isArray(sp.budgetGoals)
-          ? sp.budgetGoals.map((g: any) => ({
-              category: String(g.category ?? "Other"),
-              // server uses limitMinor
-              limitMinor: Number(g.limitMinor ?? 0),
-            }))
-          : [];
-
-        const savingsGoals = Array.isArray(sp.savingsGoals)
-          ? sp.savingsGoals.map((g: any) => ({
-              name: String(g.name ?? "Other"),
-              // server uses targetMinor
-              targetMinor: Number(g.targetMinor ?? 0),
-            }))
-          : [];
-
-        applyServerPlan({
-          currency: sp.currency,
-          timeZone: sp.timeZone,
-          language: sp.language,
-          periodType: sp.periodType,
-          periodStartUTC: sp.periodStartUTC ?? sp.periodStart,
-          periodAnchorUTC: sp.periodAnchorUTC ?? sp.periodAnchor ?? null,
-          totalBudgetLimitMinor: sp.totalBudgetLimitMinor,
-          budgetGoals,
-          savingsGoals,
-        });
-
-        dlog("[PlanScreen] server response raw", sp);
-        dlog(
-          "[PlanScreen] server response goals",
-          sp?.budgetGoals,
-          sp?.savingsGoals,
-        );
-      } catch (e) {
-        // OK to fail quietly when server is offline
-        dlog("[Plan] initial load failed", e);
+        await refreshPlan();
+      } catch {
+        // ignore
       } finally {
         if (mounted) setServerHydrating(false);
       }
     };
 
-    load();
+    void run();
     return () => {
       mounted = false;
     };
-  }, [
-    applyServerPlan,
-    plan,
-    startISO,
-    periodType,
-    periodStartUTC,
-    periodAnchorUTC,
-  ]);
+  }, [refreshPlan]);
+
+  const periodType = plan.periodType;
 
   const periodLabel =
     periodType === "MONTHLY"
@@ -212,180 +107,92 @@ export default function PlanScreen() {
         ? tr("this 2 weeks", "이번 2주")
         : tr("this week", "이번 주");
 
-  const periodTransactions = useMemo(() => {
-    return transactions.filter((t) => {
-      const iso = String(
-        (t as any).dateISO ??
-          (t as any).occurredAtISO ??
-          (t as any).createdAtISO ??
-          (t as any).createdAt ??
-          "",
-      );
-      if (!iso) return false;
-      return isISOInRange(iso, startISO, endISO);
-    });
-  }, [transactions, startISO, endISO]);
-
   const [selectedCategory, setSelectedCategory] = useState<string>(
-    EXPENSE_CATEGORIES[0],
+    EXPENSE_CATEGORY_KEYS[0],
   );
   const [selectedLimit, setSelectedLimit] = useState("");
   const [savingBudgetGoal, setSavingBudgetGoal] = useState(false);
+  const [isEditingBudgetLimit, setIsEditingBudgetLimit] = useState(false);
 
-  const [selectedSavingsGoal, setSelectedSavingsGoal] = useState<string>(
-    SAVINGS_GOALS[0],
+  const savingsGoalNames = useMemo(
+    () => (plan.savingsGoals ?? []).map((g) => String(g.name)).filter(Boolean),
+    [plan.savingsGoals],
   );
+
+  const [selectedSavingsGoal, setSelectedSavingsGoal] = useState<string>(() => {
+    return savingsGoalNames[0] ?? "";
+  });
   const [selectedSavingsTarget, setSelectedSavingsTarget] = useState("");
   const [savingSavingsGoal, setSavingSavingsGoal] = useState(false);
+  const [isEditingSavingsTarget, setIsEditingSavingsTarget] = useState(false);
 
   useEffect(() => {
-    const g = plan.budgetGoals.find((x) => x.category === selectedCategory);
-    setSelectedLimit(
-      g && g.limitMinor > 0
-        ? formatMoneyNoSymbol(g.limitMinor, baseCurrency)
-        : "",
-    );
-  }, [selectedCategory, plan.budgetGoals, baseCurrency]);
+    if (!savingsGoalNames.length) return;
+    if (selectedSavingsGoal && savingsGoalNames.includes(selectedSavingsGoal))
+      return;
+    setSelectedSavingsGoal(savingsGoalNames[0] ?? "");
+  }, [savingsGoalNames, selectedSavingsGoal]);
 
   useEffect(() => {
-    const g = plan.savingsGoals.find((x) => x.name === selectedSavingsGoal);
-    setSelectedSavingsTarget(
-      g && g.targetMinor > 0
-        ? formatMoneyNoSymbol(g.targetMinor, baseCurrency)
-        : "",
-    );
-  }, [selectedSavingsGoal, plan.savingsGoals, baseCurrency]);
+    if (isEditingBudgetLimit) return;
 
-  const spentByCategory = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const tx of periodTransactions) {
-      if (tx.type !== "EXPENSE") continue;
-      const key = String((tx as any).category ?? "Other");
-      map.set(key, (map.get(key) || 0) + txToHomeMinor(tx, baseCurrency));
-    }
-    return map;
-  }, [periodTransactions, baseCurrency]);
-
-  const totalSpentMinor = useMemo(() => {
-    let sum = 0;
-    for (const tx of periodTransactions) {
-      if (tx.type !== "EXPENSE") continue;
-      sum += txToHomeMinor(tx, baseCurrency);
-    }
-    return sum;
-  }, [periodTransactions, baseCurrency]);
-
-  const savedByGoal = useMemo(() => {
-    const map = new Map<string, number>();
-
-    for (const tx of periodTransactions) {
-      if (tx.type !== "SAVING") continue; // 저축 타입만
-      const goalName = String((tx as any).category || "Other");
-      map.set(
-        goalName,
-        (map.get(goalName) || 0) + txToHomeMinor(tx, baseCurrency),
-      );
-    }
-
-    return map;
-  }, [periodTransactions, baseCurrency]);
-
-  const progressPercent = useMemo(() => {
-    return computePlanProgressPercent(plan as any, transactions);
-  }, [plan, transactions]);
-
-  const applyServerResponse = (res: any) => {
-    const sp: any = res;
-    if (!sp) return;
-
-    // 서버에서 내려온 "부분 goals"을 기존 plan과 merge
-    const latest = getPlanState();
-    const currentBudget = Array.isArray(latest?.plan?.budgetGoals)
-      ? latest.plan.budgetGoals
-      : [];
-    const currentSavings = Array.isArray(latest?.plan?.savingsGoals)
-      ? latest.plan.savingsGoals
-      : [];
-
-    const incomingBudget = Array.isArray(sp?.budgetGoals)
-      ? sp.budgetGoals.map((g: any) => ({
-          category: String(g.category ?? "Other"),
-          limitMinor: Number(g.limitMinor ?? 0),
-        }))
-      : [];
-
-    const incomingSavings = Array.isArray(sp?.savingsGoals)
-      ? sp.savingsGoals.map((g: any) => ({
-          name: String(g.name ?? "Other"),
-          targetMinor: Number(g.targetMinor ?? 0),
-        }))
-      : [];
-
-    // merge budgetGoals by category
-    const budgetMap = new Map<
-      string,
-      { category: string; limitMinor: number }
-    >();
-    for (const g of currentBudget) budgetMap.set(g.category, { ...g });
-    for (const g of incomingBudget) {
-      if ((g.limitMinor ?? 0) <= 0) budgetMap.delete(g.category);
-      else budgetMap.set(g.category, g);
-    }
-
-    // merge savingsGoals by name
-    const savingsMap = new Map<string, { name: string; targetMinor: number }>();
-    for (const g of currentSavings) savingsMap.set(g.name, { ...g });
-    for (const g of incomingSavings) {
-      if ((g.targetMinor ?? 0) <= 0) savingsMap.delete(g.name);
-      else savingsMap.set(g.name, g);
-    }
-
-    applyServerPlan({
-      currency: sp.currency,
-      timeZone: sp.timeZone,
-      language: sp.language,
-      periodType: sp.periodType,
-      periodStartUTC: sp.periodStartUTC ?? sp.periodStart,
-      periodAnchorUTC: sp.periodAnchorUTC ?? sp.periodAnchor ?? null,
-      totalBudgetLimitMinor: sp.totalBudgetLimitMinor,
-      budgetGoals: Array.from(budgetMap.values()),
-      savingsGoals: Array.from(savingsMap.values()),
+    const g = (plan.budgetGoals ?? []).find((x: any) => {
+      const k = (x as any).categoryKey ?? (x as any).category ?? "";
+      return normKey(k) === normKey(selectedCategory);
     });
-  };
+    const limitMinor = g ? toMinorNumber((g as any).limitMinor) : 0;
+    setSelectedLimit(
+      Number.isFinite(limitMinor) && limitMinor > 0
+        ? formatMoneyNoSymbol(limitMinor, baseCurrency)
+        : "",
+    );
+  }, [selectedCategory, plan.budgetGoals, baseCurrency, isEditingBudgetLimit]);
+
+  useEffect(() => {
+    if (isEditingSavingsTarget) return;
+
+    const g = plan.savingsGoals.find((x) => x.name === selectedSavingsGoal);
+    const targetMinor = g ? toMinorNumber((g as any).targetMinor) : 0;
+    setSelectedSavingsTarget(
+      Number.isFinite(targetMinor) && targetMinor > 0
+        ? formatMoneyNoSymbol(targetMinor, baseCurrency)
+        : "",
+    );
+  }, [
+    selectedSavingsGoal,
+    plan.savingsGoals,
+    baseCurrency,
+    isEditingSavingsTarget,
+  ]);
 
   const saveSelectedCategoryLimit = async () => {
     try {
       if (savingBudgetGoal) return;
       setSavingBudgetGoal(true);
+
       const v = parseInputToMinor(selectedLimit, baseCurrency);
+
+      console.log("[PlanScreen] saving budget goal", {
+        selectedCategory,
+        input: selectedLimit,
+        parsedMinor: v,
+      });
 
       // Policy: saving 0 (or empty/invalid -> 0) deletes the goal
       if (v <= 0) {
         setSelectedLimit("");
         upsertBudgetGoalLimit(selectedCategory, 0);
-
-        const res = await plansApi.update("", {
-          periodType: periodType as any,
-          periodStartUTC,
-          ...(periodType === "BIWEEKLY" ? { periodAnchorUTC } : {}),
-          budgetGoals: [{ category: selectedCategory, limitMinor: 0 }],
-        });
-
-        applyServerResponse(res);
+        const ok = await saveBudgetGoal(selectedCategory, 0);
+        console.log("[PlanScreen] saveBudgetGoal ok?", ok);
+        if (!ok) throw new Error("Failed to save budget goals");
         return;
       }
 
       // optimistic local update
       upsertBudgetGoalLimit(selectedCategory, v);
-
-      const res = await plansApi.update("", {
-        periodType: periodType as any,
-        periodStartUTC,
-        ...(periodType === "BIWEEKLY" ? { periodAnchorUTC } : {}),
-        budgetGoals: [{ category: selectedCategory, limitMinor: v }],
-      });
-
-      applyServerResponse(res);
+      const ok = await saveBudgetGoal(selectedCategory, v);
+      console.log("[PlanScreen] saveBudgetGoal ok?", ok);
+      if (!ok) throw new Error("Failed to save budget goals");
     } catch (e: any) {
       Alert.alert(
         tr("Save failed", "저장 실패"),
@@ -393,6 +200,7 @@ export default function PlanScreen() {
       );
     } finally {
       setSavingBudgetGoal(false);
+      setIsEditingBudgetLimit(false);
     }
   };
 
@@ -405,14 +213,9 @@ export default function PlanScreen() {
       // optimistic local update
       upsertBudgetGoalLimit(selectedCategory, 0);
 
-      const res = await plansApi.update("", {
-        periodType: periodType as any,
-        periodStartUTC,
-        ...(periodType === "BIWEEKLY" ? { periodAnchorUTC } : {}),
-        budgetGoals: [{ category: selectedCategory, limitMinor: 0 }],
-      });
-
-      applyServerResponse(res);
+      const ok = await saveBudgetGoal(selectedCategory, 0);
+      console.log("[PlanScreen] saveBudgetGoal ok?", ok);
+      if (!ok) throw new Error("Failed to save budget goals");
     } catch (e: any) {
       Alert.alert(
         tr("Save failed", "저장 실패"),
@@ -420,182 +223,36 @@ export default function PlanScreen() {
       );
     } finally {
       setSavingBudgetGoal(false);
+      setIsEditingBudgetLimit(false);
     }
   };
-  // NOTE: legacy full-sync action (UI hidden). Keeping for now for debugging/future use.
-  /*
-  const savePlanToServer = async () => {
-    try {
-      setSavingToServer(true);
-
-      // Server endpoint is monthly-only for now.
-      // IMPORTANT: use the same month key as hydration (YYYY-MM) so saves persist after restart.
-      // Avoid Date parsing/toISOString here (can throw "Date value out of bounds" on invalid dates).
-      const at =
-        type === "MONTHLY"
-          ? String(startISO || new Date().toISOString()).slice(0, 7)
-          : undefined;
-
-      // If the user typed a new value but didn't press the local "Save" button,
-      // we still want "Save to Server" to persist the latest edits.
-      const pendingLimitMinor = parseInputToMinor(selectedLimit, baseCurrency);
-      const pendingSavingsTargetMinor = parseInputToMinor(
-        selectedSavingsTarget,
-        baseCurrency
-      );
-
-      // Build a snapshot for payload (do NOT rely on async state updates)
-      const budgetGoalsSnapshot = [...(plan.budgetGoals ?? [])].map(
-        (g: any) => ({
-          category: String(g?.category ?? "Other"),
-          limitMinor: Number(g?.limitMinor ?? 0),
-        })
-      );
-
-      const savingsGoalsSnapshot = [...(plan.savingsGoals ?? [])].map(
-        (g: any) => ({
-          name: String(g?.name ?? "Other"),
-          targetMinor: Number(g?.targetMinor ?? 0),
-        })
-      );
-
-      // Override currently edited category/goal in the snapshot
-      {
-        const cat = String(selectedCategory ?? "Other");
-        const idx = budgetGoalsSnapshot.findIndex((g) => g.category === cat);
-        if (idx >= 0) budgetGoalsSnapshot[idx].limitMinor = pendingLimitMinor;
-        else if (pendingLimitMinor > 0)
-          budgetGoalsSnapshot.push({
-            category: cat,
-            limitMinor: pendingLimitMinor,
-          });
-      }
-
-      {
-        const name = String(selectedSavingsGoal ?? "Other");
-        const idx = savingsGoalsSnapshot.findIndex((g) => g.name === name);
-        if (idx >= 0)
-          savingsGoalsSnapshot[idx].targetMinor = pendingSavingsTargetMinor;
-        else if (pendingSavingsTargetMinor > 0)
-          savingsGoalsSnapshot.push({
-            name,
-            targetMinor: pendingSavingsTargetMinor,
-          });
-      }
-
-      // Also update local store so UI stays consistent after saving
-      upsertBudgetGoalLimit(selectedCategory, pendingLimitMinor);
-      upsertSavingsGoalTarget(selectedSavingsGoal, pendingSavingsTargetMinor);
-
-      const payload = {
-        userId: DEV_USER_ID,
-        at,
-        // totalBudgetLimitMinor in app == totalBudgetLimitMinor on server
-        totalBudgetLimitMinor: Number((plan as any).totalBudgetLimitMinor || 0),
-
-        // IMPORTANT: filter out zeros so server-side replace doesn't wipe goals accidentally
-        budgetGoals: budgetGoalsSnapshot
-          .filter((g) => (g.limitMinor ?? 0) > 0)
-          .map((g) => ({
-            category: String(g.category),
-            limitMinor: Number(g.limitMinor) || 0,
-          })),
-
-        savingsGoals: savingsGoalsSnapshot
-          .filter((g) => (g.targetMinor ?? 0) > 0)
-          .map((g) => ({
-            name: String(g.name),
-            targetMinor: Number(g.targetMinor) || 0,
-          })),
-      };
-
-      console.log("[PlanScreen] PATCH monthly plan", {
-        at,
-        startISO,
-        selectedCategory,
-        pendingLimitMinor,
-        utilities: budgetGoalsSnapshot.find((g) => g.category === "Utilities")
-          ?.limitMinor,
-        goalsCount: budgetGoalsSnapshot.length,
-      });
-
-      const res = await patchMonthlyPlan(payload);
-
-      // Map server response to planStore.applyServerPlan shape (normalize server fields)
-      const sp: any = res.plan;
-
-      const budgetGoals = Array.isArray(sp?.budgetGoals)
-        ? sp.budgetGoals.map((g: any) => ({
-            category: String(g.category ?? "Other"),
-            limitMinor: Number(g.limitMinor ?? 0),
-          }))
-        : [];
-
-      const savingsGoals = Array.isArray(sp?.savingsGoals)
-        ? sp.savingsGoals.map((g: any) => ({
-            name: String(g.name ?? "Other"),
-            targetMinor: Number(g.targetMinor ?? g.targetMinor ?? 0),
-          }))
-        : [];
-
-      applyServerPlan({
-        periodType: sp.periodType,
-        periodStartUTC: sp.periodStart,
-        totalBudgetLimitMinor: sp.totalBudgetLimitMinor,
-        budgetGoals,
-        savingsGoals,
-      });
-
-      console.log("AFTER APPLY", plan.budgetGoals.slice(0, 3));
-
-      Alert.alert(
-        isKo ? "저장 완료" : "Saved",
-        isKo ? "서버에 저장했어요." : "Saved to server."
-      );
-    } catch (e: any) {
-      Alert.alert(
-        isKo ? "저장 실패" : "Save failed",
-        e?.message || "Unknown error"
-      );
-    } finally {
-      setSavingToServer(false);
-    }
-  };
-  */
 
   const saveSelectedSavingsTarget = async () => {
     try {
       if (savingSavingsGoal) return;
       setSavingSavingsGoal(true);
+
+      if (!String(selectedSavingsGoal || "").trim()) {
+        throw new Error(
+          tr("Please enter a goal name", "목표 이름을 입력하세요"),
+        );
+      }
+
       const v = parseInputToMinor(selectedSavingsTarget, baseCurrency);
 
-      // Policy: saving 0 (or empty/invalid -> 0) deletes the goal
       if (v <= 0) {
         setSelectedSavingsTarget("");
         upsertSavingsGoalTarget(selectedSavingsGoal, 0);
-
-        const res = await plansApi.update("", {
-          periodType: periodType as any,
-          periodStartUTC,
-          ...(periodType === "BIWEEKLY" ? { periodAnchorUTC } : {}),
-          savingsGoals: [{ name: selectedSavingsGoal, targetMinor: 0 }],
-        });
-
-        applyServerResponse(res);
+        const ok = await saveSavingsGoals();
+        console.log("[PlanScreen] saveSavingsGoals ok?", ok);
+        if (!ok) throw new Error("Failed to save savings goals");
         return;
       }
 
-      // optimistic local update
       upsertSavingsGoalTarget(selectedSavingsGoal, v);
-
-      const res = await plansApi.update("", {
-        periodType: periodType as any,
-        periodStartUTC,
-        ...(periodType === "BIWEEKLY" ? { periodAnchorUTC } : {}),
-        savingsGoals: [{ name: selectedSavingsGoal, targetMinor: v }],
-      });
-
-      applyServerResponse(res);
+      const ok = await saveSavingsGoals();
+      console.log("[PlanScreen] saveSavingsGoals ok?", ok);
+      if (!ok) throw new Error("Failed to save savings goals");
     } catch (e: any) {
       Alert.alert(
         tr("Save failed", "저장 실패"),
@@ -603,6 +260,7 @@ export default function PlanScreen() {
       );
     } finally {
       setSavingSavingsGoal(false);
+      setIsEditingSavingsTarget(false);
     }
   };
 
@@ -612,17 +270,18 @@ export default function PlanScreen() {
       setSavingSavingsGoal(true);
       setSelectedSavingsTarget("");
 
+      if (!String(selectedSavingsGoal || "").trim()) {
+        throw new Error(
+          tr("Please enter a goal name", "목표 이름을 입력하세요"),
+        );
+      }
+
       // optimistic local update
       upsertSavingsGoalTarget(selectedSavingsGoal, 0);
 
-      const res = await plansApi.update("", {
-        periodType: periodType as any,
-        periodStartUTC,
-        ...(periodType === "BIWEEKLY" ? { periodAnchorUTC } : {}),
-        savingsGoals: [{ name: selectedSavingsGoal, targetMinor: 0 }],
-      });
-
-      applyServerResponse(res);
+      const ok = await saveSavingsGoals();
+      console.log("[PlanScreen] saveSavingsGoals ok?", ok);
+      if (!ok) throw new Error("Failed to save savings goals");
     } catch (e: any) {
       Alert.alert(
         tr("Save failed", "저장 실패"),
@@ -630,25 +289,9 @@ export default function PlanScreen() {
       );
     } finally {
       setSavingSavingsGoal(false);
+      setIsEditingSavingsTarget(false);
     }
   };
-
-  // DEV-only: log render key values on change, not every render
-  useEffect(() => {
-    dlog("[PlanScreen] render", {
-      budgetGoals: plan.budgetGoals.length,
-      savingsGoals: plan.savingsGoals.length,
-      selectedCategory,
-      period: { startISO, endISO, periodType },
-    });
-  }, [
-    plan.budgetGoals.length,
-    plan.savingsGoals.length,
-    selectedCategory,
-    startISO,
-    endISO,
-    periodType,
-  ]);
 
   return (
     <ScreenLayout
@@ -657,8 +300,8 @@ export default function PlanScreen() {
         <ScreenHeader
           title={tr(`${periodLabel} Plan`, `${periodLabel} 플랜`)}
           subtitle={tr(
-            `Progress (${periodText}): ${progressPercent}%`,
-            `진행률(${periodText}): ${progressPercent}%`,
+            `Set your goals for ${periodText}`,
+            `${periodText} 목표를 설정하세요`,
           )}
           description={tr(
             `Base currency: ${baseCurrency}`,
@@ -682,7 +325,7 @@ export default function PlanScreen() {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.chipsRow}
       >
-        {EXPENSE_CATEGORIES.map((c) => {
+        {EXPENSE_CATEGORY_KEYS.map((c) => {
           const selected = c === selectedCategory;
           return (
             <Pressable
@@ -694,7 +337,7 @@ export default function PlanScreen() {
                 numberOfLines={1}
                 style={[styles.chipText, selected && styles.chipTextSelected]}
               >
-                {c}
+                {categoryLabelText(c, plan.language)}
               </Text>
             </Pressable>
           );
@@ -703,44 +346,37 @@ export default function PlanScreen() {
 
       <View style={[CardSpacing.card, styles.card]}>
         {(() => {
-          const goal = plan.budgetGoals.find(
-            (g) => g.category === selectedCategory,
+          const goal = (plan.budgetGoals ?? []).find((g: any) => {
+            const k = (g as any).categoryKey ?? (g as any).category ?? "";
+            return normKey(k) === normKey(selectedCategory);
+          });
+          const limit = toMinorNumber((goal as any)?.limitMinor);
+          console.log("[PlanScreen] selectedCategory:", selectedCategory);
+          console.log(
+            "[PlanScreen] matched goal:",
+            goal,
+            "limitMinor(raw):",
+            (goal as any)?.limitMinor,
+            "limitMinor(num):",
+            limit,
           );
-          const limit = goal?.limitMinor || 0;
-          const spent = spentByCategory.get(selectedCategory) || 0;
-          const ratio = limit > 0 ? spent / limit : 0;
-          const status =
-            limit <= 0
-              ? "NO_LIMIT"
-              : ratio > 1
-                ? "OVER"
-                : ratio > 0.8
-                  ? "WARNING"
-                  : "SAFE";
-          const statusColor =
-            status === "OVER" ? "#c00" : status === "WARNING" ? "#c90" : "#0a7";
 
           return (
             <>
               <Text style={[CardSpacing.cardTitle, styles.cardTitle]}>
-                {selectedCategory}
+                {categoryLabelText(selectedCategory, plan.language)}
               </Text>
 
               {limit > 0 ? (
-                <Text style={[styles.cardMeta, { color: statusColor }]}>
-                  {tr("Spent:", "지출:")} {formatMoney(spent, baseCurrency)} /{" "}
-                  {formatMoney(limit, baseCurrency)}{" "}
-                  {status === "SAFE"
-                    ? "✅"
-                    : status === "WARNING"
-                      ? "⚠️"
-                      : tr("🚨 Over", "🚨 초과")}
+                <Text style={styles.cardMeta}>
+                  {tr("Current goal:", "현재 목표:")}{" "}
+                  {formatMoney(limit, baseCurrency)}
                 </Text>
               ) : (
                 <Text style={styles.cardBody}>
                   {tr(
-                    "No limit set for this category yet.",
-                    "이 카테고리는 아직 예산 한도가 없어요.",
+                    "No goal set for this category yet.",
+                    "이 카테고리는 아직 목표 금액이 없어요.",
                   )}
                 </Text>
               )}
@@ -748,12 +384,14 @@ export default function PlanScreen() {
               <View style={styles.row}>
                 <View style={styles.moneyInputWrap}>
                   <Text style={styles.moneyPrefix}>
-                    {currencyPrefix(baseCurrency)}
+                    {getCurrencySymbol(baseCurrency)}
                   </Text>
                   <TextInput
                     value={selectedLimit}
                     onChangeText={setSelectedLimit}
-                    placeholder={placeholderForCurrency(baseCurrency)}
+                    onFocus={() => setIsEditingBudgetLimit(true)}
+                    onBlur={() => setIsEditingBudgetLimit(false)}
+                    placeholder={getPlaceholderForCurrency(baseCurrency)}
                     inputMode={baseCurrency === "KRW" ? "numeric" : "decimal"}
                     keyboardType={
                       baseCurrency === "KRW" ? "number-pad" : "decimal-pad"
@@ -798,55 +436,66 @@ export default function PlanScreen() {
         {tr("Savings Goals", "저축 목표")}
       </Text>
 
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.chipsRow}
-      >
-        {SAVINGS_GOALS.map((g) => {
-          const selected = g === selectedSavingsGoal;
-          return (
-            <Pressable
-              key={g}
-              onPress={() => setSelectedSavingsGoal(g)}
-              style={[styles.chip, selected && styles.chipSelected]}
-            >
-              <Text
-                numberOfLines={1}
-                style={[styles.chipText, selected && styles.chipTextSelected]}
+      {savingsGoalNames.length ? (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chipsRow}
+        >
+          {savingsGoalNames.map((g) => {
+            const selected = g === selectedSavingsGoal;
+            return (
+              <Pressable
+                key={g}
+                onPress={() => setSelectedSavingsGoal(g)}
+                style={[styles.chip, selected && styles.chipSelected]}
               >
-                {g}
-              </Text>
-            </Pressable>
-          );
-        })}
-      </ScrollView>
+                <Text
+                  numberOfLines={1}
+                  style={[styles.chipText, selected && styles.chipTextSelected]}
+                >
+                  {g}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      ) : null}
 
       <View style={[CardSpacing.card, styles.card]}>
         {(() => {
           const goal = plan.savingsGoals.find(
             (x) => x.name === selectedSavingsGoal,
           );
-          const target = goal?.targetMinor || 0;
-          const saved = savedByGoal.get(selectedSavingsGoal) || 0;
-
-          const ratio = target > 0 ? saved / target : 0;
-          const pct = Math.round(Math.min(1, Math.max(0, ratio)) * 100);
-          const done = target > 0 && ratio >= 1;
+          const target = toMinorNumber((goal as any)?.targetMinor);
 
           return (
             <>
-              <Text style={[CardSpacing.cardTitle, styles.cardTitle]}>
-                {selectedSavingsGoal}
-              </Text>
+              {savingsGoalNames.length ? (
+                <Text style={[CardSpacing.cardTitle, styles.cardTitle]}>
+                  {selectedSavingsGoal}
+                </Text>
+              ) : (
+                <>
+                  <Text style={[CardSpacing.cardTitle, styles.cardTitle]}>
+                    {tr("Add savings goal", "저축 목표 추가")}
+                  </Text>
+                  <View style={styles.textInputWrap}>
+                    <TextInput
+                      value={selectedSavingsGoal}
+                      onChangeText={setSelectedSavingsGoal}
+                      placeholder={tr("Goal name", "목표 이름")}
+                      autoCapitalize="words"
+                      style={styles.moneyInput}
+                    />
+                  </View>
+                </>
+              )}
 
               {target > 0 ? (
-                <Text
-                  style={[styles.cardMeta, { color: done ? "#0a7" : "#666" }]}
-                >
-                  {tr("Saved:", "저축:")} {formatMoney(saved, baseCurrency)} /{" "}
-                  {formatMoney(target, baseCurrency)} ({pct}%){" "}
-                  {done ? "✅" : ""}
+                <Text style={styles.cardMeta}>
+                  {tr("Current goal:", "현재 목표:")}{" "}
+                  {formatMoney(target, baseCurrency)}
                 </Text>
               ) : (
                 <Text style={styles.cardBody}>
@@ -860,12 +509,14 @@ export default function PlanScreen() {
               <View style={styles.row}>
                 <View style={styles.moneyInputWrap}>
                   <Text style={styles.moneyPrefix}>
-                    {currencyPrefix(baseCurrency)}
+                    {getCurrencySymbol(baseCurrency)}
                   </Text>
                   <TextInput
                     value={selectedSavingsTarget}
                     onChangeText={setSelectedSavingsTarget}
-                    placeholder={placeholderForCurrency(baseCurrency)}
+                    onFocus={() => setIsEditingSavingsTarget(true)}
+                    onBlur={() => setIsEditingSavingsTarget(false)}
+                    placeholder={getPlaceholderForCurrency(baseCurrency)}
                     inputMode={baseCurrency === "KRW" ? "numeric" : "decimal"}
                     keyboardType={
                       baseCurrency === "KRW" ? "number-pad" : "decimal-pad"
@@ -913,15 +564,6 @@ export default function PlanScreen() {
 
 const styles = StyleSheet.create({
   topActions: { marginBottom: 10 },
-  serverBtn: {
-    alignSelf: "flex-start",
-    borderRadius: 12,
-    backgroundColor: "black",
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  serverBtnDisabled: { opacity: 0.6 },
-  serverBtnText: { color: "white", fontWeight: "800" },
   serverHint: { marginTop: 6, color: "#666", fontWeight: "600" },
 
   chipsRow: {
@@ -980,6 +622,14 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 12,
     backgroundColor: "white",
+  },
+  textInputWrap: {
+    borderWidth: 1,
+    borderColor: "#ddd",
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    backgroundColor: "white",
+    marginBottom: 10,
   },
   moneyPrefix: {
     fontWeight: "800",

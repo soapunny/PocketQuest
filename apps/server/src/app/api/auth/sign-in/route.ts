@@ -3,29 +3,65 @@ import { prisma } from "@/lib/prisma";
 import jwt from "jsonwebtoken";
 import { z } from "zod";
 
+const JWT_SECRET: string = (() => {
+  const v = process.env.JWT_SECRET;
+  if (!v) throw new Error("JWT_SECRET is required (production)");
+  return v;
+})();
+
 const signInSchema = z.object({
   provider: z.enum(["google", "kakao"]),
-  providerId: z.string(),
+  providerId: z.string().min(1),
   email: z.string().email(),
   name: z.string().min(1),
   profileImageUri: z.string().nullable().optional(),
 });
 
-const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key-change-in-production";
+function toPrismaProvider(p: "google" | "kakao") {
+  // Prisma enum is uppercase (e.g. GOOGLE/KAKAO)
+  return p.toUpperCase() as "GOOGLE" | "KAKAO";
+}
+
+function toClientProvider(p: any): "google" | "kakao" {
+  return String(p).toUpperCase() === "KAKAO" ? "kakao" : "google";
+}
+
+async function ensureActivePlan(userId: string) {
+  const u = await prisma.user.findUnique({ where: { id: userId } });
+  if (!u) throw new Error("User not found");
+
+  if (u.activePlanId) return u;
+
+  const plan = await prisma.plan.create({
+    data: {
+      userId: u.id,
+      periodType: "WEEKLY",
+      periodStart: new Date(),
+      timeZone: u.timeZone,
+      currency: u.currency,
+      language: u.language,
+    },
+  });
+
+  return prisma.user.update({
+    where: { id: u.id },
+    data: { activePlanId: plan.id },
+  });
+}
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const data = signInSchema.parse(body);
 
+    const prismaProvider = toPrismaProvider(data.provider);
+
     // Find or create user
-    // Note: Prisma compound unique constraint naming
-    let user = await prisma.user.findUnique({
+    // Use findFirst to avoid depending on a specific compound-unique name.
+    let user = await prisma.user.findFirst({
       where: {
-        provider_providerId: {
-          provider: data.provider,
-          providerId: data.providerId,
-        },
+        provider: prismaProvider,
+        providerId: data.providerId,
       },
     });
 
@@ -40,12 +76,13 @@ export async function POST(request: NextRequest) {
         user = await prisma.user.update({
           where: { id: existingUser.id },
           data: {
-            provider: data.provider,
+            provider: prismaProvider,
             providerId: data.providerId,
             name: data.name,
             profileImageUri: data.profileImageUri || null,
           },
         });
+        user = await ensureActivePlan(user.id);
       } else {
         // Create new user
         user = await prisma.user.create({
@@ -53,24 +90,11 @@ export async function POST(request: NextRequest) {
             email: data.email,
             name: data.name,
             profileImageUri: data.profileImageUri || null,
-            provider: data.provider,
+            provider: prismaProvider,
             providerId: data.providerId,
-            // Create default plan
-            plans: {
-              create: {
-                periodType: "WEEKLY",
-                periodStartISO: new Date().toISOString().slice(0, 10),
-              },
-            },
-            // Create default character
-            character: {
-              create: {
-                level: 1,
-                xp: 0,
-              },
-            },
           },
         });
+        user = await ensureActivePlan(user.id);
       }
     } else {
       // Update user info
@@ -81,6 +105,7 @@ export async function POST(request: NextRequest) {
           profileImageUri: data.profileImageUri || null,
         },
       });
+      user = await ensureActivePlan(user.id);
     }
 
     // Generate JWT token
@@ -90,7 +115,7 @@ export async function POST(request: NextRequest) {
         email: user.email,
       },
       JWT_SECRET,
-      { expiresIn: "30d" }
+      { expiresIn: "30d" },
     );
 
     return NextResponse.json({
@@ -100,22 +125,21 @@ export async function POST(request: NextRequest) {
         email: user.email,
         name: user.name,
         profileImageUri: user.profileImageUri,
-        provider: user.provider as "google" | "kakao",
+        provider: toClientProvider(user.provider),
       },
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(
         { error: "Invalid request data", details: error.errors },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     console.error("Sign-in error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
-

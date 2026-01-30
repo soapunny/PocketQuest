@@ -1,13 +1,14 @@
 import { useCallback, useState } from "react";
 
 import { fetchBootstrap } from "../api/bootstrapApi";
-import { useAuth } from "../store/authStore";
+import { useAuthStore } from "../store/authStore";
 import { usePlanStore } from "../store/planStore";
 import { useDashboardStore } from "../store/dashboardStore";
 import { useUserPrefsStore } from "../store/userPrefsStore";
 
 export function useBootStrap() {
-  const { user } = useAuth();
+  const auth = useAuthStore();
+  const serverToken = (auth as any)?.serverToken as string | null | undefined;
   const { applyBootstrapPlan } = usePlanStore();
   const applyDashboardFromBootstrap = useDashboardStore(
     (s) => s.applyDashboardFromBootstrap,
@@ -26,8 +27,15 @@ export function useBootStrap() {
     setBootstrapError(null);
 
     try {
-      // Token may be stored on the user object in future auth flows.
-      const token = (user as any)?.token ? String((user as any).token) : undefined;
+      // Bootstrap requires our SERVER JWT (issued by /api/auth/sign-in), not the Supabase access_token.
+      const token = serverToken ?? "";
+      if (!token) {
+        throw new Error(
+          "Bootstrap failed: missing server JWT (call /api/auth/sign-in after Supabase OAuth and store it in authStore.serverToken)",
+        );
+      }
+
+      console.log("[bootstrap] token length:", token.length);
       const payload = await fetchBootstrap(token);
 
       // 1) user prefs (source of truth)
@@ -49,7 +57,7 @@ export function useBootStrap() {
     applyDashboardFromBootstrap,
     applyUserPrefsFromBootstrap,
     isBootstrapping,
-    user,
+    auth,
   ]);
 
   return {
@@ -58,4 +66,3 @@ export function useBootStrap() {
     runBootstrap,
   };
 }
-

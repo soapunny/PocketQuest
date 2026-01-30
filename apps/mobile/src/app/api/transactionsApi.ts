@@ -1,7 +1,6 @@
 import { request } from "./http";
 import type {
   Range,
-  Currency,
   TxType,
   TransactionDTO,
   TransactionsListResponseDTO,
@@ -10,6 +9,7 @@ import type {
   CreateTransactionResponseDTO,
   DeleteTransactionResponseDTO,
 } from "../../../../../packages/shared/src/transactions/types";
+import type { Currency } from "../../../../../packages/shared/src/money/types";
 
 export const transactionsApi = {
   getList: async (params: {

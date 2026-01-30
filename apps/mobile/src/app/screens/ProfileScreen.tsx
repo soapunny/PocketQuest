@@ -2,54 +2,20 @@ import { useLayoutEffect, useMemo } from "react";
 import { View, Text, StyleSheet, Image, Pressable } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 
-import { useAuth } from "../store/authStore";
-import { usePlan } from "../store/planStore";
-import { useTransactions } from "../store/transactionsStore";
-import { computeAllTimePlanProgressPercent } from "../domain/plan/progress";
 import ScreenHeader from "../components/layout/ScreenHeader";
 import ScreenLayout from "../components/layout/ScreenLayout";
 import ScreenCard from "../components/layout/ScreenCard";
 import { CardSpacing } from "../components/Typography";
-import type { Currency } from "../domain/money/currency";
-import { formatMoney, convertMinor } from "../domain/money/currency";
 
-function absMinor(n: any) {
-  const v = typeof n === "number" ? n : Number(n);
-  if (!Number.isFinite(v)) return 0;
-  return Math.abs(v);
-}
+import { useAuth } from "../store/authStore";
+import { usePlan } from "../store/planStore";
+import { useTransactions } from "../store/transactionsStore";
 
-function txToHomeMinor(tx: any, homeCurrency: Currency): number {
-  const currency: Currency = tx?.currency === "KRW" ? "KRW" : "USD";
-
-  // Prefer new field; fallback to legacy amountMinor
-  const rawAmount =
-    typeof tx?.amountMinor === "number"
-      ? tx.amountMinor
-      : typeof tx?.amountMinor === "number"
-        ? tx.amountMinor
-        : 0;
-
-  if (!Number.isFinite(rawAmount) || rawAmount === 0) return 0;
-
-  const sign = rawAmount < 0 ? -1 : 1;
-  const amountAbs = absMinor(rawAmount);
-
-  if (currency === homeCurrency) return sign * amountAbs;
-
-  const fx = typeof tx?.fxUsdKrw === "number" ? tx.fxUsdKrw : NaN;
-  // If FX is missing, treat as 0 so we don't lie in totals.
-  if (!Number.isFinite(fx) || fx <= 0) return 0;
-
-  const convertedAbs = absMinor(
-    convertMinor(amountAbs, currency, homeCurrency, fx),
-  );
-  return sign * convertedAbs;
-}
-
-function txToHomeAbsMinor(tx: any, homeCurrency: Currency): number {
-  return absMinor(txToHomeMinor(tx, homeCurrency));
-}
+import {
+  computeAllTimePlanProgressPercent,
+  txToHomeAbsMinor,
+} from "../domain/plan/progress";
+import { formatMoney, convertMinor, absMinor } from "../domain/money";
 
 export default function ProfileScreen() {
   const navigation = useNavigation<any>();

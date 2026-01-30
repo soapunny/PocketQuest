@@ -1,8 +1,11 @@
+// apps/mobile/src/app/domain/plan/progress/progress.ts
+
+import type { Currency } from "../../../../../../../packages/shared/src/money/types";
 import type { Plan } from "../../../store/planStore";
-import type { Currency } from "../../money/currency";
-import { getPlanPeriodRange, isISOInRange } from "../../plan/period/index";
-import { getTxISODate } from "./date";
-import { absMinor, isSavingsTx, txToHomeMinor } from "./tx";
+import { absMinor } from "../../money";
+import { isSavingsTx } from "../../transactions/classify";
+import { isISOInRange, getPlanPeriodRange } from "../period";
+import { getTxISODate, txToHomeMinor } from "../progress";
 
 /**
  * Computes overall plan progress (0-100) from transactions that fall within the current plan period.
@@ -13,7 +16,8 @@ export function computePlanProgressPercent(plan: Plan, transactions: any[]) {
   const range = getPlanPeriodRange(plan as any);
   const { startISO, endISO } = range;
 
-  const homeCurrency: Currency = ((plan as any).homeCurrency ?? "USD") as Currency;
+  const homeCurrency: Currency = ((plan as any).homeCurrency ??
+    "USD") as Currency;
 
   const budgetGoals = (plan as any).budgetGoals ?? [];
   const savingsGoals = (plan as any).savingsGoals ?? [];
@@ -56,7 +60,8 @@ export function computePlanProgressPercent(plan: Plan, transactions: any[]) {
   }
 
   // If no budget targets, return a neutral score.
-  const budgetScore = budgetGoalsCount === 0 ? 0.5 : budgetSum / budgetGoalsCount;
+  const budgetScore =
+    budgetGoalsCount === 0 ? 0.5 : budgetSum / budgetGoalsCount;
 
   // Savings: totalSavedHomeMinor is in home currency minor units.
   // NOTE: targetMinor is assumed to be in home currency minor units as well.
@@ -68,7 +73,10 @@ export function computePlanProgressPercent(plan: Plan, transactions: any[]) {
     for (const g of savingsGoals) {
       if ((g as any).targetMinor <= 0) continue;
       count += 1;
-      sum += Math.min(1, Math.max(0, totalSavedHomeMinor / (g as any).targetMinor));
+      sum += Math.min(
+        1,
+        Math.max(0, totalSavedHomeMinor / (g as any).targetMinor),
+      );
     }
     savingsScore = count === 0 ? 0.5 : sum / count;
   }
@@ -80,8 +88,12 @@ export function computePlanProgressPercent(plan: Plan, transactions: any[]) {
 /**
  * Computes overall plan progress (0-100) from ALL transactions (all time).
  */
-export function computeAllTimePlanProgressPercent(plan: Plan, transactions: any[]) {
-  const homeCurrency: Currency = ((plan as any).homeCurrency ?? "USD") as Currency;
+export function computeAllTimePlanProgressPercent(
+  plan: Plan,
+  transactions: any[],
+) {
+  const homeCurrency: Currency = ((plan as any).homeCurrency ??
+    "USD") as Currency;
 
   const budgetGoals = (plan as any).budgetGoals ?? [];
   const savingsGoals = (plan as any).savingsGoals ?? [];
@@ -119,7 +131,8 @@ export function computeAllTimePlanProgressPercent(plan: Plan, transactions: any[
     budgetSum += ratio > 1 ? 0 : Math.max(0, 1 - ratio);
   }
 
-  const budgetScore = budgetGoalsCount === 0 ? 0.5 : budgetSum / budgetGoalsCount;
+  const budgetScore =
+    budgetGoalsCount === 0 ? 0.5 : budgetSum / budgetGoalsCount;
 
   // NOTE: targetMinor is assumed to be in home currency minor units.
   // TODO: if savings goals gain their own currency later, convert targets here.
@@ -139,4 +152,3 @@ export function computeAllTimePlanProgressPercent(plan: Plan, transactions: any[
   const combined = budgetScore * 0.7 + savingsScore * 0.3;
   return Math.round(Math.min(1, Math.max(0, combined)) * 100);
 }
-

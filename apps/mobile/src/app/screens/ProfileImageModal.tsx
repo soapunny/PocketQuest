@@ -1,11 +1,22 @@
 import { useState } from "react";
-import { View, Text, StyleSheet, Image, Pressable, Alert, Platform } from "react-native";
+import {
+  View,
+  Text,
+  StyleSheet,
+  Image,
+  Pressable,
+  Alert,
+  Platform,
+} from "react-native";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
+
+// UI components
+import LoadingButton from "../components/LoadingButton";
+
 import { useAuth } from "../store/authStore";
 import { usePlan } from "../store/planStore";
-import LoadingButton from "../components/LoadingButton";
 
 type RouteParams = {
   profileImageUri?: string | null;
@@ -22,7 +33,7 @@ export default function ProfileImageModal() {
   const tr = (en: string, ko: string) => (isKo ? ko : en);
   const routeParams = (route.params || {}) as RouteParams;
   const [profileImageUri, setProfileImageUri] = useState<string | null>(
-    routeParams.profileImageUri || user?.profileImageUri || null
+    routeParams.profileImageUri || user?.profileImageUri || null,
   );
   const [isLoading, setIsLoading] = useState(false);
   const profileName = routeParams.profileName || user?.name || "User";
@@ -34,15 +45,16 @@ export default function ProfileImageModal() {
     try {
       // 권한 요청
       if (Platform.OS !== "web") {
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        const { status } =
+          await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== "granted") {
           setIsLoading(false);
           Alert.alert(
             tr("Permission required", "권한 필요"),
             tr(
               "Sorry, we need camera roll permissions to change your profile picture!",
-              "프로필 사진을 변경하려면 사진 라이브러리 권한이 필요해요!"
-            )
+              "프로필 사진을 변경하려면 사진 라이브러리 권한이 필요해요!",
+            ),
           );
           return;
         }
@@ -68,8 +80,8 @@ export default function ProfileImageModal() {
         tr("Error", "오류"),
         tr(
           "Failed to select image. Please try again.",
-          "이미지 선택에 실패했어요. 다시 시도해주세요."
-        )
+          "이미지 선택에 실패했어요. 다시 시도해주세요.",
+        ),
       );
     } finally {
       setIsLoading(false);
@@ -187,4 +199,3 @@ const styles = StyleSheet.create({
     color: "#666",
   },
 });
-

@@ -1,6 +1,7 @@
 // apps/mobile/src/app/domain/money/format.ts
 
-import { Currency, currencySymbol, minorUnitScale } from "./currency";
+import type { Currency } from "../../../../../../packages/shared/src/money/types";
+import { getCurrencySymbol, minorUnitScale } from "../money";
 
 /**
  * Format an amount in minor units to a user-facing string.
@@ -15,13 +16,13 @@ export function formatMoney(amountMinor: number, currency: Currency): string {
   if (currency === "USD") {
     const dollars = abs / scale;
     // Always show 2 decimals for USD.
-    return `${sign}${currencySymbol(currency)}${dollars.toFixed(2)}`;
+    return `${sign}${getCurrencySymbol(currency)}${dollars.toFixed(2)}`;
   }
 
   // KRW: integer formatting (no decimals)
   // Use locale formatting for readability.
   const formatted = abs.toLocaleString(undefined, { maximumFractionDigits: 0 });
-  return `${sign}${currencySymbol(currency)}${formatted}`;
+  return `${sign}${getCurrencySymbol(currency)}${formatted}`;
 }
 
 /**
@@ -30,7 +31,7 @@ export function formatMoney(amountMinor: number, currency: Currency): string {
  */
 export function formatMoneyNumber(
   amountMinor: number,
-  currency: Currency
+  currency: Currency,
 ): string {
   const scale = minorUnitScale(currency);
   const sign = amountMinor < 0 ? "-" : "";
@@ -42,6 +43,12 @@ export function formatMoneyNumber(
   }
 
   return `${sign}${abs}`;
+}
+
+export function formatMoneyNoSymbol(minor: number, currency: Currency) {
+  const s = formatMoney(minor, currency);
+  if (currency === "KRW") return s.replace(/^₩\s?/, "");
+  return s.replace(/^\$\s?/, "");
 }
 
 /**

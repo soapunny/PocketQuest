@@ -1,42 +1,86 @@
-// apps/server/src/app/api/plans/[id]/actions/rollover/route.ts
+// apps/server/src/app/api/plans/actions/rollover/route.ts
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { calcNextPeriodEnd, ensurePeriodEnd } from "@/lib/plan/periodRules";
-import type { PeriodType } from "@prisma/client";
+import { getAuthUser } from "@/lib/auth";
+import { serverPlanDTOSchema } from "../../../../../../../../packages/shared/src/plans/types";
+import type { ServerPlanDTO } from "../../../../../../../../packages/shared/src/plans/types";
+import { ZodError } from "zod";
 
-export async function POST() {
-  console.log("[ROLL_OVER] called");
-  console.log("[ROLL_OVER] DEV_USER_ID =", process.env.DEV_USER_ID);
+function getDevUserId(): string | null {
+  if (process.env.NODE_ENV === "production") return null;
+  const envId = process.env.DEV_USER_ID;
+  return envId && envId.trim() ? envId.trim() : null;
+}
 
+function toServerPlanDTO(plan: any, timeZone: string): ServerPlanDTO {
+  const dto: ServerPlanDTO = {
+    id: String(plan.id),
+    language: plan?.language ?? null,
+    periodType: plan?.periodType,
+    periodStartUTC:
+      plan?.periodStart instanceof Date
+        ? plan.periodStart.toISOString()
+        : undefined,
+    periodEndUTC:
+      plan?.periodEnd instanceof Date
+        ? plan.periodEnd.toISOString()
+        : undefined,
+    periodAnchorUTC:
+      plan?.periodAnchor instanceof Date
+        ? plan.periodAnchor.toISOString()
+        : undefined,
+    timeZone,
+    totalBudgetLimitMinor:
+      typeof plan?.totalBudgetLimitMinor === "number"
+        ? plan.totalBudgetLimitMinor
+        : (plan?.totalBudgetLimitMinor ?? null),
+    currency: plan?.currency,
+    homeCurrency: plan?.currency,
+    displayCurrency: plan?.currency,
+    budgetGoals: Array.isArray(plan?.budgetGoals)
+      ? plan.budgetGoals.map((g: any) => ({
+          id: g.id ?? null,
+          category: String(g.category ?? "Other"),
+          limitMinor: typeof g.limitMinor === "number" ? g.limitMinor : null,
+        }))
+      : null,
+    savingsGoals: Array.isArray(plan?.savingsGoals)
+      ? plan.savingsGoals.map((g: any) => ({
+          id: g.id ?? null,
+          name: String(g.name ?? "Other"),
+          targetMinor: typeof g.targetMinor === "number" ? g.targetMinor : null,
+        }))
+      : null,
+  };
+  return serverPlanDTOSchema.parse(dto);
+}
+
+export async function POST(request: NextRequest) {
   try {
-    const devUserId =
-      process.env.NODE_ENV !== "production"
-        ? process.env.DEV_USER_ID
-        : undefined;
+    const authed = getAuthUser(request);
+    const userId = authed?.userId ?? getDevUserId();
 
-    if (!devUserId) {
-      return NextResponse.json(
-        { error: "DEV_USER_ID is not set (dev only)" },
-        { status: 400 },
-      );
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const user = await prisma.user.findUnique({
-      where: { id: devUserId },
+      where: { id: userId },
       include: { activePlan: true },
     });
 
     if (!user || !user.activePlan) {
       return NextResponse.json(
-        { error: "No active plan found for user", userId: devUserId },
+        { rolled: false, plan: null, error: "No active plan found" },
         { status: 404 },
       );
     }
 
     const now = new Date();
     const current = user.activePlan;
-    const periodType = current.periodType as PeriodType;
+    const periodType = current.periodType;
 
     // ✅ 레거시 plan 방어 포함: periodEnd가 null이어도 계산해서 진행
     const currentEnd = ensurePeriodEnd(
@@ -48,11 +92,14 @@ export async function POST() {
 
     // 아직 기간 안 끝났으면 종료
     if (currentEnd > now) {
-      return NextResponse.json({
-        rolled: false,
-        reason: "Plan is still active",
-        activePlanId: current.id,
-      });
+      return NextResponse.json(
+        {
+          rolled: false,
+          reason: "Plan is still active",
+          plan: null,
+        },
+        { status: 409 },
+      );
     }
 
     const result = await prisma.$transaction(async (tx) => {
@@ -166,12 +213,25 @@ export async function POST() {
       return { createdCount, activePlan };
     });
 
+    const timeZone = user.timeZone || "UTC";
+    const planDto = result.activePlan
+      ? toServerPlanDTO(result.activePlan, timeZone)
+      : null;
+
     return NextResponse.json({
       rolled: true,
       createdCount: result.createdCount,
-      activePlan: result.activePlan,
+      plan: planDto,
     });
   } catch (error) {
+    if (error instanceof ZodError) {
+      // Server-side contract bug: DTO shape is not matching SSOT
+      return NextResponse.json(
+        { error: "Invalid server plan DTO", details: error.flatten() },
+        { status: 500 },
+      );
+    }
+
     console.error("[PLAN_ROLLOVER_ERROR]", error);
     return NextResponse.json(
       { error: "Internal Server Error" },

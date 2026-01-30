@@ -5,14 +5,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev:mobile": "cd apps/mobile && pnpm exec expo start",
-    "dev:mobile:clear": "cd apps/mobile && pnpm exec expo start -c",
-    "fix:mobile": "cd apps/mobile && pnpm exec expo install --fix",
+    "dev:mobile": "pnpm --filter ./apps/mobile start",
     "dev:server": "pnpm --filter ./apps/server dev",
-    "dev": "pnpm -r --parallel dev",
-    "db:generate": "pnpm --filter @pocketquest/prisma generate",
-    "db:migrate": "pnpm --filter @pocketquest/prisma migrate",
-    "db:studio": "pnpm --filter @pocketquest/prisma studio"
+    "dev:api": "pnpm --filter ./apps/api dev",
+    "dev": "pnpm -r --parallel dev"
   },
   "keywords": [],
   "author": "",

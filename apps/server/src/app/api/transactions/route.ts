@@ -14,7 +14,7 @@ import { format } from "date-fns";
 import { z } from "zod";
 import {
   transactionCreateSchema,
-  RANGE_VALUES,
+  rangeSchema,
   TransactionsSummary,
   Currency,
   TxType,
@@ -27,8 +27,6 @@ import {
   expenseCategoryKeySchema,
   incomeCategoryKeySchema,
 } from "@/lib/categories";
-
-const rangeSchema = z.enum(RANGE_VALUES);
 
 // Use shared transactionCreateSchema (basic shape). Server performs additional
 // category/savingsGoal validation beyond this shared shape.
