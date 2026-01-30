@@ -1,3 +1,5 @@
+// apps/mobile/src/app/screens/AddTransactionModal.tsx
+
 import { useMemo, useState, useEffect } from "react";
 import {
   View,
@@ -17,9 +19,7 @@ import ScreenLayout from "../components/layout/ScreenLayout";
 import ScreenHeader from "../components/layout/ScreenHeader";
 import ScreenCard from "../components/layout/ScreenCard";
 
-import type {
-  TxType,
-} from "../../../../../packages/shared/src/transactions/types";
+import type { TxType } from "../../../../../packages/shared/src/transactions/types";
 import type { Currency } from "../../../../../packages/shared/src/money/types";
 
 import { useTransactions } from "../store/transactionsStore";
@@ -27,16 +27,25 @@ import { usePlan } from "../store/planStore";
 
 import {
   categoryLabelText,
+  canonicalCategoryKeyForServer,
   EXPENSE_CATEGORY_KEYS,
   INCOME_CATEGORY_KEYS,
-  SAVING_CATEGORY_KEYS,
 } from "../domain/categories";
 
 export default function AddTransactionModal() {
   const navigation = useNavigation();
   const txStore = useTransactions();
 
-  const { homeCurrency, displayCurrency, language } = usePlan();
+  const plan = usePlan();
+  const { homeCurrency, displayCurrency, language } = plan;
+  const savingsGoals = (plan as any)?.savingsGoals as
+    | Array<{ id: string; name: string }>
+    | undefined;
+  const savingsGoalOptions = (savingsGoals ?? []).map((g) => ({
+    id: String(g.id),
+    name: String(g.name ?? "Savings"),
+  }));
+
   const isKo = language === "ko";
   const tr = (en: string, ko: string) => (isKo ? ko : en);
 
@@ -56,6 +65,9 @@ export default function AddTransactionModal() {
   const [categoryKey, setCategoryKey] = useState<string>(
     EXPENSE_CATEGORY_KEYS[0] ?? "uncategorized",
   );
+  const [selectedSavingsGoalId, setSelectedSavingsGoalId] = useState<string>(
+    savingsGoalOptions[0]?.id ?? "",
+  );
   const [note, setNote] = useState<string>("");
 
   const [fxUsdKrwText, setFxUsdKrwText] = useState<string>("");
@@ -68,8 +80,9 @@ export default function AddTransactionModal() {
   const categoryOptions = useMemo<readonly string[]>(() => {
     if (type === "EXPENSE") return EXPENSE_CATEGORY_KEYS;
     if (type === "INCOME") return INCOME_CATEGORY_KEYS;
-    return SAVING_CATEGORY_KEYS; // SAVING
-  }, [type]);
+    // SAVING: options are SavingsGoal IDs
+    return savingsGoalOptions.map((g) => g.id);
+  }, [type, savingsGoalOptions]);
 
   useEffect(() => {
     // When the type changes, ensure the currently selected category is valid.
@@ -80,7 +93,11 @@ export default function AddTransactionModal() {
       setCategoryKey(EXPENSE_CATEGORY_KEYS[0] ?? "uncategorized");
     else if (type === "INCOME")
       setCategoryKey(INCOME_CATEGORY_KEYS[0] ?? "uncategorized");
-    else setCategoryKey(SAVING_CATEGORY_KEYS[0] ?? "uncategorized"); // SAVING
+    else {
+      const firstId = savingsGoalOptions[0]?.id ?? "";
+      setCategoryKey(firstId || "uncategorized");
+      setSelectedSavingsGoalId(firstId);
+    }
   }, [type, categoryOptions, categoryKey]);
 
   useEffect(() => {
@@ -101,6 +118,19 @@ export default function AddTransactionModal() {
   const onSave = async () => {
     if (!canSave) return;
     if (isSaving) return;
+    if (
+      type === "SAVING" &&
+      !String(selectedSavingsGoalId || categoryKey || "").trim()
+    ) {
+      Alert.alert(
+        tr("No savings goal", "저축 목표 없음"),
+        tr(
+          "Create a Savings Goal in Plan first, then record a Saving transaction.",
+          "Plan에서 저축 목표를 먼저 만든 뒤 저축 거래를 추가해 주세요.",
+        ),
+      );
+      return;
+    }
 
     // 항상 양수(또는 0 이상)로 minor 단위를 저장하고,
     // EXPENSE/INCOME/SAVING 구분은 type으로 처리합니다.
@@ -113,15 +143,28 @@ export default function AddTransactionModal() {
 
     try {
       setIsSaving(true);
+      const savingsGoalIdFinal =
+        type === "SAVING"
+          ? String(selectedSavingsGoalId || categoryKey || "").trim()
+          : "";
+
       await txStore.createTransaction({
         type,
         amountMinor,
         currency,
         fxUsdKrw: fxNeeded ? fxUsdKrw : undefined,
-        category: categoryKey,
+        // Server validates canonical keys.
+        category:
+          type === "SAVING"
+            ? "savings"
+            : canonicalCategoryKeyForServer(
+                categoryKey,
+                type as unknown as TxType,
+              ),
+        savingsGoalId: type === "SAVING" ? savingsGoalIdFinal : undefined,
         occurredAtISO: new Date().toISOString(),
         note: noteTrimmed || undefined,
-      });
+      } as any);
 
       navigation.goBack();
     } catch (error) {
@@ -181,8 +224,8 @@ export default function AddTransactionModal() {
                   {t === "EXPENSE"
                     ? tr("Expense", "지출")
                     : t === "INCOME"
-                      ? tr("Income", "수입")
-                      : tr("Saving", "저축")}
+                    ? tr("Income", "수입")
+                    : tr("Saving", "저축")}
                 </Text>
               </Pressable>
             ))}
@@ -256,18 +299,24 @@ export default function AddTransactionModal() {
             {type === "SAVING"
               ? tr("Savings Goal", "저축 목표")
               : type === "INCOME"
-                ? tr("Income Category", "수입 카테고리")
-                : tr("Category", "카테고리")}
+              ? tr("Income Category", "수입 카테고리")
+              : tr("Category", "카테고리")}
           </Text>
           <View style={styles.chipRow}>
             {categoryOptions.map((c) => (
               <Pressable
                 key={c}
-                onPress={() => setCategoryKey(c)}
+                onPress={() => {
+                  setCategoryKey(c);
+                  if (type === "SAVING") setSelectedSavingsGoalId(c);
+                }}
                 style={chipStyle(categoryKey === c)}
               >
                 <Text style={chipTextStyle(categoryKey === c)}>
-                  {categoryLabelText(c, language)}
+                  {type === "SAVING"
+                    ? savingsGoalOptions.find((g) => g.id === c)?.name ??
+                      tr("Savings", "저축")
+                    : categoryLabelText(c, language)}
                 </Text>
               </Pressable>
             ))}

@@ -1,3 +1,4 @@
+import { canonicalCategoryKeyForServer } from "../../../../../../packages/shared/src/transactions/categories";
 // apps/mobile/src/app/domain/categories/categoryLabels.ts
 
 /**
@@ -70,3 +71,5 @@ export function categoryLabelText(
   if (!human) return language === "ko" ? "미분류" : "Uncategorized";
   return human.charAt(0).toUpperCase() + human.slice(1);
 }
+
+export { canonicalCategoryKeyForServer };

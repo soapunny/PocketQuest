@@ -189,7 +189,10 @@ async function buildDashboardPayload(params: {
     const catKey = canonicalizeCategory(t.category ?? "");
 
     if (t.type === TxType.EXPENSE) {
-      spentByCategoryMap.set(catKey, (spentByCategoryMap.get(catKey) ?? 0) + amtHome);
+      spentByCategoryMap.set(
+        catKey,
+        (spentByCategoryMap.get(catKey) ?? 0) + amtHome,
+      );
     } else if (t.type === TxType.SAVING) {
       savedByGoalKey.set(catKey, (savedByGoalKey.get(catKey) ?? 0) + amtHome);
     }
@@ -198,21 +201,35 @@ async function buildDashboardPayload(params: {
   const netMinor = incomeMinor - spentMinor;
 
   const spentByCategory = Array.from(spentByCategoryMap.entries())
-    .map(([categoryKey, spentMinor]) => ({ categoryKey, spentMinor }))
+    .map(([categoryKey, spentMinor]) => ({
+      category: categoryKey,
+      categoryKey,
+      spentMinor,
+    }))
     .sort((a, b) => b.spentMinor - a.spentMinor);
 
   // Budget status rows (assumes limits are in homeCurrency minor units)
   if (activePlan.currency !== homeCurrency) {
-    warnings.push(`plan_currency_mismatch:${activePlan.currency}->${homeCurrency}`);
+    warnings.push(
+      `plan_currency_mismatch:${activePlan.currency}->${homeCurrency}`,
+    );
   }
 
   const budgetStatusRows = (activePlan.budgetGoals ?? [])
     .map((g) => {
       const categoryKey = canonicalizeCategory(g.category ?? "");
-      const limitMinor = Number.isFinite(g.limitMinor) ? Math.trunc(g.limitMinor) : 0;
+      const limitMinor = Number.isFinite(g.limitMinor)
+        ? Math.trunc(g.limitMinor)
+        : 0;
       const spentMinor = spentByCategoryMap.get(categoryKey) ?? 0;
       const remainingMinor = limitMinor - spentMinor;
-      return { categoryKey, limitMinor, spentMinor, remainingMinor };
+      return {
+        category: categoryKey,
+        categoryKey,
+        limitMinor,
+        spentMinor,
+        remainingMinor,
+      };
     })
     .filter((r) => r.limitMinor > 0);
 
@@ -221,7 +238,9 @@ async function buildDashboardPayload(params: {
     .map((g) => {
       const goalId = String(g.id);
       const name = String(g.name ?? "");
-      const targetMinor = Number.isFinite(g.targetMinor) ? Math.trunc(g.targetMinor) : 0;
+      const targetMinor = Number.isFinite(g.targetMinor)
+        ? Math.trunc(g.targetMinor)
+        : 0;
       const key = canonicalizeCategory(name);
       const savedMinor = savedByGoalKey.get(key) ?? 0;
       const progressRatio = targetMinor > 0 ? savedMinor / targetMinor : 0;

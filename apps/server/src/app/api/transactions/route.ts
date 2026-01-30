@@ -1,3 +1,5 @@
+// apps/server/src/app/api/transactions/route.ts
+
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthUser } from "@/lib/auth";
@@ -16,23 +18,35 @@ import {
   transactionCreateSchema,
   rangeSchema,
   TransactionsSummary,
-  Currency,
   TxType,
   TransactionDTO,
 } from "../../../../../../packages/shared/src/transactions/types";
+import { Currency } from "../../../../../../packages/shared/src/money/types";
+
 import {
   EXPENSE_CATEGORY_KEYS,
   INCOME_CATEGORY_KEYS,
-  SAVING_CATEGORY_KEY,
-  expenseCategoryKeySchema,
-  incomeCategoryKeySchema,
-} from "@/lib/categories";
+  canonicalCategoryKeyForServer,
+} from "../../../../../../packages/shared/src/transactions/categories";
+
+const SAVING_CATEGORY_KEY = "savings" as const;
+
+// Zod enums from shared SSOT
+const expenseCategoryKeySchema = z.enum([...EXPENSE_CATEGORY_KEYS] as [
+  string,
+  ...string[],
+]);
+
+const incomeCategoryKeySchema = z.enum([...INCOME_CATEGORY_KEYS] as [
+  string,
+  ...string[],
+]);
 
 // Use shared transactionCreateSchema (basic shape). Server performs additional
 // category/savingsGoal validation beyond this shared shape.
 
 async function resolveUserPlanIdForGoals(
-  userId: string
+  userId: string,
 ): Promise<string | null> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -145,7 +159,7 @@ export async function GET(request: NextRequest) {
             ? "DEV: pass x-dev-user-id header or ?userId=..."
             : undefined,
       },
-      { status: 401 }
+      { status: 401 },
     );
   }
 
@@ -156,8 +170,8 @@ export async function GET(request: NextRequest) {
     const parsedRange = rangeSchema.safeParse(normalizedRange);
     if (!parsedRange.success) {
       return NextResponse.json(
-        { error: "Invalid range", details: parsedRange.error.errors },
-        { status: 400 }
+        { error: "Invalid range", details: parsedRange.error.message },
+        { status: 400 },
       );
     }
     const range = parsedRange.data;
@@ -229,7 +243,7 @@ export async function GET(request: NextRequest) {
 
     // Add occurredAtLocalISO to reduce client parsing burden.
     const transactionsDTO = transactions.map((t) =>
-      toTransactionDTO(t, timeZone)
+      toTransactionDTO(t, timeZone),
     );
 
     let summary: TransactionsSummary | undefined;
@@ -290,7 +304,7 @@ export async function GET(request: NextRequest) {
     console.error("Get transactions error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -314,7 +328,7 @@ export async function POST(request: NextRequest) {
               ? "DEV: pass x-dev-user-id header or include userId in body"
               : undefined,
         },
-        { status: 401 }
+        { status: 401 },
       );
     }
 
@@ -326,15 +340,19 @@ export async function POST(request: NextRequest) {
 
     const data = transactionCreateSchema.parse(body);
     // normalize inputs
-    let category = String(data.category ?? "").trim();
+    let categoryRaw = String(data.category ?? "").trim();
     let savingsGoalId = data.savingsGoalId?.trim();
+
+    // Canonicalize category to shared server-accepted keys (aliases/casing)
+    const txType = data.type as unknown as TxType;
+    let category = canonicalCategoryKeyForServer(categoryRaw, txType);
 
     // SAVING rules
     if (data.type === "SAVING") {
       if (!savingsGoalId) {
         return NextResponse.json(
           { error: "savingsGoalId is required for SAVING" },
-          { status: 400 }
+          { status: 400 },
         );
       }
 
@@ -344,13 +362,13 @@ export async function POST(request: NextRequest) {
         if (err?.code === "PLAN_NOT_FOUND") {
           return NextResponse.json(
             { error: "Plan not found" },
-            { status: 404 }
+            { status: 404 },
           );
         }
         if (err?.code === "SAVINGS_GOAL_FORBIDDEN") {
           return NextResponse.json(
             { error: "savingsGoalId does not belong to you" },
-            { status: 403 }
+            { status: 403 },
           );
         }
         throw err;
@@ -370,7 +388,7 @@ export async function POST(request: NextRequest) {
               error: "Invalid expense category",
               allowed: EXPENSE_CATEGORY_KEYS,
             },
-            { status: 400 }
+            { status: 400 },
           );
         }
         category = ok.data;
@@ -381,7 +399,7 @@ export async function POST(request: NextRequest) {
         if (!ok.success) {
           return NextResponse.json(
             { error: "Invalid income category", allowed: INCOME_CATEGORY_KEYS },
-            { status: 400 }
+            { status: 400 },
           );
         }
         category = ok.data;
@@ -422,20 +440,20 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(
       { transaction: toTransactionDTO(created, timeZone) },
-      { status: 201 }
+      { status: 201 },
     );
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(
         { error: "Invalid request data", details: error.errors },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
     console.error("Create transaction error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
