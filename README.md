@@ -29,6 +29,16 @@ This repository is a **monorepo** containing:
 - Plans persist independently per period type
 - Automatic plan creation when switching periods (idempotent upsert)
 
+#### 🧾 Transaction System
+
+- Shared transaction category policy (SSOT) in `packages/shared`
+- Canonical category keys enforced across **mobile → API → DB**
+- Legacy `uncategorized` migrated to unified `other` fallback
+- Clear separation of:
+  - **EXPENSE / INCOME** → category-based
+  - **SAVING** → goal-based (`savingsGoalId`), category fixed to `"savings"`
+- Safe partial updates (PATCH) without unintended overwrites
+
 #### 🔄 Active Plan Management
 
 - `User.activePlanId` is the single source of truth
@@ -77,6 +87,14 @@ A plan contains:
 - Currency
 - Language
 - Timezone-aware period boundaries
+
+A transaction belongs to the active plan and is classified as one of:
+
+- **EXPENSE** – categorized spending (e.g. groceries, rent)
+- **INCOME** – categorized income (e.g. salary, bonus)
+- **SAVING** – contributions tied to a specific savings goal
+
+Transaction categories are validated against shared canonical keys and normalized before persistence.
 
 Plans are immutable by period.  
 Switching periods activates a different plan instead of mutating the existing one.
@@ -134,6 +152,7 @@ Switching periods activates a different plan instead of mutating the existing on
 - Cursor / VS Code
 - Git + GitHub
 - Jira (Kanban)
+- Shared domain logic via `packages/shared` (SSOT)
 
 ---
 
@@ -162,7 +181,7 @@ pocketquest/
 │ └── migrations/
 │
 ├── packages/
-│ └── shared/             # (planned) shared types & schemas
+│ └── shared/             # Shared domain logic (transactions, categories, types)
 │
 ├── pnpm-workspace.yaml
 ├── package.json
@@ -175,6 +194,7 @@ pocketquest/
 - Consistency over premature features
 - Timezone correctness before analytics
 - Clear UX before gamification
+- Single Source of Truth (SSOT) for shared domain rules
 
 PocketQuest prioritizes correctness, clarity, and long-term extensibility.
 
