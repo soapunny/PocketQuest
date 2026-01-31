@@ -1,3 +1,5 @@
+// apps/mobile/src/app/screens/TransactionsScreen.tsx
+
 import { useCallback, useMemo, useState, ReactNode } from "react";
 import { useFocusEffect } from "@react-navigation/native";
 import {
@@ -28,12 +30,11 @@ import { useTransactions } from "../store/transactionsStore";
 // bootstrap handled in transactions store
 import { usePlan } from "../store/planStore";
 
+import { categoryLabelText } from "../domain/categories/categoryLabels";
 import {
-  categoryLabelText,
   EXPENSE_CATEGORY_KEYS,
   INCOME_CATEGORY_KEYS,
-  SAVING_CATEGORY_KEYS,
-} from "../domain/categories";
+} from "../../../../../packages/shared/src/transactions/categories";
 import {
   formatAmountTextFromMinor,
   parseInputToMinor,
@@ -107,7 +108,7 @@ export default function TransactionsScreen() {
         } catch (error) {
           console.error(
             "[TransactionsScreen] failed to load transactions from server",
-            error,
+            error
           );
         }
       })();
@@ -116,18 +117,34 @@ export default function TransactionsScreen() {
       return () => {
         isActive = false;
       };
-    }, [periodFilter, loadTransactions]),
+    }, [periodFilter, loadTransactions])
   );
 
-  const { homeCurrency, language } = usePlan();
+  const planStore = usePlan() as any;
+  const homeCurrency: Currency = planStore?.homeCurrency ?? "USD";
+  const language: string | null | undefined = planStore?.language;
+  const savingsGoals: Array<{ id: string; name: string }> =
+    planStore?.plan?.savingsGoals ?? planStore?.savingsGoals ?? [];
+  const [savingsGoalId, setSavingsGoalId] = useState<string>("");
+
+  const savingsGoalOptions = useMemo(
+    () => savingsGoals.map((g) => String(g.id)),
+    [savingsGoals]
+  );
+
   const isKo = language === "ko";
   const tr = (en: string, ko: string) => (isKo ? ko : en);
+
+  function savingsGoalLabel(id: string): string {
+    const hit = savingsGoals.find((g) => String(g.id) === String(id));
+    return hit?.name ? String(hit.name) : tr("Savings", "저축");
+  }
 
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const editingTx = useMemo(
     () => transactions.find((t) => t.id === editingId) ?? null,
-    [transactions, editingId],
+    [transactions, editingId]
   );
 
   const [type, setType] = useState<TxType>("EXPENSE");
@@ -142,24 +159,25 @@ export default function TransactionsScreen() {
   const categoryOptions = useMemo(() => {
     if (type === "EXPENSE") return EXPENSE_CATEGORY_KEYS as readonly string[];
     if (type === "INCOME") return INCOME_CATEGORY_KEYS as readonly string[];
-    return SAVING_CATEGORY_KEYS as readonly string[];
-  }, [type]);
+    return savingsGoalOptions as readonly string[];
+  }, [type, savingsGoalOptions]);
 
   function ensureCategoryValid(nextType: TxType, current: string) {
     const opts =
       nextType === "EXPENSE"
         ? (EXPENSE_CATEGORY_KEYS as readonly string[])
         : nextType === "INCOME"
-          ? (INCOME_CATEGORY_KEYS as readonly string[])
-          : (SAVING_CATEGORY_KEYS as readonly string[]);
+        ? (INCOME_CATEGORY_KEYS as readonly string[])
+        : (savingsGoalOptions as readonly string[]);
 
+    if (opts.length === 0) return "";
     if (opts.includes(current)) return current;
 
     return nextType === "EXPENSE"
       ? EXPENSE_CATEGORY_KEYS[0]
       : nextType === "INCOME"
-        ? INCOME_CATEGORY_KEYS[0]
-        : SAVING_CATEGORY_KEYS[0];
+      ? INCOME_CATEGORY_KEYS[0]
+      : String(opts[0]);
   }
 
   const filteredTransactions = useMemo(() => {
@@ -172,7 +190,11 @@ export default function TransactionsScreen() {
 
       if (!q) return true;
 
-      const hay = `${tx.type} ${tx.category} ${tx.note ?? ""}`.toLowerCase();
+      const goalName =
+        tx.type === "SAVING" ? String((tx as any)?.savingsGoalName ?? "") : "";
+      const hay = `${tx.type} ${tx.category} ${goalName} ${
+        tx.note ?? ""
+      }`.toLowerCase();
       const ok = hay.includes(q);
       return ok;
     });
@@ -195,15 +217,28 @@ export default function TransactionsScreen() {
     if (!tx) return;
 
     const nextType = (tx.type as TxType) ?? "EXPENSE";
-    const nextCategoryRaw = tx.category ?? EXPENSE_CATEGORY_KEYS[0];
-    const nextCategory = ensureCategoryValid(nextType, nextCategoryRaw);
+
+    // For SAVING transactions, the selector is savingsGoalId (category is always "savings").
+    const rawForSelector =
+      nextType === "SAVING"
+        ? String((tx as any)?.savingsGoalId ?? "")
+        : String(tx.category ?? EXPENSE_CATEGORY_KEYS[0]);
+
+    const nextCategory = ensureCategoryValid(nextType, rawForSelector);
 
     const cur = tx.currency;
     const amtMinor = absMinor(tx.amountMinor ?? 0);
 
     setEditingId(id);
     setType(nextType);
-    setCategory(nextCategory);
+
+    if (nextType === "SAVING") {
+      // nextCategory is a validated savingsGoalId option
+      setSavingsGoalId(nextCategory);
+    } else {
+      setCategory(nextCategory);
+      setSavingsGoalId("");
+    }
     setEditingCurrency(cur);
     setAmountText(formatAmountTextFromMinor(amtMinor, cur));
     setNote(tx.note ?? "");
@@ -222,7 +257,7 @@ export default function TransactionsScreen() {
     if (!absMinor || absMinor <= 0) {
       Alert.alert(
         tr("Invalid amount", "금액 오류"),
-        tr("Please enter a positive amount.", "0보다 큰 금액을 입력해 주세요."),
+        tr("Please enter a positive amount.", "0보다 큰 금액을 입력해 주세요.")
       );
       return;
     }
@@ -234,12 +269,27 @@ export default function TransactionsScreen() {
     const noteTrimmed = note.trim();
     const patch: UpdateTransactionDTO = {
       type,
-      category,
+      // For SAVING, category is a stable literal; the goal is selected separately.
+      category: type === "SAVING" ? "savings" : category,
       currency: editingCurrency,
       amountMinor: nextAmountMinor,
       // Use null to explicitly clear the note on the server
       note: noteTrimmed ? noteTrimmed : null,
+      ...(type === "SAVING"
+        ? ({ savingsGoalId: savingsGoalId || null } as any)
+        : ({ savingsGoalId: null } as any)),
     };
+
+    if (type === "SAVING" && !savingsGoalId) {
+      Alert.alert(
+        tr("Select a savings goal", "저축 목표를 선택해 주세요"),
+        tr(
+          "Please choose which savings goal this belongs to.",
+          "이 저축 거래가 어떤 목표에 해당하는지 선택해 주세요."
+        )
+      );
+      return;
+    }
 
     try {
       // delegate update to transactions store which handles refresh + bootstrap
@@ -251,8 +301,8 @@ export default function TransactionsScreen() {
         tr("Update failed", "수정 실패"),
         tr(
           "Could not save changes. Please try again.",
-          "저장에 실패했어요. 다시 시도해 주세요.",
-        ),
+          "저장에 실패했어요. 다시 시도해 주세요."
+        )
       );
     } finally {
     }
@@ -270,8 +320,8 @@ export default function TransactionsScreen() {
         tr("Delete failed", "삭제 실패"),
         tr(
           "Could not delete. Please try again.",
-          "삭제에 실패했어요. 다시 시도해 주세요.",
-        ),
+          "삭제에 실패했어요. 다시 시도해 주세요."
+        )
       );
     } finally {
     }
@@ -293,7 +343,7 @@ export default function TransactionsScreen() {
             void deleteEditingTransaction();
           },
         },
-      ],
+      ]
     );
   }
 
@@ -306,7 +356,7 @@ export default function TransactionsScreen() {
             title={tr("Transactions", "거래 내역")}
             subtitle={tr(
               "Filter, search, and tap a card to edit.",
-              "필터/검색 후 카드를 눌러 수정하세요.",
+              "필터/검색 후 카드를 눌러 수정하세요."
             )}
             rightSlot={
               <View style={styles.resultPill}>
@@ -375,7 +425,7 @@ export default function TransactionsScreen() {
               onChangeText={setSearchText}
               placeholder={tr(
                 "Search by category or note",
-                "카테고리/메모로 검색",
+                "카테고리/메모로 검색"
               )}
               autoCorrect={false}
               style={styles.searchInput}
@@ -457,7 +507,9 @@ export default function TransactionsScreen() {
                 </View>
 
                 <Text style={[CardSpacing.cardTitle, styles.txCategory]}>
-                  {categoryLabelText(tx.category, language)}
+                  {txType === "SAVING"
+                    ? savingsGoalLabel(String((tx as any)?.savingsGoalId ?? ""))
+                    : categoryLabelText(tx.category, language)}
                 </Text>
                 <Text style={[styles.txAmount, { color: pill.pillText }]}>
                   {formatMoney(displayMinor, cur)}
@@ -467,7 +519,7 @@ export default function TransactionsScreen() {
                   <Text style={styles.metaText}>
                     {tr(
                       `Base totals use ${homeCurrency}. This transaction is in ${cur}.`,
-                      `기준 합계 통화는 ${homeCurrency}이고, 이 거래는 ${cur}로 기록되어 있어요.`,
+                      `기준 합계 통화는 ${homeCurrency}이고, 이 거래는 ${cur}로 기록되어 있어요.`
                     )}
                   </Text>
                 ) : null}
@@ -495,7 +547,7 @@ export default function TransactionsScreen() {
           <Text style={styles.emptyText}>
             {tr(
               "No matching transactions. Try changing filters or search.",
-              "조건에 맞는 거래가 없어요. 필터나 검색어를 바꿔보세요.",
+              "조건에 맞는 거래가 없어요. 필터나 검색어를 바꿔보세요."
             )}
           </Text>
         }
@@ -518,9 +570,16 @@ export default function TransactionsScreen() {
                 key={t}
                 onPress={() => {
                   const nextType = t;
-                  const nextCat = ensureCategoryValid(nextType, category);
+                  const base = nextType === "SAVING" ? savingsGoalId : category;
+                  const nextCat = ensureCategoryValid(nextType, base);
                   setType(nextType);
-                  setCategory(nextCat);
+
+                  if (nextType === "SAVING") {
+                    setSavingsGoalId(nextCat);
+                  } else {
+                    setCategory(nextCat);
+                    setSavingsGoalId("");
+                  }
                 }}
                 style={chipStyle(active)}
               >
@@ -528,8 +587,8 @@ export default function TransactionsScreen() {
                   {t === "EXPENSE"
                     ? tr("Expense", "지출")
                     : t === "INCOME"
-                      ? tr("Income", "수입")
-                      : tr("Saving", "저축")}
+                    ? tr("Income", "수입")
+                    : tr("Saving", "저축")}
                 </Text>
               </Pressable>
             );
@@ -556,7 +615,7 @@ export default function TransactionsScreen() {
           <Text style={{ alignSelf: "center", color: "#666" }}>
             {tr(
               "(currency is set when created)",
-              "(통화는 생성 시점에 결정돼요)",
+              "(통화는 생성 시점에 결정돼요)"
             )}
           </Text>
         </View>
@@ -578,24 +637,40 @@ export default function TransactionsScreen() {
           {type === "SAVING"
             ? tr("Savings Goal", "저축 목표")
             : type === "INCOME"
-              ? tr("Income Category", "수입 카테고리")
-              : tr("Category", "카테고리")}
+            ? tr("Income Category", "수입 카테고리")
+            : tr("Category", "카테고리")}
         </Text>
         <View style={styles.categoryWrap}>
-          {categoryOptions.map((c) => {
-            const active = category === c;
-            return (
-              <Pressable
-                key={c}
-                onPress={() => setCategory(c)}
-                style={chipStyle(active)}
-              >
-                <Text style={chipTextStyle(active)}>
-                  {categoryLabelText(c, language)}
-                </Text>
-              </Pressable>
-            );
-          })}
+          {categoryOptions.length === 0 ? (
+            <Text style={{ color: "#777" }}>
+              {tr(
+                "No savings goals yet. Create one in Plan > Savings.",
+                "저축 목표가 아직 없어요. Plan > Savings에서 만들어 주세요."
+              )}
+            </Text>
+          ) : (
+            categoryOptions.map((c) => {
+              const selected = type === "SAVING" ? savingsGoalId : category;
+              const active = selected === c;
+
+              return (
+                <Pressable
+                  key={c}
+                  onPress={() => {
+                    if (type === "SAVING") setSavingsGoalId(c);
+                    else setCategory(c);
+                  }}
+                  style={chipStyle(active)}
+                >
+                  <Text style={chipTextStyle(active)}>
+                    {type === "SAVING"
+                      ? savingsGoalLabel(c)
+                      : categoryLabelText(c, language)}
+                  </Text>
+                </Pressable>
+              );
+            })
+          )}
         </View>
 
         {/* Note */}

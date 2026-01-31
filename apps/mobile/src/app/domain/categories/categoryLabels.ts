@@ -1,4 +1,3 @@
-import { canonicalCategoryKeyForServer } from "../../../../../../packages/shared/src/transactions/categories";
 // apps/mobile/src/app/domain/categories/categoryLabels.ts
 
 /**
@@ -11,7 +10,7 @@ import { canonicalCategoryKeyForServer } from "../../../../../../packages/shared
  */
 export function categoryLabelText(
   categoryKey: string,
-  language: string | null | undefined,
+  language: string | null | undefined
 ): string {
   const key = (categoryKey ?? "").trim();
   if (!key) return language === "ko" ? "미분류" : "Uncategorized";
@@ -20,7 +19,6 @@ export function categoryLabelText(
 
   // Canonical keys -> English labels
   const en: Record<string, string> = {
-    uncategorized: "Uncategorized",
     groceries: "Groceries",
     rent: "Rent",
     utilities: "Utilities",
@@ -38,11 +36,11 @@ export function categoryLabelText(
     travel: "Travel",
     subscriptions: "Subscriptions",
     misc: "Misc",
+    other: "Other",
   };
 
   // Canonical keys -> Korean labels
   const ko: Record<string, string> = {
-    uncategorized: "미분류",
     groceries: "식료품",
     rent: "월세",
     utilities: "공과금",
@@ -60,6 +58,7 @@ export function categoryLabelText(
     travel: "여행",
     subscriptions: "구독",
     misc: "기타",
+    other: "미분류",
   };
 
   const dict = language === "ko" ? ko : en;
@@ -71,5 +70,3 @@ export function categoryLabelText(
   if (!human) return language === "ko" ? "미분류" : "Uncategorized";
   return human.charAt(0).toUpperCase() + human.slice(1);
 }
-
-export { canonicalCategoryKeyForServer };

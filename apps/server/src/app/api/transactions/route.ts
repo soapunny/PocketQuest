@@ -32,21 +32,14 @@ import {
 const SAVING_CATEGORY_KEY = "savings" as const;
 
 // Zod enums from shared SSOT
-const expenseCategoryKeySchema = z.enum([...EXPENSE_CATEGORY_KEYS] as [
-  string,
-  ...string[],
-]);
-
-const incomeCategoryKeySchema = z.enum([...INCOME_CATEGORY_KEYS] as [
-  string,
-  ...string[],
-]);
+const expenseCategoryKeySchema = z.enum(EXPENSE_CATEGORY_KEYS);
+const incomeCategoryKeySchema = z.enum(INCOME_CATEGORY_KEYS);
 
 // Use shared transactionCreateSchema (basic shape). Server performs additional
 // category/savingsGoal validation beyond this shared shape.
 
 async function resolveUserPlanIdForGoals(
-  userId: string,
+  userId: string
 ): Promise<string | null> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -159,7 +152,7 @@ export async function GET(request: NextRequest) {
             ? "DEV: pass x-dev-user-id header or ?userId=..."
             : undefined,
       },
-      { status: 401 },
+      { status: 401 }
     );
   }
 
@@ -171,7 +164,7 @@ export async function GET(request: NextRequest) {
     if (!parsedRange.success) {
       return NextResponse.json(
         { error: "Invalid range", details: parsedRange.error.message },
-        { status: 400 },
+        { status: 400 }
       );
     }
     const range = parsedRange.data;
@@ -243,7 +236,7 @@ export async function GET(request: NextRequest) {
 
     // Add occurredAtLocalISO to reduce client parsing burden.
     const transactionsDTO = transactions.map((t) =>
-      toTransactionDTO(t, timeZone),
+      toTransactionDTO(t, timeZone)
     );
 
     let summary: TransactionsSummary | undefined;
@@ -304,7 +297,7 @@ export async function GET(request: NextRequest) {
     console.error("Get transactions error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }
@@ -328,7 +321,7 @@ export async function POST(request: NextRequest) {
               ? "DEV: pass x-dev-user-id header or include userId in body"
               : undefined,
         },
-        { status: 401 },
+        { status: 401 }
       );
     }
 
@@ -339,20 +332,40 @@ export async function POST(request: NextRequest) {
     const timeZone = dbUser?.timeZone || DEFAULT_TIME_ZONE;
 
     const data = transactionCreateSchema.parse(body);
+    // Defensive: ensure tx type is one of the supported literals.
+    if (
+      data.type !== "EXPENSE" &&
+      data.type !== "INCOME" &&
+      data.type !== "SAVING"
+    ) {
+      return NextResponse.json(
+        { error: "Invalid transaction type" },
+        { status: 400 }
+      );
+    }
     // normalize inputs
     let categoryRaw = String(data.category ?? "").trim();
-    let savingsGoalId = data.savingsGoalId?.trim();
+    let savingsGoalId =
+      typeof data.savingsGoalId === "string"
+        ? data.savingsGoalId.trim()
+        : undefined;
 
     // Canonicalize category to shared server-accepted keys (aliases/casing)
-    const txType = data.type as unknown as TxType;
+    const txType: TxType = data.type;
     let category = canonicalCategoryKeyForServer(categoryRaw, txType);
+
+    // Defaults are handled by shared SSOT (`canonicalCategoryKeyForServer`).
+    // Defense-in-depth: INCOME must never be "uncategorized" (legacy key).
+    if (txType === "INCOME" && category === "uncategorized") {
+      category = "other";
+    }
 
     // SAVING rules
     if (data.type === "SAVING") {
       if (!savingsGoalId) {
         return NextResponse.json(
           { error: "savingsGoalId is required for SAVING" },
-          { status: 400 },
+          { status: 400 }
         );
       }
 
@@ -362,13 +375,13 @@ export async function POST(request: NextRequest) {
         if (err?.code === "PLAN_NOT_FOUND") {
           return NextResponse.json(
             { error: "Plan not found" },
-            { status: 404 },
+            { status: 404 }
           );
         }
         if (err?.code === "SAVINGS_GOAL_FORBIDDEN") {
           return NextResponse.json(
             { error: "savingsGoalId does not belong to you" },
-            { status: 403 },
+            { status: 403 }
           );
         }
         throw err;
@@ -388,7 +401,7 @@ export async function POST(request: NextRequest) {
               error: "Invalid expense category",
               allowed: EXPENSE_CATEGORY_KEYS,
             },
-            { status: 400 },
+            { status: 400 }
           );
         }
         category = ok.data;
@@ -399,7 +412,7 @@ export async function POST(request: NextRequest) {
         if (!ok.success) {
           return NextResponse.json(
             { error: "Invalid income category", allowed: INCOME_CATEGORY_KEYS },
-            { status: 400 },
+            { status: 400 }
           );
         }
         category = ok.data;
@@ -410,15 +423,15 @@ export async function POST(request: NextRequest) {
 
     const createData: any = {
       userId,
-      type: data.type,
+      type: data.type as any,
       amountMinor: data.amountMinor,
       currency: data.currency ?? "USD",
-      fxUsdKrw: data.fxUsdKrw ?? undefined,
+      fxUsdKrw: data.fxUsdKrw ?? null,
       category,
       // Nullable in Prisma schema: set for SAVING, otherwise clear to null
       savingsGoalId: data.type === "SAVING" ? savingsGoalId : null,
       occurredAt,
-      note: data.note ?? undefined,
+      note: data.note ?? null,
     };
 
     const created = (await prisma.transaction.create({
@@ -440,20 +453,20 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(
       { transaction: toTransactionDTO(created, timeZone) },
-      { status: 201 },
+      { status: 201 }
     );
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(
         { error: "Invalid request data", details: error.errors },
-        { status: 400 },
+        { status: 400 }
       );
     }
 
     console.error("Create transaction error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }

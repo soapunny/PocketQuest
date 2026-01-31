@@ -26,7 +26,7 @@ import type {
   SwitchCurrencyRequestDTO,
 } from "../../../../../packages/shared/src/plans/types";
 
-import { EXPENSE_CATEGORY_KEYS } from "../domain/categories";
+import { EXPENSE_CATEGORY_KEYS } from "../../../../../packages/shared/src/transactions/categories";
 
 export type BudgetCategory = (typeof EXPENSE_CATEGORY_KEYS)[number] | string;
 
@@ -62,7 +62,7 @@ type Store = {
   // Single-goal upsert helper (POST /api/plans/[id]/goals/budget)
   saveBudgetGoal: (
     category: BudgetCategory,
-    limitMinor: number,
+    limitMinor: number
   ) => Promise<boolean>;
 
   // Persist current savings goals to server using SSOT DTOs.
@@ -116,7 +116,7 @@ function safeParseISODateTime(iso: any): Date | null {
 
 function deriveLocalISOFromUTCInstant(
   utcISO: string,
-  timeZone: string,
+  timeZone: string
 ): string {
   const d = safeParseISODateTime(utcISO);
   if (!d) return "";
@@ -163,7 +163,7 @@ function normalizeCurrency(v: any): Currency {
 
 function normalizePlan(
   server: ServerPlanDTO | null | undefined,
-  fallback: { existing: Plan },
+  fallback: { existing: Plan }
 ): Plan {
   const existing = fallback.existing;
   const timeZone =
@@ -186,24 +186,24 @@ function normalizePlan(
     server?.currency != null
       ? normalizeCurrency(server.currency)
       : server?.homeCurrency != null
-        ? normalizeCurrency(server.homeCurrency)
-        : server?.displayCurrency != null
-          ? normalizeCurrency(server.displayCurrency)
-          : existing.currency || existing.displayCurrency || "USD";
+      ? normalizeCurrency(server.homeCurrency)
+      : server?.displayCurrency != null
+      ? normalizeCurrency(server.displayCurrency)
+      : existing.currency || existing.displayCurrency || "USD";
 
   const homeCurrency: Currency =
     server?.homeCurrency != null
       ? normalizeCurrency(server.homeCurrency)
       : server?.currency != null
-        ? currency
-        : existing.homeCurrency;
+      ? currency
+      : existing.homeCurrency;
 
   const displayCurrency: Currency =
     server?.displayCurrency != null
       ? normalizeCurrency(server.displayCurrency)
       : server?.currency != null
-        ? currency
-        : existing.displayCurrency;
+      ? currency
+      : existing.displayCurrency;
 
   const periodStartUTC = server?.periodStartUTC || existing.periodStartUTC;
   const periodEndUTC = server?.periodEndUTC || existing.periodEndUTC;
@@ -222,19 +222,19 @@ function normalizePlan(
       : existing.periodEndISO;
 
   const serverBudgetGoals = Array.isArray(server?.budgetGoals)
-    ? (server?.budgetGoals ?? [])
+    ? server?.budgetGoals ?? []
     : [];
   const serverSavingsGoals = Array.isArray(server?.savingsGoals)
-    ? (server?.savingsGoals ?? [])
+    ? server?.savingsGoals ?? []
     : [];
 
   const nextBudgetGoals = mergeBudgetGoalsWithDefaults(
     buildDefaultBudgetGoals(),
-    serverBudgetGoals,
+    serverBudgetGoals
   );
   const nextSavingsGoals = mergeSavingsGoals(
     existing.savingsGoals,
-    serverSavingsGoals,
+    serverSavingsGoals
   );
 
   const serverTotalClean = normalizePositiveInt(server?.totalBudgetLimitMinor);
@@ -268,7 +268,7 @@ function mergeBudgetGoalsWithDefaults(
     id?: string | null;
     category: string;
     limitMinor?: number | null;
-  }[],
+  }[]
 ): BudgetGoal[] {
   // Map by normalized category key: { limit, id? }
   const byCat = new Map<string, { limit: number; id?: string }>();
@@ -300,7 +300,7 @@ function mergeBudgetGoalsWithDefaults(
   // Append any server categories not in defaults
   byCat.forEach((val, cat) => {
     const exists = merged.some(
-      (m) => normalizeCategoryKey(m.category) === normalizeCategoryKey(cat),
+      (m) => normalizeCategoryKey(m.category) === normalizeCategoryKey(cat)
     );
     if (!exists) {
       const key = normalizeCategoryKey(cat);
@@ -321,7 +321,7 @@ function mergeSavingsGoals(
     id?: string | null;
     name: string;
     targetMinor?: number | null;
-  }[],
+  }[]
 ): SavingsGoal[] {
   const byName = new Map<string, { target: number; id?: string }>();
   serverGoals.forEach((g) => {
@@ -349,7 +349,7 @@ function mergeSavingsGoals(
 function sumBudgetLimits(goals: BudgetGoal[]) {
   return goals.reduce(
     (sum, g) => sum + (g.limitMinor > 0 ? g.limitMinor : 0),
-    0,
+    0
   );
 }
 
@@ -398,7 +398,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   >(async () => {});
 
   const setTotalBudgetLimitMinor: Store["setTotalBudgetLimitMinor"] = (
-    minor,
+    minor
   ) => {
     const clean = Math.max(0, Number.isFinite(minor) ? Math.round(minor) : 0);
     setPlan((p) => ({ ...p, totalBudgetLimitMinor: clean }));
@@ -415,7 +415,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   };
 
   const setAdvancedCurrencyMode: Store["setAdvancedCurrencyMode"] = (
-    enabled,
+    enabled
   ) => {
     const on = !!enabled;
 
@@ -476,7 +476,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         return next;
       });
     },
-    [],
+    []
   );
 
   const refreshPlan: Store["refreshPlan"] = useCallback(async () => {
@@ -647,7 +647,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       plan.periodEndUTC,
       postRollover,
       refreshPlan,
-    ],
+    ]
   );
 
   useEffect(() => {
@@ -724,7 +724,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     async (nextCurrency: "USD" | "KRW") => {
       if (!token) {
         console.warn(
-          "[planStore] Missing auth token. Cannot switch plan currency.",
+          "[planStore] Missing auth token. Cannot switch plan currency."
         );
         return false;
       }
@@ -760,7 +760,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
     },
-    [plan, activePlanId, applyServerPlan, token],
+    [plan, activePlanId, applyServerPlan, token]
   );
 
   const switchPeriodType: Store["switchPeriodType"] = useCallback(
@@ -770,7 +770,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
       if (!token) {
         console.warn(
-          "[planStore] Missing auth token. Cannot switch period type.",
+          "[planStore] Missing auth token. Cannot switch period type."
         );
         return false;
       }
@@ -795,7 +795,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
     },
-    [plan, applyServerPlan, token],
+    [plan, applyServerPlan, token]
   );
 
   const refreshPeriodIfNeeded: Store["refreshPeriodIfNeeded"] =
@@ -872,18 +872,18 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
   const upsertBudgetGoalLimit: Store["upsertBudgetGoalLimit"] = (
     category,
-    limitMinor,
+    limitMinor
   ) => {
     const cat = normalizeCategoryKey(category);
     const cleanLimit = Math.max(
       0,
-      Number.isFinite(limitMinor) ? Math.round(limitMinor) : 0,
+      Number.isFinite(limitMinor) ? Math.round(limitMinor) : 0
     );
 
     setPlan((p) => {
       // Compare using normalized keys to avoid casing mismatches
       const idx = p.budgetGoals.findIndex(
-        (g) => normalizeCategoryKey(g.category) === cat,
+        (g) => normalizeCategoryKey(g.category) === cat
       );
 
       let nextGoals = p.budgetGoals;
@@ -904,7 +904,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
       const total = nextGoals.reduce(
         (sum, g) => sum + (g.limitMinor > 0 ? g.limitMinor : 0),
-        0,
+        0
       );
 
       const nextPlan = {
@@ -939,7 +939,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
     console.log(
       "[planStore] PATCH budget goals payload:",
-      JSON.stringify(payload),
+      JSON.stringify(payload)
     );
 
     try {
@@ -947,7 +947,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         const resp = await plansApi.patchBudgetGoals(
           token,
           activePlanId,
-          payload,
+          payload
         );
         if (resp?.plan) {
           applyServerPlan(resp.plan);
@@ -978,7 +978,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     async (category, limitMinor) => {
       if (!token) {
         console.warn(
-          "[planStore] Missing auth token. Cannot save budget goal.",
+          "[planStore] Missing auth token. Cannot save budget goal."
         );
         return false;
       }
@@ -996,7 +996,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
       console.log(
         "[planStore] POST budget goal payload:",
-        JSON.stringify(payload),
+        JSON.stringify(payload)
       );
 
       try {
@@ -1010,13 +1010,13 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
     },
-    [token, activePlanId, applyServerPlan, saveBudgetGoals],
+    [token, activePlanId, applyServerPlan, saveBudgetGoals]
   );
 
   const saveSavingsGoals: Store["saveSavingsGoals"] = useCallback(async () => {
     if (!token) {
       console.warn(
-        "[planStore] Missing auth token. Cannot save savings goals.",
+        "[planStore] Missing auth token. Cannot save savings goals."
       );
       return false;
     }
@@ -1034,7 +1034,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
     console.log(
       "[planStore] PATCH savings goals payload:",
-      JSON.stringify(payload),
+      JSON.stringify(payload)
     );
 
     try {
@@ -1042,7 +1042,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         const resp = await plansApi.patchSavingsGoals(
           token,
           activePlanId,
-          payload,
+          payload
         );
         if (resp?.plan) {
           applyServerPlan(resp.plan);
@@ -1070,12 +1070,12 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
   const upsertSavingsGoalTarget: Store["upsertSavingsGoalTarget"] = (
     name,
-    targetMinor,
+    targetMinor
   ) => {
     const n = (name || "Other").toString().trim() || "Other";
     const clean = Math.max(
       0,
-      Number.isFinite(targetMinor) ? Math.round(targetMinor) : 0,
+      Number.isFinite(targetMinor) ? Math.round(targetMinor) : 0
     );
 
     setPlan((p) => {
@@ -1109,7 +1109,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     const n = (name || "").trim();
     const t = Math.max(
       0,
-      Number.isFinite(targetMinor) ? Math.round(targetMinor) : 0,
+      Number.isFinite(targetMinor) ? Math.round(targetMinor) : 0
     );
     if (!n || t <= 0) return;
 
@@ -1154,7 +1154,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         setIsInitialized(true);
       }
     },
-    [applyServerPlan],
+    [applyServerPlan]
   );
 
   const store = useMemo<Store>(
@@ -1213,7 +1213,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       isInitialized,
       isLoading,
       initialize,
-    ],
+    ]
   );
 
   return React.createElement(PlanContext.Provider, { value: store }, children);

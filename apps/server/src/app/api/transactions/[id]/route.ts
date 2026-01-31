@@ -4,19 +4,23 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthUser } from "@/lib/auth";
 import { z } from "zod";
+import { Currency } from "../../../../../../../packages/shared/src/money/types";
 import {
   transactionUpdateSchema,
   TransactionDTO,
-  Currency,
   TxType,
 } from "../../../../../../../packages/shared/src/transactions/types";
 import {
   EXPENSE_CATEGORY_KEYS,
   INCOME_CATEGORY_KEYS,
-  SAVING_CATEGORY_KEY,
-  expenseCategoryKeySchema,
-  incomeCategoryKeySchema,
-} from "@/lib/categories";
+  canonicalCategoryKeyForServer,
+} from "../../../../../../../packages/shared/src/transactions/categories";
+
+const SAVING_CATEGORY_KEY = "savings" as const;
+
+// Zod enums from shared SSOT
+const expenseCategoryKeySchema = z.enum(EXPENSE_CATEGORY_KEYS);
+const incomeCategoryKeySchema = z.enum(INCOME_CATEGORY_KEYS);
 import { DEFAULT_TIME_ZONE } from "@/lib/plan/defaults";
 import { toZonedTime } from "date-fns-tz";
 import { format } from "date-fns";
@@ -255,7 +259,17 @@ export async function PATCH(
     const nextCategoryRaw = data.category ?? existing.category;
     const nextSavingsGoalIdRaw = data.savingsGoalId ?? existing.savingsGoalId;
 
-    let category = String(nextCategoryRaw ?? "").trim();
+    // Canonicalize category to server-accepted keys (aliases/casing)
+    let category = canonicalCategoryKeyForServer(
+      String(nextCategoryRaw ?? "").trim(),
+      nextType as TxType
+    );
+
+    // Defaults are handled by shared SSOT (`canonicalCategoryKeyForServer`).
+    // Defense-in-depth: INCOME must never be "uncategorized" (legacy key).
+    if (nextType === "INCOME" && category === "uncategorized") {
+      category = "other";
+    }
     let savingsGoalId =
       typeof nextSavingsGoalIdRaw === "string"
         ? nextSavingsGoalIdRaw.trim()
@@ -289,7 +303,7 @@ export async function PATCH(
 
       category = SAVING_CATEGORY_KEY;
     } else {
-      // For non-saving types, savingsGoalId must be cleared (nullable field => set null, not undefined)
+      // For non-saving types, savingsGoalId must be cleared (nullable field => set null in Prisma)
       savingsGoalId = undefined;
 
       if (nextType === "EXPENSE") {
@@ -322,12 +336,13 @@ export async function PATCH(
       type: nextType,
       amountMinor: nextAmountMinor,
       currency: nextCurrency,
-      fxUsdKrw: nextFxUsdKrw ?? undefined,
+      // Nullable columns: use null to clear
+      fxUsdKrw: nextFxUsdKrw ?? null,
       category,
-      // Nullable in Prisma schema: clear to null for non-saving types
+      // Nullable in Prisma schema: set for SAVING, otherwise clear to null
       savingsGoalId: nextType === "SAVING" ? savingsGoalId : null,
       occurredAt: nextOccurredAt,
-      note: nextNote ?? undefined,
+      note: nextNote ?? null,
     };
 
     const transaction = (await prisma.transaction.update({

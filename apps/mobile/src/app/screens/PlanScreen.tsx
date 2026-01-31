@@ -19,7 +19,7 @@ import type { Currency } from "../../../../../packages/shared/src/money/types";
 
 import { usePlan } from "../store/planStore";
 
-import { EXPENSE_CATEGORY_KEYS } from "../domain/categories";
+import { EXPENSE_CATEGORY_KEYS } from "../../../../../packages/shared/src/transactions/categories";
 import { categoryLabelText } from "../domain/categories/categoryLabels";
 import {
   parseInputToMinor,
@@ -97,18 +97,18 @@ export default function PlanScreen() {
     periodType === "MONTHLY"
       ? tr("Monthly", "월간")
       : periodType === "BIWEEKLY"
-        ? tr("Bi-weekly", "2주")
-        : tr("Weekly", "주간");
+      ? tr("Bi-weekly", "2주")
+      : tr("Weekly", "주간");
 
   const periodText =
     periodType === "MONTHLY"
       ? tr("this month", "이번 달")
       : periodType === "BIWEEKLY"
-        ? tr("this 2 weeks", "이번 2주")
-        : tr("this week", "이번 주");
+      ? tr("this 2 weeks", "이번 2주")
+      : tr("this week", "이번 주");
 
   const [selectedCategory, setSelectedCategory] = useState<string>(
-    EXPENSE_CATEGORY_KEYS[0],
+    EXPENSE_CATEGORY_KEYS[0]
   );
   const [selectedLimit, setSelectedLimit] = useState("");
   const [savingBudgetGoal, setSavingBudgetGoal] = useState(false);
@@ -116,7 +116,7 @@ export default function PlanScreen() {
 
   const savingsGoalNames = useMemo(
     () => (plan.savingsGoals ?? []).map((g) => String(g.name)).filter(Boolean),
-    [plan.savingsGoals],
+    [plan.savingsGoals]
   );
 
   const [selectedSavingsGoal, setSelectedSavingsGoal] = useState<string>(() => {
@@ -144,7 +144,7 @@ export default function PlanScreen() {
     setSelectedLimit(
       Number.isFinite(limitMinor) && limitMinor > 0
         ? formatMoneyNoSymbol(limitMinor, baseCurrency)
-        : "",
+        : ""
     );
   }, [selectedCategory, plan.budgetGoals, baseCurrency, isEditingBudgetLimit]);
 
@@ -156,7 +156,7 @@ export default function PlanScreen() {
     setSelectedSavingsTarget(
       Number.isFinite(targetMinor) && targetMinor > 0
         ? formatMoneyNoSymbol(targetMinor, baseCurrency)
-        : "",
+        : ""
     );
   }, [
     selectedSavingsGoal,
@@ -196,7 +196,7 @@ export default function PlanScreen() {
     } catch (e: any) {
       Alert.alert(
         tr("Save failed", "저장 실패"),
-        e?.message || "Unknown error",
+        e?.message || "Unknown error"
       );
     } finally {
       setSavingBudgetGoal(false);
@@ -219,7 +219,7 @@ export default function PlanScreen() {
     } catch (e: any) {
       Alert.alert(
         tr("Save failed", "저장 실패"),
-        e?.message || "Unknown error",
+        e?.message || "Unknown error"
       );
     } finally {
       setSavingBudgetGoal(false);
@@ -234,7 +234,7 @@ export default function PlanScreen() {
 
       if (!String(selectedSavingsGoal || "").trim()) {
         throw new Error(
-          tr("Please enter a goal name", "목표 이름을 입력하세요"),
+          tr("Please enter a goal name", "목표 이름을 입력하세요")
         );
       }
 
@@ -256,7 +256,7 @@ export default function PlanScreen() {
     } catch (e: any) {
       Alert.alert(
         tr("Save failed", "저장 실패"),
-        e?.message || "Unknown error",
+        e?.message || "Unknown error"
       );
     } finally {
       setSavingSavingsGoal(false);
@@ -272,7 +272,7 @@ export default function PlanScreen() {
 
       if (!String(selectedSavingsGoal || "").trim()) {
         throw new Error(
-          tr("Please enter a goal name", "목표 이름을 입력하세요"),
+          tr("Please enter a goal name", "목표 이름을 입력하세요")
         );
       }
 
@@ -285,7 +285,7 @@ export default function PlanScreen() {
     } catch (e: any) {
       Alert.alert(
         tr("Save failed", "저장 실패"),
-        e?.message || "Unknown error",
+        e?.message || "Unknown error"
       );
     } finally {
       setSavingSavingsGoal(false);
@@ -301,11 +301,11 @@ export default function PlanScreen() {
           title={tr(`${periodLabel} Plan`, `${periodLabel} 플랜`)}
           subtitle={tr(
             `Set your goals for ${periodText}`,
-            `${periodText} 목표를 설정하세요`,
+            `${periodText} 목표를 설정하세요`
           )}
           description={tr(
             `Base currency: ${baseCurrency}`,
-            `기준 통화: ${baseCurrency}`,
+            `기준 통화: ${baseCurrency}`
           )}
         />
       }
@@ -358,7 +358,7 @@ export default function PlanScreen() {
             "limitMinor(raw):",
             (goal as any)?.limitMinor,
             "limitMinor(num):",
-            limit,
+            limit
           );
 
           return (
@@ -376,7 +376,7 @@ export default function PlanScreen() {
                 <Text style={styles.cardBody}>
                   {tr(
                     "No goal set for this category yet.",
-                    "이 카테고리는 아직 목표 금액이 없어요.",
+                    "이 카테고리는 아직 목표 금액이 없어요."
                   )}
                 </Text>
               )}
@@ -465,7 +465,7 @@ export default function PlanScreen() {
       <View style={[CardSpacing.card, styles.card]}>
         {(() => {
           const goal = plan.savingsGoals.find(
-            (x) => x.name === selectedSavingsGoal,
+            (x) => x.name === selectedSavingsGoal
           );
           const target = toMinorNumber((goal as any)?.targetMinor);
 
@@ -501,7 +501,7 @@ export default function PlanScreen() {
                 <Text style={styles.cardBody}>
                   {tr(
                     "No target set for this goal yet.",
-                    "이 목표는 아직 목표 금액이 없어요.",
+                    "이 목표는 아직 목표 금액이 없어요."
                   )}
                 </Text>
               )}

@@ -25,12 +25,12 @@ import type { Currency } from "../../../../../packages/shared/src/money/types";
 import { useTransactions } from "../store/transactionsStore";
 import { usePlan } from "../store/planStore";
 
+import { categoryLabelText } from "../domain/categories";
 import {
-  categoryLabelText,
-  canonicalCategoryKeyForServer,
   EXPENSE_CATEGORY_KEYS,
   INCOME_CATEGORY_KEYS,
-} from "../domain/categories";
+  canonicalCategoryKeyForServer,
+} from "../../../../../packages/shared/src/transactions/categories";
 
 export default function AddTransactionModal() {
   const navigation = useNavigation();
@@ -62,11 +62,24 @@ export default function AddTransactionModal() {
   const [type, setType] = useState<TxType>("EXPENSE");
   const [amountValue, setAmountValue] = useState<number | null>(null);
 
+  const defaultExpenseCategory = useMemo(() => {
+    // Prefer a sensible default instead of "uncategorized"
+    const preferred = "groceries";
+    const list = EXPENSE_CATEGORY_KEYS as readonly string[];
+    return list.includes(preferred) ? preferred : list[0] ?? "other";
+  }, []);
+
+  const defaultIncomeCategory = useMemo(() => {
+    const preferred = "salary";
+    const list = INCOME_CATEGORY_KEYS as readonly string[];
+    return list.includes(preferred) ? preferred : list[0] ?? "other";
+  }, []);
+
   const [categoryKey, setCategoryKey] = useState<string>(
-    EXPENSE_CATEGORY_KEYS[0] ?? "uncategorized",
+    defaultExpenseCategory
   );
   const [selectedSavingsGoalId, setSelectedSavingsGoalId] = useState<string>(
-    savingsGoalOptions[0]?.id ?? "",
+    savingsGoalOptions[0]?.id ?? ""
   );
   const [note, setNote] = useState<string>("");
 
@@ -85,20 +98,41 @@ export default function AddTransactionModal() {
   }, [type, savingsGoalOptions]);
 
   useEffect(() => {
-    // When the type changes, ensure the currently selected category is valid.
-    if (categoryOptions.includes(categoryKey)) return;
+    // When the type or available options change, ensure the currently selected category is valid.
+    if (categoryOptions.includes(categoryKey)) {
+      // If we are not in SAVING mode, keep savingsGoalId empty to avoid accidental sends.
+      if (type !== "SAVING" && selectedSavingsGoalId) {
+        setSelectedSavingsGoalId("");
+      }
+      return;
+    }
 
     // Default per type (keeps things predictable)
-    if (type === "EXPENSE")
-      setCategoryKey(EXPENSE_CATEGORY_KEYS[0] ?? "uncategorized");
-    else if (type === "INCOME")
-      setCategoryKey(INCOME_CATEGORY_KEYS[0] ?? "uncategorized");
-    else {
-      const firstId = savingsGoalOptions[0]?.id ?? "";
-      setCategoryKey(firstId || "uncategorized");
-      setSelectedSavingsGoalId(firstId);
+    if (type === "EXPENSE") {
+      setCategoryKey(defaultExpenseCategory);
+      setSelectedSavingsGoalId("");
+      return;
     }
-  }, [type, categoryOptions, categoryKey]);
+
+    if (type === "INCOME") {
+      setCategoryKey(defaultIncomeCategory);
+      setSelectedSavingsGoalId("");
+      return;
+    }
+
+    // SAVING
+    const firstId = savingsGoalOptions[0]?.id ?? "";
+    setCategoryKey(firstId);
+    setSelectedSavingsGoalId(firstId);
+  }, [
+    type,
+    categoryOptions,
+    categoryKey,
+    savingsGoalOptions,
+    selectedSavingsGoalId,
+    defaultExpenseCategory,
+    defaultIncomeCategory,
+  ]);
 
   useEffect(() => {
     // If the user changes currency in Settings, clear the FX snapshot input.
@@ -126,8 +160,8 @@ export default function AddTransactionModal() {
         tr("No savings goal", "저축 목표 없음"),
         tr(
           "Create a Savings Goal in Plan first, then record a Saving transaction.",
-          "Plan에서 저축 목표를 먼저 만든 뒤 저축 거래를 추가해 주세요.",
-        ),
+          "Plan에서 저축 목표를 먼저 만든 뒤 저축 거래를 추가해 주세요."
+        )
       );
       return;
     }
@@ -135,7 +169,7 @@ export default function AddTransactionModal() {
     // 항상 양수(또는 0 이상)로 minor 단위를 저장하고,
     // EXPENSE/INCOME/SAVING 구분은 type으로 처리합니다.
     const absMinor = Math.round(
-      (amountValue ?? 0) * (currency === "USD" ? 100 : 1),
+      (amountValue ?? 0) * (currency === "USD" ? 100 : 1)
     );
     const amountMinor = absMinor;
 
@@ -143,41 +177,62 @@ export default function AddTransactionModal() {
 
     try {
       setIsSaving(true);
+
       const savingsGoalIdFinal =
         type === "SAVING"
           ? String(selectedSavingsGoalId || categoryKey || "").trim()
-          : "";
+          : undefined;
+
+      // Normalize category for server (SSOT):
+      // - EXPENSE/INCOME: canonical keys + aliases
+      // - SAVING: always "savings" (goal id is sent separately)
+      let categoryForServer = canonicalCategoryKeyForServer(
+        String(categoryKey ?? ""),
+        type
+      );
+
+      // Final allowlist clamp (defense-in-depth)
+      if (type === "EXPENSE") {
+        if (
+          !(EXPENSE_CATEGORY_KEYS as readonly string[]).includes(
+            categoryForServer
+          )
+        ) {
+          categoryForServer = defaultExpenseCategory;
+        }
+      } else if (type === "INCOME") {
+        if (
+          !(INCOME_CATEGORY_KEYS as readonly string[]).includes(
+            categoryForServer
+          )
+        ) {
+          categoryForServer = defaultIncomeCategory;
+        }
+      }
 
       await txStore.createTransaction({
         type,
         amountMinor,
         currency,
         fxUsdKrw: fxNeeded ? fxUsdKrw : undefined,
-        // Server validates canonical keys.
-        category:
-          type === "SAVING"
-            ? "savings"
-            : canonicalCategoryKeyForServer(
-                categoryKey,
-                type as unknown as TxType,
-              ),
+        category: categoryForServer,
         savingsGoalId: type === "SAVING" ? savingsGoalIdFinal : undefined,
         occurredAtISO: new Date().toISOString(),
         note: noteTrimmed || undefined,
-      } as any);
+      });
 
       navigation.goBack();
     } catch (error) {
       console.error(
         "[AddTransactionModal] failed to create transaction",
-        error,
+        error
       );
       Alert.alert(
         tr("Save failed", "저장 실패"),
         tr(
           "Could not save this transaction. Please try again.",
-          "거래를 저장하지 못했어요. 다시 시도해 주세요.",
-        ),
+          "거래를 저장하지 못했어요. 다시 시도해 주세요."
+        )
       );
     } finally {
       setIsSaving(false);
@@ -192,7 +247,7 @@ export default function AddTransactionModal() {
           title={tr("Add Transaction", "거래 추가")}
           subtitle={tr(
             "Quick entry • Currency comes from Settings",
-            "빠른 입력 • 통화는 설정에서 가져와요",
+            "빠른 입력 • 통화는 설정에서 가져와요"
           )}
           compact
         />
@@ -252,7 +307,7 @@ export default function AddTransactionModal() {
           <Text style={[CardSpacing.fieldHelp, styles.helper]}>
             {tr(
               "Enter an amount (numbers only). Currency is set from Settings.",
-              "금액을 입력하세요(숫자만). 통화는 설정에서 정해져요.",
+              "금액을 입력하세요(숫자만). 통화는 설정에서 정해져요."
             )}
           </Text>
         </View>
@@ -266,7 +321,7 @@ export default function AddTransactionModal() {
             <Text style={[CardSpacing.fieldHelp, styles.helper]}>
               {tr(
                 `Used for totals in ${homeCurrency}. Enter: 1 USD = ___ KRW`,
-                `기준 합계 통화(${homeCurrency})로 계산할 때 사용돼요. 입력: 1 USD = ___ KRW`,
+                `기준 합계 통화(${homeCurrency})로 계산할 때 사용돼요. 입력: 1 USD = ___ KRW`
               )}
             </Text>
             <TextInput
@@ -286,7 +341,7 @@ export default function AddTransactionModal() {
               <Text style={styles.errorText}>
                 {tr(
                   "Please enter a valid exchange rate.",
-                  "올바른 환율을 입력해 주세요.",
+                  "올바른 환율을 입력해 주세요."
                 )}
               </Text>
             )}

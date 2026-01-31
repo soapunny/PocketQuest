@@ -72,11 +72,20 @@ export const CATEGORY_META: Readonly<Record<string, CategoryMeta>> =
     },
 
     // Income
+    salary: {
+      key: "salary",
+      icon: "cash",
+      colorToken: "emerald-500",
+      order: 5,
+      group: "income",
+      txTypes: ["INCOME"],
+    },
+    // Alias (legacy)
     paycheck: {
       key: "paycheck",
       icon: "cash",
       colorToken: "emerald-500",
-      order: 5,
+      order: 6,
       group: "income",
       txTypes: ["INCOME"],
     },
@@ -106,11 +115,20 @@ export const CATEGORY_META: Readonly<Record<string, CategoryMeta>> =
     },
 
     // Savings (transaction category; savings goal is a separate concept)
+    savings: {
+      key: "savings",
+      icon: "target",
+      colorToken: "teal-500",
+      order: 9,
+      group: "savings",
+      txTypes: ["SAVING"],
+    },
+    // Alias (legacy)
     saving: {
       key: "saving",
       icon: "target",
       colorToken: "teal-500",
-      order: 9,
+      order: 10,
       group: "savings",
       txTypes: ["SAVING"],
     },
@@ -264,40 +282,41 @@ export function getCategoryMeta(categoryKey: unknown): CategoryMeta {
 }
 
 /**
- * Get selectable canonical category keys for a given transaction type.
- * - Ordered by `order`
- * - Backward compatible: meta entries without `txTypes` are treated as EXPENSE-only
- * - Excludes "uncategorized" (fallback-only)
+ * UI helper: sort a given set of category keys by UI meta `order`.
+ *
+ * IMPORTANT:
+ * - This does NOT define which keys are valid (SSOT is shared).
+ * - Callers should pass keys from shared allowlists.
+ * - Unknown keys are kept and sorted to the end.
  */
-export function getSelectableCategoryKeysByTxType(txType: TxType): string[] {
-  const entries = Object.values(CATEGORY_META);
+export function sortCategoryKeysByMeta(
+  keys: readonly string[],
+  txType?: TxType
+): string[] {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
 
-  const filtered = entries.filter((m) => {
-    if (m.key === "uncategorized") return false;
+  for (const k of keys) {
+    const s = typeof k === "string" ? k.trim().toLowerCase() : "";
+    if (!s) continue;
+    if (seen.has(s)) continue;
+    seen.add(s);
+    normalized.push(s);
+  }
 
-    const allowed = m.txTypes;
-    if (!allowed) return txType === "EXPENSE";
-    return allowed.includes(txType);
+  const scored = normalized.map((k) => {
+    const meta = getCategoryMeta(k);
+    const allowed = meta.txTypes;
+    const ok = !txType
+      ? true
+      : !allowed
+      ? txType === "EXPENSE"
+      : allowed.includes(txType);
+    return { k, meta, ok };
   });
 
-  filtered.sort((a, b) => a.order - b.order);
+  const filtered = txType ? scored.filter((x) => x.ok) : scored;
 
-  // Ensure uniqueness and stable output
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const m of filtered) {
-    const k = m.key;
-    if (!seen.has(k)) {
-      seen.add(k);
-      out.push(k);
-    }
-  }
-  return out;
+  filtered.sort((a, b) => a.meta.order - b.meta.order);
+  return filtered.map((x) => x.k);
 }
-
-// Derived canonical key lists for common UI pickers.
-// NOTE: These are convenience exports; the source of truth remains CATEGORY_META.
-export const EXPENSE_CATEGORY_KEYS =
-  getSelectableCategoryKeysByTxType("EXPENSE");
-export const INCOME_CATEGORY_KEYS = getSelectableCategoryKeysByTxType("INCOME");
-export const SAVING_CATEGORY_KEYS = getSelectableCategoryKeysByTxType("SAVING");
