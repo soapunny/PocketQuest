@@ -31,9 +31,9 @@ This repository is a **monorepo** containing:
 
 #### 🧾 Transaction System
 
-- Shared transaction category policy (SSOT) in `packages/shared`
-- Canonical category keys enforced across **mobile → API → DB**
-- Legacy `uncategorized` migrated to unified `other` fallback
+- Canonical categories live in `packages/shared/src/transactions/categories.ts`
+- EXPENSE / INCOME transactions use category keys; legacy `uncategorized` migrated to unified `other` fallback
+- SAVING transactions require `savingsGoalId` and do not use category selection
 - Clear separation of:
   - **EXPENSE / INCOME** → category-based
   - **SAVING** → goal-based (`savingsGoalId`), category fixed to `"savings"`
@@ -113,6 +113,12 @@ Switching periods activates a different plan instead of mutating the existing on
 - Currency switching (USD / KRW)
 - English / Korean support
 
+#### Dashboard UX
+
+- Status chips with emoji semantics: Good ✅, Caution ⚠️, Over ❌
+- Remaining-based percentages and progress bars provide quick visual feedback
+- Recent Transactions removed from Dashboard; use Transactions tab for details
+
 ### 🗄️ Backend API (Next.js App Router)
 
 - Period-aware plan upsert (POST / PATCH)
@@ -145,13 +151,13 @@ Switching periods activates a different plan instead of mutating the existing on
 - TypeScript
 - Prisma ORM
 - PostgreSQL
+- Supabase
 
 ### Tooling
 
 - pnpm (monorepo)
 - Cursor / VS Code
 - Git + GitHub
-- Jira (Kanban)
 - Shared domain logic via `packages/shared` (SSOT)
 
 ---
@@ -159,29 +165,62 @@ Switching periods activates a different plan instead of mutating the existing on
 ## 📁 Project Structure (Actual)
 
 ```text
-pocketquest/
+PocketQuest/
 ├── apps/
-│ ├── mobile/
-│ │ └── src/app/
-│ │   ├── screens/        # Dashboard, Plan, Transactions, Settings
-│ │   ├── components/     # Shared UI components
-│ │   ├── lib/            # planStore, API clients, helpers
-│ │   ├── i18n/           # EN / KO translations
-│ │   └── theme/          # Design tokens
-│ │
-│ └── server/
-│   └── src/app/api/
-│     ├── plans/          # Unified plan endpoints
-│     │ └── rollover/     # Period rollover logic
-│     ├── transactions/
-│     └── health/
-│
-├── prisma/
-│ ├── schema.prisma
-│ └── migrations/
+│   ├── mobile/
+│   │   ├── src/app/
+│   │   │   ├── api/
+│   │   │   ├── components/
+│   │   │   ├── config/
+│   │   │   ├── domain/
+│   │   │   ├── hooks/
+│   │   │   ├── lib/
+│   │   │   ├── navigation/
+│   │   │   ├── screens/
+│   │   │   ├── store/
+│   │   │   └── oauth.tsx
+│   │   ├── .env.development
+│   │   ├── app.json
+│   │   ├── App.tsx
+│   │   ├── babel.config.js
+│   │   ├── index.ts
+│   │   ├── metro.config.js
+│   │   ├── package.json
+│   │   └── tsconfig.json
+│   │
+│   └── server/
+│       ├── prisma/
+│       │   ├── migrations/
+│       │   └── schema.prisma
+│       ├── src/
+│       │   ├── app/api/
+│       │   │   ├── auth/
+│       │   │   ├── bootstrap/
+│       │   │   ├── character/
+│       │   │   ├── health/
+│       │   │   ├── plans/
+│       │   │   ├── transactions/
+│       │   │   └── users/me/
+│       │   ├── lib/
+│       │   │   ├── bootstrap/
+│       │   │   └── plan/
+│       │   ├── auth.ts
+│       │   ├── categories.ts
+│       │   ├── prisma.ts
+│       │   └── middleware.ts
+│       ├── .env
+│       ├── next.config.js
+│       ├── package.json
+│       └── tsconfig.json
 │
 ├── packages/
-│ └── shared/             # Shared domain logic (transactions, categories, types)
+│   └── shared/
+│       └── src/
+│           └── plans/
+│               └── types.ts
+│           └── transactions/
+│               ├── categories.ts
+│               └── types.ts
 │
 ├── pnpm-workspace.yaml
 ├── package.json
@@ -193,17 +232,8 @@ pocketquest/
 - Server is the source of truth
 - Consistency over premature features
 - Timezone correctness before analytics
-- Clear UX before gamification
 - Single Source of Truth (SSOT) for shared domain rules
 
 PocketQuest prioritizes correctness, clarity, and long-term extensibility.
-
-## 🛣️ Next Steps
-
-- Refine advanced currency mode (home vs display)
-- Automated rollover (cron-based)
-- Authentication & multi-user support
-- Analytics and insights
-- Optional gamification layer
 
 ---
