@@ -108,7 +108,7 @@ export type CreateTransactionDTO = {
   currency?: Currency;
   fxUsdKrw?: number | null;
   category: string;
-  savingsGoalId?: string;
+  savingsGoalId?: string | null;
   occurredAtISO: string;
   note?: string | null;
   amountCents?: number;
@@ -121,13 +121,13 @@ export type DeleteTransactionResponseDTO = { success: boolean };
 
 // 2.4 Zod schemas (basic shapes only, no server-only category enforcement)
 export const rangeSchema = z.enum(
-  RANGE_VALUES as unknown as [string, ...string[]],
+  RANGE_VALUES as unknown as [string, ...string[]]
 );
 export const currencySchema = z.enum(
-  CURRENCY_VALUES as unknown as [string, ...string[]],
+  CURRENCY_VALUES as unknown as [string, ...string[]]
 );
 export const txTypeSchema = z.enum(
-  TX_TYPE_VALUES as unknown as [string, ...string[]],
+  TX_TYPE_VALUES as unknown as [string, ...string[]]
 );
 
 export const transactionCreateSchema = z.object({
@@ -136,7 +136,7 @@ export const transactionCreateSchema = z.object({
   currency: currencySchema.optional(),
   fxUsdKrw: z.number().optional().nullable(),
   category: z.string().min(1),
-  savingsGoalId: z.string().min(1).optional(),
+  savingsGoalId: z.string().min(1).nullable().optional(),
   occurredAtISO: z.string().datetime(),
   note: z.string().optional().nullable(),
   amountCents: z.number().optional(),
@@ -148,7 +148,7 @@ export const transactionUpdateSchema = z.object({
   currency: currencySchema.optional(),
   fxUsdKrw: z.number().optional().nullable(),
   category: z.string().optional(),
-  savingsGoalId: z.string().min(1).optional(),
+  savingsGoalId: z.string().min(1).nullable().optional(),
   occurredAtISO: z.string().datetime().optional(),
   note: z.string().optional().nullable(),
   amountCents: z.number().optional(),

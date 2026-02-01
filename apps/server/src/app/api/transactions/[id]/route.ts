@@ -3,7 +3,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthUser } from "@/lib/auth";
-import { z } from "zod";
+import { z, ZodError } from "zod";
+import { Prisma } from "@prisma/client";
 import { Currency } from "../../../../../../../packages/shared/src/money/types";
 import {
   transactionUpdateSchema,
@@ -221,6 +222,9 @@ export async function PATCH(
     const timeZone = dbUser?.timeZone || DEFAULT_TIME_ZONE;
 
     const data = updateTransactionSchema.parse(body);
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[transactions/[id]] PATCH body", body);
+    }
 
     // Check if transaction exists and belongs to user
     const existing = (await prisma.transaction.findFirst({
@@ -257,7 +261,10 @@ export async function PATCH(
       ? new Date(data.occurredAtISO)
       : existing.occurredAt;
     const nextCategoryRaw = data.category ?? existing.category;
-    const nextSavingsGoalIdRaw = data.savingsGoalId ?? existing.savingsGoalId;
+    const nextSavingsGoalIdRaw =
+      data.savingsGoalId !== undefined
+        ? data.savingsGoalId
+        : existing.savingsGoalId;
 
     // Canonicalize category to server-accepted keys (aliases/casing)
     let category = canonicalCategoryKeyForServer(
@@ -274,6 +281,7 @@ export async function PATCH(
       typeof nextSavingsGoalIdRaw === "string"
         ? nextSavingsGoalIdRaw.trim()
         : undefined;
+    if (savingsGoalId === "") savingsGoalId = undefined;
 
     if (nextType === "SAVING") {
       if (!savingsGoalId) {
@@ -344,6 +352,9 @@ export async function PATCH(
       occurredAt: nextOccurredAt,
       note: nextNote ?? null,
     };
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[transactions/[id]] PATCH updateData", updateData);
+    }
 
     const transaction = (await prisma.transaction.update({
       where: { id: params.id },
@@ -367,18 +378,42 @@ export async function PATCH(
       transaction: toTransactionDTO(transaction, timeZone),
     });
   } catch (error) {
-    if (error instanceof z.ZodError) {
+    if (error instanceof ZodError) {
       return NextResponse.json(
         { error: "Invalid request data", details: error.errors },
         { status: 400 }
       );
     }
 
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      // e.g. P2025 (record not found), P2002 (unique), etc.
+      const payload: any = {
+        error: "Database error",
+        code: error.code,
+      };
+      if (process.env.NODE_ENV !== "production") {
+        payload.message = error.message;
+        payload.meta = (error as any).meta ?? null;
+      }
+      return NextResponse.json(payload, { status: 400 });
+    }
+
+    if (error instanceof Prisma.PrismaClientValidationError) {
+      const payload: any = { error: "Database validation error" };
+      if (process.env.NODE_ENV !== "production") {
+        payload.message = error.message;
+      }
+      return NextResponse.json(payload, { status: 400 });
+    }
+
     console.error("Update transaction error:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+
+    const payload: any = { error: "Internal server error" };
+    if (process.env.NODE_ENV !== "production") {
+      payload.message = (error as any)?.message ?? String(error);
+    }
+
+    return NextResponse.json(payload, { status: 500 });
   }
 }
 

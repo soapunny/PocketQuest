@@ -268,7 +268,7 @@ export type UpsertSavingsGoalRequestDTO = {
 };
 
 export type PatchSavingsGoalsRequestDTO = {
-  savingsGoals: Array<{ name: string; targetMinor: number }>;
+  savingsGoals: Array<{ id?: string | null; name: string; targetMinor: number }>;
 };
 
 export const savingsGoalItemSchema = z.object({
@@ -278,17 +278,13 @@ export const savingsGoalItemSchema = z.object({
 });
 
 export const upsertSavingsGoalRequestSchema = z.object({
+  id: z.string().optional().nullable(),
   name: z.string().min(1),
   targetMinor: z.number().int().nonnegative(),
 });
 
 export const patchSavingsGoalsRequestSchema = z.object({
-  savingsGoals: z.array(
-    z.object({
-      name: z.string().min(1),
-      targetMinor: z.number().int().nonnegative(),
-    }),
-  ),
+  savingsGoals: z.array(savingsGoalItemSchema),
 });
 
 // ---------------------------------------------------------------------------

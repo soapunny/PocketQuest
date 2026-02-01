@@ -78,7 +78,7 @@ model Transaction {
 
   // For SAVING transactions, link to a specific savings goal (required by app policy).
   savingsGoalId String?
-  savingsGoal   SavingsGoal? @relation("SavingsGoalTransactions", fields: [savingsGoalId], references: [id], onDelete: Restrict)
+  savingsGoal   SavingsGoal? @relation("SavingsGoalTransactions", fields: [savingsGoalId], references: [id], onDelete: SetNull)
 
   type TxType //transaction type(EXPENSE, INCOME, SAVING)
 

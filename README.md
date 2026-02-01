@@ -237,3 +237,15 @@ PocketQuest/
 PocketQuest prioritizes correctness, clarity, and long-term extensibility.
 
 ---
+
+## 정책
+
+- General
+- SavingsGoal
+  - 생성
+  - 편집
+  - 삭제
+    - 삭제된 goal에 연결된 saving transactions 처리 정책(유지 + goalId null)
+    - Transactions: savingsGoalId가 null/빈 문자열이면 라벨을 **“Unassigned / 미지정”**으로 표시, 필터/검색에도 정상적으로 걸리게, 미지정 트랜잭션”을 유저가 다시 어떤 goal로 재할당할 수 있게, 특정 goal로 할당된 tx를 Unassigned로 바꾸는 것은 금지
+    - Dashboard: goalId=null로 묶인 savedMinor를 “Unassigned” 한 줄로 보여주기
+    - Add Transaction: Unassigned도 선택 가능하게 열어두되, 기본값은 “첫 번째 goal”로 세팅

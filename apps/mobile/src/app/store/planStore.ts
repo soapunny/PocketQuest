@@ -1,4 +1,5 @@
 // apps/mobile/src/app/store/planStore.ts
+
 import React, {
   createContext,
   useCallback,
@@ -11,6 +12,7 @@ import React, {
 import { AppState, AppStateStatus } from "react-native";
 
 import { useAuthStore } from "./authStore";
+import { useDashboardStore } from "./dashboardStore";
 import { plansApi } from "../api/plansApi";
 import type { Currency } from "../../../../../packages/shared/src/money/types";
 import type {
@@ -48,7 +50,8 @@ type Store = {
   setLanguage: (lang: Language) => void;
   setTotalBudgetLimitMinor: (minor: number) => void;
   upsertBudgetGoalLimit: (category: BudgetCategory, limitMinor: number) => void;
-  upsertSavingsGoalTarget: (name: string, targetMinor: number) => void;
+  upsertSavingsGoalTarget: (id: string, targetMinor: number) => void;
+  renameSavingsGoal: (id: string, name: string) => void;
   addSavingsGoal: (name: string, targetMinor: number) => void;
   removeSavingsGoal: (id: string) => void;
 
@@ -161,6 +164,10 @@ function normalizeCurrency(v: any): Currency {
   return String(v).toUpperCase() === "KRW" ? "KRW" : "USD";
 }
 
+function hasOwn(obj: any, key: string): boolean {
+  return !!obj && Object.prototype.hasOwnProperty.call(obj, key);
+}
+
 function normalizePlan(
   server: ServerPlanDTO | null | undefined,
   fallback: { existing: Plan }
@@ -221,21 +228,31 @@ function normalizePlan(
         String(periodEndUTC).slice(0, 10)
       : existing.periodEndISO;
 
-  const serverBudgetGoals = Array.isArray(server?.budgetGoals)
-    ? server?.budgetGoals ?? []
-    : [];
-  const serverSavingsGoals = Array.isArray(server?.savingsGoals)
-    ? server?.savingsGoals ?? []
-    : [];
+  // IMPORTANT: Some endpoints return a partial plan (e.g., only budgetGoals).
+  // Treat missing fields as "not provided" (keep existing), not as empty arrays.
+  const serverProvidedBudgetGoals = hasOwn(server, "budgetGoals");
+  const serverProvidedSavingsGoals = hasOwn(server, "savingsGoals");
 
-  const nextBudgetGoals = mergeBudgetGoalsWithDefaults(
-    buildDefaultBudgetGoals(),
-    serverBudgetGoals
-  );
-  const nextSavingsGoals = mergeSavingsGoals(
-    existing.savingsGoals,
-    serverSavingsGoals
-  );
+  const serverBudgetGoals =
+    serverProvidedBudgetGoals && Array.isArray((server as any)?.budgetGoals)
+      ? (((server as any).budgetGoals ?? []) as any[])
+      : null;
+
+  const serverSavingsGoals =
+    serverProvidedSavingsGoals && Array.isArray((server as any)?.savingsGoals)
+      ? (((server as any).savingsGoals ?? []) as any[])
+      : null;
+
+  const nextBudgetGoals = serverBudgetGoals
+    ? mergeBudgetGoalsWithDefaults(
+        buildDefaultBudgetGoals(),
+        serverBudgetGoals as any
+      )
+    : existing.budgetGoals;
+
+  const nextSavingsGoals = serverSavingsGoals
+    ? mergeSavingsGoals(existing.savingsGoals, serverSavingsGoals as any)
+    : existing.savingsGoals;
 
   const serverTotalClean = normalizePositiveInt(server?.totalBudgetLimitMinor);
   const computedTotal = sumBudgetLimits(nextBudgetGoals);
@@ -323,25 +340,66 @@ function mergeSavingsGoals(
     targetMinor?: number | null;
   }[]
 ): SavingsGoal[] {
-  const byName = new Map<string, { target: number; id?: string }>();
-  serverGoals.forEach((g) => {
-    const name = normalizeName(g.name);
-    const raw = g.targetMinor ?? 0;
-    const target = normalizePositiveInt(raw);
-    const id = g.id ? String(g.id) : undefined;
-    byName.set(name, { target, id });
+  // ✅ SSOT: id-first.
+  // - If server provides an id, we always use that id.
+  // - If server does NOT provide an id (legacy), we fall back to name matching.
+  // - This prevents rename from creating “new goals” or flipping ids.
+
+  const currentById = new Map<string, SavingsGoal>();
+  const currentByNameLower = new Map<string, SavingsGoal>();
+
+  (current ?? []).forEach((g) => {
+    const id = String((g as any)?.id ?? "").trim();
+    if (id) currentById.set(id, g);
+
+    const name = normalizeName((g as any)?.name);
+    const key = name.trim().toLowerCase();
+    if (key) currentByNameLower.set(key, g);
   });
 
-  // Keep existing IDs when possible, otherwise accept server id, otherwise stable id.
   const merged: SavingsGoal[] = [];
-  byName.forEach((val, name) => {
-    const existing = current.find((x) => x.name === name);
+  const seenIds = new Set<string>();
+  const seenNameKeys = new Set<string>();
+
+  for (const sg of serverGoals ?? []) {
+    const name = normalizeName((sg as any)?.name);
+    const nameKey = name.trim().toLowerCase();
+    const target = normalizePositiveInt((sg as any)?.targetMinor ?? 0);
+
+    const sidRaw = (sg as any)?.id;
+    const sid = sidRaw == null ? "" : String(sidRaw).trim();
+
+    if (sid) {
+      // id-first path
+      if (seenIds.has(sid)) continue;
+      seenIds.add(sid);
+
+      merged.push({
+        id: sid,
+        name,
+        targetMinor: target,
+      });
+
+      if (nameKey) seenNameKeys.add(nameKey);
+      continue;
+    }
+
+    // Legacy path: no id -> match by name
+    if (!nameKey) continue;
+    if (seenNameKeys.has(nameKey)) continue;
+    seenNameKeys.add(nameKey);
+
+    const existing = currentByNameLower.get(nameKey);
+
     merged.push({
-      id: existing?.id ?? val.id ?? stableIdForKey("savings", name),
+      id: String(existing?.id ?? stableIdForKey("savings", name)),
       name,
-      targetMinor: val.target,
+      targetMinor: target,
     });
-  });
+  }
+
+  // Optional: If you ever want to keep local-only draft goals that the server
+  // didn't return, you'd merge them here. For now we keep server as the truth.
 
   return merged;
 }
@@ -354,7 +412,22 @@ function sumBudgetLimits(goals: BudgetGoal[]) {
 }
 
 export function PlanProvider({ children }: { children: React.ReactNode }) {
-  const { token } = useAuthStore();
+  const auth = useAuthStore();
+  const token = (auth as any)?.token as string | null | undefined;
+  // Server JWT issued by /api/auth/sign-in (required by bootstrap)
+  const serverToken = (auth as any)?.serverToken as string | null | undefined;
+
+  const refreshDashboardAfterPlanGoalSave = useCallback(async () => {
+    const t = String(serverToken ?? "").trim();
+    if (!t) {
+      // Plan APIs may still work with other tokens depending on env, but bootstrap/dashboard needs serverToken.
+      console.warn(
+        "[planStore] Missing serverToken; cannot refresh dashboard via bootstrap"
+      );
+      return;
+    }
+    await useDashboardStore.getState().refreshDashboard(t);
+  }, [serverToken]);
 
   const makeInitialPlan = useCallback((): Plan => {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -951,6 +1024,8 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         );
         if (resp?.plan) {
           applyServerPlan(resp.plan);
+          // Keep Dashboard in sync with goal changes (bootstrap uses serverToken)
+          await refreshDashboardAfterPlanGoalSave();
         }
         return true;
       }
@@ -967,12 +1042,21 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         useCurrentPeriod: true,
       } as any);
       applyServerPlan(resp.plan);
+      // Keep Dashboard in sync with goal changes (bootstrap uses serverToken)
+      await refreshDashboardAfterPlanGoalSave();
       return true;
     } catch (e) {
       console.warn("[planStore] saveBudgetGoals error", e);
       return false;
     }
-  }, [token, plan.budgetGoals, plan.periodType, activePlanId, applyServerPlan]);
+  }, [
+    token,
+    plan.budgetGoals,
+    plan.periodType,
+    activePlanId,
+    applyServerPlan,
+    refreshDashboardAfterPlanGoalSave,
+  ]);
 
   const saveBudgetGoal: Store["saveBudgetGoal"] = useCallback(
     async (category, limitMinor) => {
@@ -1003,6 +1087,8 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         const resp = await plansApi.upsertBudgetGoal(token, planId, payload);
         if (resp?.plan) {
           applyServerPlan(resp.plan);
+          // Keep Dashboard in sync with goal changes (including deletes via limit=0)
+          await refreshDashboardAfterPlanGoalSave();
         }
         return true;
       } catch (e) {
@@ -1010,7 +1096,13 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
     },
-    [token, activePlanId, applyServerPlan, saveBudgetGoals]
+    [
+      token,
+      activePlanId,
+      applyServerPlan,
+      saveBudgetGoals,
+      refreshDashboardAfterPlanGoalSave,
+    ]
   );
 
   const saveSavingsGoals: Store["saveSavingsGoals"] = useCallback(async () => {
@@ -1027,10 +1119,11 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
     const payload: PatchSavingsGoalsRequestDTO = {
       savingsGoals: (latest.savingsGoals ?? []).map((g) => ({
+        ...({ id: String(g.id) } as any),
         name: normalizeName(g.name),
         targetMinor: Math.max(0, Math.trunc(Number(g.targetMinor) || 0)),
       })),
-    };
+    } as any;
 
     console.log(
       "[planStore] PATCH savings goals payload:",
@@ -1046,6 +1139,8 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         );
         if (resp?.plan) {
           applyServerPlan(resp.plan);
+          // Keep Dashboard in sync with goal changes (create/rename/target edits)
+          await refreshDashboardAfterPlanGoalSave();
         }
         return true;
       }
@@ -1061,45 +1156,42 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         useCurrentPeriod: true,
       } as any);
       applyServerPlan(resp.plan);
+      // Keep Dashboard in sync with goal changes
+      await refreshDashboardAfterPlanGoalSave();
       return true;
     } catch (e) {
       console.warn("[planStore] saveSavingsGoals error", e);
       return false;
     }
-  }, [token, plan, activePlanId, applyServerPlan]);
+  }, [
+    token,
+    plan,
+    activePlanId,
+    applyServerPlan,
+    refreshDashboardAfterPlanGoalSave,
+  ]);
 
   const upsertSavingsGoalTarget: Store["upsertSavingsGoalTarget"] = (
-    name,
+    id,
     targetMinor
   ) => {
-    const n = (name || "Other").toString().trim() || "Other";
+    const goalId = String(id ?? "").trim();
+    if (!goalId) return;
     const clean = Math.max(
       0,
       Number.isFinite(targetMinor) ? Math.round(targetMinor) : 0
     );
 
     setPlan((p) => {
-      const idx = p.savingsGoals.findIndex((g) => g.name === n);
+      const idx = (p.savingsGoals ?? []).findIndex(
+        (g) => String(g.id ?? "") === goalId
+      );
+      if (idx < 0) return p;
 
-      if (idx >= 0) {
-        const next = p.savingsGoals.slice();
-        next[idx] = { ...next[idx], targetMinor: clean };
+      const next = p.savingsGoals.slice();
+      next[idx] = { ...next[idx], targetMinor: clean };
 
-        const nextPlan = { ...p, savingsGoals: next };
-        _latestPlanSnapshot = { plan: nextPlan };
-        return nextPlan;
-      }
-
-      if (clean <= 0) return p;
-
-      const nextPlan = {
-        ...p,
-        savingsGoals: [
-          ...p.savingsGoals,
-          { id: uid(), name: n, targetMinor: clean },
-        ],
-      };
-
+      const nextPlan = { ...p, savingsGoals: next };
       _latestPlanSnapshot = { plan: nextPlan };
       return nextPlan;
     });
@@ -1111,9 +1203,11 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       0,
       Number.isFinite(targetMinor) ? Math.round(targetMinor) : 0
     );
-    if (!n || t <= 0) return;
+    if (!n) return;
 
     setPlan((p) => {
+      if ((p.savingsGoals ?? []).length >= 10) return p;
+
       const nextPlan = {
         ...p,
         savingsGoals: [
@@ -1121,6 +1215,26 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
           { id: uid(), name: n, targetMinor: t },
         ],
       };
+      _latestPlanSnapshot = { plan: nextPlan };
+      return nextPlan;
+    });
+  };
+
+  const renameSavingsGoal: Store["renameSavingsGoal"] = (id, name) => {
+    const goalId = String(id ?? "").trim();
+    const n = (name ?? "").toString().trim();
+    if (!goalId) return;
+
+    setPlan((p) => {
+      const idx = (p.savingsGoals ?? []).findIndex(
+        (g) => String(g.id ?? "") === goalId
+      );
+      if (idx < 0) return p;
+
+      const next = p.savingsGoals.slice();
+      next[idx] = { ...next[idx], name: n };
+
+      const nextPlan = { ...p, savingsGoals: next };
       _latestPlanSnapshot = { plan: nextPlan };
       return nextPlan;
     });
@@ -1181,6 +1295,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       upsertBudgetGoalLimit,
       upsertSavingsGoalTarget,
       addSavingsGoal,
+      renameSavingsGoal,
       removeSavingsGoal,
       applyServerPlan,
       applyBootstrapPlan,
@@ -1207,6 +1322,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       upsertBudgetGoalLimit,
       upsertSavingsGoalTarget,
       addSavingsGoal,
+      renameSavingsGoal,
       removeSavingsGoal,
       applyServerPlan,
       applyBootstrapPlan,

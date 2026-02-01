@@ -1,5 +1,7 @@
-import React, { useMemo } from "react";
-import { View, Text, StyleSheet } from "react-native";
+// apps/mobile/src/app/screens/DashboardScreen.tsx
+
+import React, { useMemo, useState } from "react";
+import { View, Text, StyleSheet, Pressable } from "react-native";
 
 import ScreenLayout from "../components/layout/ScreenLayout";
 import ScreenHeader from "../components/layout/ScreenHeader";
@@ -35,17 +37,29 @@ type CashflowHealthKey = "HEALTHY" | "OK" | "CAUTION" | "RISK";
 
 type BudgetHealthKey = "GOOD" | "CAUTION" | "OVER";
 
-function cashflowHealthKeyFromSpendRate(spendRate: number): CashflowHealthKey {
-  const r = clamp01(spendRate);
-  if (r <= 0.2) return "HEALTHY";
-  if (r <= 0.4) return "OK";
-  if (r <= 0.7) return "CAUTION";
-  return "RISK";
+// Cashflow status should reflect how much of income remains (net/income), not raw spend rate.
+// Example: spending 50% => remaining 50% => should be "HEALTHY"/"OK", not "CAUTION".
+function cashflowHealthKeyFromRemainingRatio(
+  remainingRatio: number
+): CashflowHealthKey {
+  if (!Number.isFinite(remainingRatio)) return "CAUTION";
+
+  // remainingRatio can be negative (overspent)
+  if (remainingRatio < 0) return "RISK";
+
+  // 0%~10% remaining: caution
+  if (remainingRatio < 0.1) return "CAUTION";
+
+  // 10%~30% remaining: ok
+  if (remainingRatio < 0.3) return "OK";
+
+  // 30%+ remaining: healthy
+  return "HEALTHY";
 }
 
 function budgetHealthKeyFromRatio(
   ratio: number,
-  limitMinor: number,
+  limitMinor: number
 ): BudgetHealthKey {
   if (!Number.isFinite(limitMinor) || limitMinor <= 0) return "GOOD";
   if (ratio < 0.9) return "GOOD";
@@ -70,10 +84,13 @@ export default function DashboardScreen() {
   const isKo = language === "ko";
   const tr = (en: string, ko: string) => (isKo ? ko : en);
 
+  const [isBudgetDetailsOpen, setIsBudgetDetailsOpen] = useState(false);
+  const [isSavingsDetailsOpen, setIsSavingsDetailsOpen] = useState(false);
+
   type StatusDescriptor = { text: string; color: string; arrow: string };
 
   const cashflowHealthDescriptor = (
-    key: CashflowHealthKey,
+    key: CashflowHealthKey
   ): StatusDescriptor => {
     switch (key) {
       case "HEALTHY":
@@ -163,23 +180,39 @@ export default function DashboardScreen() {
     sub,
     status,
     progress,
+    variant,
   }: {
     title: string;
     value: string;
     sub?: React.ReactNode;
     status?: { label: string; color: string };
     progress?: { ratio: number; color: string };
+    variant?: "default" | "detail";
   }) => {
+    const isDetail = variant === "detail";
+    const cardStyle = StyleSheet.flatten([
+      styles.metricCard,
+      isDetail ? styles.metricCardDetail : null,
+    ]);
     return (
-      <ScreenCard style={styles.metricCard}>
+      <ScreenCard style={cardStyle}>
         <View style={styles.metricTopRow}>
-          <Text style={styles.metricTitle}>{title}</Text>
+          <Text
+            style={[styles.metricTitle, isDetail && styles.metricTitleDetail]}
+          >
+            {title}
+          </Text>
           {status ? (
             <StatusChip label={status.label} color={status.color} />
           ) : null}
         </View>
         {progress ? (
-          <View style={styles.progressTrack}>
+          <View
+            style={[
+              styles.progressTrack,
+              isDetail && styles.progressTrackDetail,
+            ]}
+          >
             <View
               style={[
                 styles.progressFill,
@@ -191,12 +224,27 @@ export default function DashboardScreen() {
             />
           </View>
         ) : null}
-        <Text style={styles.metricValue}>{value}</Text>
+        <Text
+          style={[styles.metricValue, isDetail && styles.metricValueDetail]}
+        >
+          {value}
+        </Text>
         {sub ? (
           typeof sub === "string" ? (
-            <Text style={styles.metricSub}>{sub}</Text>
+            <Text
+              style={[styles.metricSub, isDetail && styles.metricSubDetail]}
+            >
+              {sub}
+            </Text>
           ) : (
-            <View style={styles.metricSubRow}>{sub}</View>
+            <View
+              style={[
+                styles.metricSubRow,
+                isDetail && styles.metricSubRowDetail,
+              ]}
+            >
+              {sub}
+            </View>
           )
         ) : null}
       </ScreenCard>
@@ -236,6 +284,7 @@ export default function DashboardScreen() {
     totals: {
       incomeMinor: number;
       spentMinor: number;
+      savingMinor: number;
       netMinor: number;
     };
     range: {
@@ -249,7 +298,7 @@ export default function DashboardScreen() {
       remainingMinor: number;
     }>;
     savingsProgressRows?: Array<{
-      goalId: string;
+      goalId: string | null;
       name: string;
       targetMinor: number;
       savedMinor: number;
@@ -268,7 +317,7 @@ export default function DashboardScreen() {
 
   const savingsProgressRows = (dashboard as any).savingsProgressRows as
     | Array<{
-        goalId: string;
+        goalId: string | null;
         name: string;
         targetMinor: number;
         savedMinor: number;
@@ -278,7 +327,7 @@ export default function DashboardScreen() {
 
   const totalBudgetLimitMinor = (budgetStatusRows ?? []).reduce(
     (sum, row) => sum + (Number.isFinite(row.limitMinor) ? row.limitMinor : 0),
-    0,
+    0
   );
 
   // Use `totals.spentMinor` as authoritative spending within the period.
@@ -305,7 +354,8 @@ export default function DashboardScreen() {
 
   const cashflowHealth = {
     spendRate,
-    key: cashflowHealthKeyFromSpendRate(spendRate),
+    remainingRatio: cashflowRemainingRatio,
+    key: cashflowHealthKeyFromRemainingRatio(cashflowRemainingRatio),
   };
 
   const budgetSpentRatio =
@@ -348,7 +398,9 @@ export default function DashboardScreen() {
       const key = budgetHealthKeyFromRatio(spentRatio, limitMinor);
       const d = budgetHealthDescriptor(key);
 
-      const categoryKey = String(r.category ?? "");
+      const categoryKey = String(
+        (r as any).categoryKey ?? (r as any).category ?? ""
+      );
       const title = categoryLabelText(categoryKey, language);
 
       return {
@@ -361,6 +413,17 @@ export default function DashboardScreen() {
         status: { label: `${d.arrow} ${d.text}`, color: d.color },
       };
     });
+
+  // Unassigned SAVING amount in this period:
+  // Server does not emit a null-goal row, so derive from totals.savingMinor.
+  const trackedSavedMinor = (savingsProgressRows ?? [])
+    .filter((r) => Number.isFinite(r.targetMinor) && r.targetMinor > 0)
+    .reduce((sum, r) => sum + Math.trunc(Number(r.savedMinor) || 0), 0);
+
+  const totalSavingMinor = Math.trunc(Number((totals as any)?.savingMinor) || 0);
+
+  // Derived unassigned = all savings - tracked goal savings
+  const unassignedSavedMinor = Math.max(0, totalSavingMinor - trackedSavedMinor);
 
   const perSavingsGoals = (savingsProgressRows ?? [])
     .filter((r) => Number.isFinite(r.targetMinor) && r.targetMinor > 0)
@@ -387,6 +450,51 @@ export default function DashboardScreen() {
       };
     });
 
+  // Only show Unassigned when it exists in this plan period.
+  if (unassignedSavedMinor > 0) {
+    perSavingsGoals.push({
+      key: "__unassigned__",
+      title: tr("Unassigned", "미지정"),
+      savedMinor: unassignedSavedMinor,
+      // Display as saved/saved to avoid implying a target exists.
+      targetMinor: unassignedSavedMinor,
+      remainingMinor: 0,
+      ratio: 1,
+      pct: 100,
+      status: { label: "—", color: styles.statusMuted.color },
+    });
+  }
+
+  const totalSavings = (savingsProgressRows ?? [])
+    .filter((r) => Number.isFinite(r.targetMinor) && r.targetMinor > 0)
+    .reduce(
+      (acc, r) => {
+        const targetMinor = Math.trunc(Number(r.targetMinor) || 0);
+        const savedMinor = Math.trunc(Number(r.savedMinor) || 0);
+        acc.targetMinor += targetMinor;
+        acc.savedMinor += savedMinor;
+        return acc;
+      },
+      { targetMinor: 0, savedMinor: 0 }
+    );
+
+  const totalSavingsRemainingMinor =
+    totalSavings.targetMinor - totalSavings.savedMinor;
+
+  const totalSavingsRatio =
+    totalSavings.targetMinor > 0
+      ? totalSavings.savedMinor / totalSavings.targetMinor
+      : 0;
+
+  const totalSavingsPct = pctFromRatio(totalSavingsRatio);
+
+  const totalSavingsStatus = (() => {
+    const s = savingsHealthDescriptor(
+      savingsHealthKeyFromRatio(totalSavingsRatio)
+    );
+    return { label: `${s.arrow} ${s.text}`, color: s.color };
+  })();
+
   return (
     <ScreenLayout
       header={
@@ -394,7 +502,7 @@ export default function DashboardScreen() {
           title={tr("Dashboard", "대시보드")}
           subtitle={tr(
             `${periodLabel} at a glance`,
-            `${periodLabel} 한눈에 보기`,
+            `${periodLabel} 한눈에 보기`
           )}
         />
       }
@@ -417,12 +525,12 @@ export default function DashboardScreen() {
           value={tr(
             `${formatMoney(totals.spentMinor, hc)} / ${formatMoney(
               totals.incomeMinor,
-              hc,
+              hc
             )}`,
             `${formatMoney(totals.spentMinor, hc)} / ${formatMoney(
               totals.incomeMinor,
-              hc,
-            )}`,
+              hc
+            )}`
           )}
           status={cashflowStatus}
           progress={{
@@ -434,7 +542,7 @@ export default function DashboardScreen() {
               <Text style={styles.metricSub}>
                 {tr(
                   `Remaining: ${formatMoney(totals.netMinor, hc)} · `,
-                  `남음: ${formatMoney(totals.netMinor, hc)} · `,
+                  `남음: ${formatMoney(totals.netMinor, hc)} · `
                 )}
               </Text>
               <Text style={[styles.metricSub, { color: cashflowStatus.color }]}>
@@ -446,19 +554,38 @@ export default function DashboardScreen() {
       </View>
 
       {/* Budget */}
-      <Text style={CardSpacing.section}>{tr("Budget", "예산")}</Text>
+      <View style={styles.sectionRow}>
+        <Text style={CardSpacing.section}>{tr("Budget", "예산")}</Text>
+        <Pressable
+          onPress={() => setIsBudgetDetailsOpen((v) => !v)}
+          style={[
+            styles.detailsBtn,
+            !perCategoryBudgets.length && styles.detailsBtnDisabled,
+          ]}
+          disabled={!perCategoryBudgets.length}
+        >
+          <Text
+            style={[
+              styles.detailsBtnText,
+              !perCategoryBudgets.length && styles.detailsBtnTextDisabled,
+            ]}
+          >
+            {isBudgetDetailsOpen ? tr("Hide", "닫기") : tr("Details", "상세")}
+          </Text>
+        </Pressable>
+      </View>
       <View style={styles.grid2}>
         <MetricCard
           title={tr("Total budget", "전체 예산")}
           value={tr(
             `${formatMoney(budgetSummary.spentMinor, hc)} / ${formatMoney(
               budgetSummary.limitMinor,
-              hc,
+              hc
             )}`,
             `${formatMoney(budgetSummary.spentMinor, hc)} / ${formatMoney(
               budgetSummary.limitMinor,
-              hc,
-            )}`,
+              hc
+            )}`
           )}
           status={budgetStatus}
           progress={{
@@ -471,9 +598,9 @@ export default function DashboardScreen() {
                 {tr(
                   `Remaining: ${formatMoney(
                     budgetSummary.remainingMinor,
-                    hc,
+                    hc
                   )} · `,
-                  `남음: ${formatMoney(budgetSummary.remainingMinor, hc)} · `,
+                  `남음: ${formatMoney(budgetSummary.remainingMinor, hc)} · `
                 )}
               </Text>
               <Text style={[styles.metricSub, { color: budgetStatus.color }]}>
@@ -484,82 +611,169 @@ export default function DashboardScreen() {
         />
       </View>
 
-      {perCategoryBudgets.length ? (
+      {perCategoryBudgets.length && isBudgetDetailsOpen ? (
         <>
-          <Text style={CardSpacing.section}>
-            {tr("Budgets by category", "카테고리별 예산")}
-          </Text>
-          <View style={styles.grid2}>
-            {perCategoryBudgets.map((b) => (
-              <MetricCard
-                key={b.title}
-                title={b.title}
-                value={tr(
-                  `${formatMoney(b.spentMinor, hc)} / ${formatMoney(
-                    b.limitMinor,
-                    hc,
-                  )}`,
-                  `${formatMoney(b.spentMinor, hc)} / ${formatMoney(
-                    b.limitMinor,
-                    hc,
-                  )}`,
-                )}
-                status={b.status}
-                progress={{ ratio: b.spentRatio, color: b.status.color }}
-                sub={
-                  <>
-                    <Text style={styles.metricSub}>
-                      {tr(
-                        `Remaining: ${formatMoney(b.remainingMinor, hc)} · `,
-                        `남음: ${formatMoney(b.remainingMinor, hc)} · `,
-                      )}
-                    </Text>
-                    <Text style={[styles.metricSub, { color: b.status.color }]}>
-                      {`${b.pct}%`}
-                    </Text>
-                  </>
-                }
-              />
-            ))}
+          <View style={styles.detailsBox}>
+            <Text style={styles.detailsBoxTitle}>
+              {tr("Budget details", "예산 상세")}
+            </Text>
+            <View style={styles.grid2}>
+              {perCategoryBudgets.map((b) => (
+                <MetricCard
+                  key={b.title}
+                  title={b.title}
+                  value={tr(
+                    `${formatMoney(b.spentMinor, hc)} / ${formatMoney(
+                      b.limitMinor,
+                      hc
+                    )}`,
+                    `${formatMoney(b.spentMinor, hc)} / ${formatMoney(
+                      b.limitMinor,
+                      hc
+                    )}`
+                  )}
+                  status={b.status}
+                  progress={{ ratio: b.spentRatio, color: b.status.color }}
+                  sub={
+                    <>
+                      <Text style={styles.metricSub}>
+                        {tr(
+                          `Remaining: ${formatMoney(b.remainingMinor, hc)} · `,
+                          `남음: ${formatMoney(b.remainingMinor, hc)} · `
+                        )}
+                      </Text>
+                      <Text
+                        style={[styles.metricSub, { color: b.status.color }]}
+                      >
+                        {`${b.pct}%`}
+                      </Text>
+                    </>
+                  }
+                  variant="detail"
+                />
+              ))}
+            </View>
           </View>
         </>
       ) : null}
 
-      {perSavingsGoals.length ? (
+      {/* Savings */}
+      <View style={styles.sectionRow}>
+        <Text style={CardSpacing.section}>{tr("Savings", "저축")}</Text>
+        <Pressable
+          onPress={() => setIsSavingsDetailsOpen((v) => !v)}
+          style={[
+            styles.detailsBtn,
+            !perSavingsGoals.length && styles.detailsBtnDisabled,
+          ]}
+          disabled={!perSavingsGoals.length}
+        >
+          <Text
+            style={[
+              styles.detailsBtnText,
+              !perSavingsGoals.length && styles.detailsBtnTextDisabled,
+            ]}
+          >
+            {isSavingsDetailsOpen ? tr("Hide", "닫기") : tr("Details", "상세")}
+          </Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.grid2}>
+        {totalSavings.targetMinor > 0 ? (
+          <MetricCard
+            title={tr("Total savings", "전체 저축")}
+            value={tr(
+              `${formatMoney(totalSavings.savedMinor, hc)} / ${formatMoney(
+                totalSavings.targetMinor,
+                hc
+              )}`,
+              `${formatMoney(totalSavings.savedMinor, hc)} / ${formatMoney(
+                totalSavings.targetMinor,
+                hc
+              )}`
+            )}
+            status={totalSavingsStatus}
+            progress={{
+              ratio: totalSavingsRatio,
+              color: totalSavingsStatus.color,
+            }}
+            sub={
+              <>
+                <Text style={styles.metricSub}>
+                  {tr(
+                    `Remaining: ${formatMoney(
+                      totalSavingsRemainingMinor,
+                      hc
+                    )} · `,
+                    `남음: ${formatMoney(totalSavingsRemainingMinor, hc)} · `
+                  )}
+                </Text>
+                <Text
+                  style={[
+                    styles.metricSub,
+                    { color: totalSavingsStatus.color },
+                  ]}
+                >
+                  {`${totalSavingsPct}%`}
+                </Text>
+              </>
+            }
+          />
+        ) : (
+          <MetricCard
+            title={tr("Total savings", "전체 저축")}
+            value={tr("No savings goals yet", "저축 목표가 아직 없어요")}
+            sub={tr(
+              "Create savings goals in Plan to track progress here.",
+              "Plan에서 저축 목표를 만들면 여기서 진행률을 볼 수 있어요."
+            )}
+          />
+        )}
+      </View>
+
+      {perSavingsGoals.length && isSavingsDetailsOpen ? (
         <>
-          <Text style={CardSpacing.section}>{tr("Savings", "저축")}</Text>
-          <View style={styles.grid2}>
-            {perSavingsGoals.map((g) => (
-              <MetricCard
-                key={g.key}
-                title={g.title}
-                value={tr(
-                  `${formatMoney(g.savedMinor, hc)} / ${formatMoney(
-                    g.targetMinor,
-                    hc,
-                  )}`,
-                  `${formatMoney(g.savedMinor, hc)} / ${formatMoney(
-                    g.targetMinor,
-                    hc,
-                  )}`,
-                )}
-                status={g.status}
-                progress={{ ratio: g.ratio, color: g.status.color }}
-                sub={
-                  <>
-                    <Text style={styles.metricSub}>
-                      {tr(
-                        `Remaining: ${formatMoney(g.remainingMinor, hc)} · `,
-                        `남음: ${formatMoney(g.remainingMinor, hc)} · `,
-                      )}
-                    </Text>
-                    <Text style={[styles.metricSub, { color: g.status.color }]}>
-                      {`${g.pct}%`}
-                    </Text>
-                  </>
-                }
-              />
-            ))}
+          <View style={styles.detailsBox}>
+            <Text style={styles.detailsBoxTitle}>
+              {tr("Savings details", "저축 상세")}
+            </Text>
+            <View style={styles.grid2}>
+              {perSavingsGoals.map((g) => (
+                <MetricCard
+                  key={g.key}
+                  title={g.title}
+                  value={tr(
+                    `${formatMoney(g.savedMinor, hc)} / ${formatMoney(
+                      g.targetMinor,
+                      hc
+                    )}`,
+                    `${formatMoney(g.savedMinor, hc)} / ${formatMoney(
+                      g.targetMinor,
+                      hc
+                    )}`
+                  )}
+                  status={g.status}
+                  progress={{ ratio: g.ratio, color: g.status.color }}
+                  sub={
+                    <>
+                      <Text style={styles.metricSub}>
+                        {tr(
+                          `Remaining: ${formatMoney(g.remainingMinor, hc)} · `,
+                          `남음: ${formatMoney(g.remainingMinor, hc)} · `
+                        )}
+                      </Text>
+                      <Text
+                        style={[styles.metricSub, { color: g.status.color }]}
+                      >
+                        {`${g.pct}%`}
+                      </Text>
+                    </>
+                  }
+                  variant="detail"
+                />
+              ))}
+            </View>
           </View>
         </>
       ) : null}
@@ -574,6 +788,30 @@ const styles = StyleSheet.create({
   },
   grid2: {
     gap: 12,
+  },
+
+  sectionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  detailsBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: "rgba(0,0,0,0.04)",
+  },
+  detailsBtnText: {
+    fontSize: 12,
+    fontWeight: "800",
+    color: "#111",
+    opacity: 0.75,
+  },
+  detailsBtnDisabled: {
+    opacity: 0.4,
+  },
+  detailsBtnTextDisabled: {
+    opacity: 0.7,
   },
 
   // Card layout
@@ -662,5 +900,48 @@ const styles = StyleSheet.create({
   },
   savingsBest: {
     color: "#7C3AED", // purple
+  },
+
+  // Nested details container
+  detailsBox: {
+    paddingLeft: 10,
+    paddingRight: 6,
+    paddingTop: 10,
+    paddingBottom: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.08)",
+    backgroundColor: "rgba(0,0,0,0.02)",
+  },
+  detailsBoxTitle: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: "#111",
+    opacity: 0.75,
+    marginBottom: 10,
+  },
+
+  // Detail card variant tweaks
+  metricCardDetail: {
+    minHeight: 92,
+  },
+  metricTitleDetail: {
+    fontSize: 12,
+    opacity: 0.68,
+  },
+  progressTrackDetail: {
+    height: 3,
+    marginBottom: 6,
+  },
+  metricValueDetail: {
+    fontSize: 18,
+  },
+  metricSubDetail: {
+    marginTop: 4,
+    fontSize: 11,
+    opacity: 0.62,
+  },
+  metricSubRowDetail: {
+    marginTop: 4,
   },
 });

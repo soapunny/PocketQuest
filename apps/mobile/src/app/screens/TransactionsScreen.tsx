@@ -1,9 +1,10 @@
 // apps/mobile/src/app/screens/TransactionsScreen.tsx
 
-import { useCallback, useMemo, useState, ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, ReactNode } from "react";
 import { useFocusEffect } from "@react-navigation/native";
 import {
   Alert,
+  Keyboard,
   Modal,
   Pressable,
   StyleSheet,
@@ -29,6 +30,7 @@ import type { Currency } from "../../../../../packages/shared/src/money/types";
 import { useTransactions } from "../store/transactionsStore";
 // bootstrap handled in transactions store
 import { usePlan } from "../store/planStore";
+import { useDashboardStore } from "../store/dashboardStore";
 
 import { categoryLabelText } from "../domain/categories/categoryLabels";
 import {
@@ -41,6 +43,7 @@ import {
   formatMoney,
   absMinor,
 } from "../domain/money";
+import { deriveTransactionDirty } from "../domain/forms";
 import { typeUI } from "../domain/transactions";
 
 function TransactionEditModal(props: {
@@ -51,6 +54,30 @@ function TransactionEditModal(props: {
 }) {
   const { visible, onRequestClose, title, children } = props;
 
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener("keyboardDidShow", () => {
+      setKeyboardVisible(true);
+    });
+    const hideSub = Keyboard.addListener("keyboardDidHide", () => {
+      setKeyboardVisible(false);
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  const onBackdropPress = () => {
+    if (keyboardVisible) {
+      Keyboard.dismiss();
+      return;
+    }
+    onRequestClose();
+  };
+
   return (
     <Modal
       visible={visible}
@@ -59,7 +86,7 @@ function TransactionEditModal(props: {
       onRequestClose={onRequestClose}
     >
       <Pressable
-        onPress={onRequestClose}
+        onPress={onBackdropPress}
         style={{
           flex: 1,
           backgroundColor: "rgba(0,0,0,0.35)",
@@ -67,7 +94,7 @@ function TransactionEditModal(props: {
           justifyContent: "center",
         }}
       >
-        <Pressable onPress={() => {}} style={styles.modalCard}>
+        <Pressable onPress={() => Keyboard.dismiss()} style={styles.modalCard}>
           <ScreenCard>
             <Text style={[CardSpacing.cardTitle, styles.modalTitle]}>
               {title}
@@ -82,6 +109,7 @@ function TransactionEditModal(props: {
 
 export default function TransactionsScreen() {
   const txStore = useTransactions();
+  const { refreshDashboard } = useDashboardStore();
   const {
     transactions,
     loading: isLoading,
@@ -128,19 +156,30 @@ export default function TransactionsScreen() {
   const [savingsGoalId, setSavingsGoalId] = useState<string>("");
 
   const savingsGoalOptions = useMemo(
-    () => savingsGoals.map((g) => String(g.id)),
+    () => ["", ...savingsGoals.map((g) => String(g.id))],
     [savingsGoals]
   );
 
   const isKo = language === "ko";
   const tr = (en: string, ko: string) => (isKo ? ko : en);
 
-  function savingsGoalLabel(id: string): string {
-    const hit = savingsGoals.find((g) => String(g.id) === String(id));
-    return hit?.name ? String(hit.name) : tr("Savings", "저축");
+  function savingsGoalLabel(id: string | null | undefined): string {
+    const raw = String(id ?? "").trim();
+    if (!raw) return tr("Unassigned", "미지정");
+
+    const hit = savingsGoals.find((g) => String(g.id) === raw);
+    return hit?.name ? String(hit.name) : tr("Unassigned", "미지정");
   }
 
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingBaseline, setEditingBaseline] = useState<null | {
+    type: TxType;
+    category: string;
+    savingsGoalId: string;
+    amountMinorAbs: number;
+    noteTrim: string;
+    currency: Currency;
+  }>(null);
 
   const editingTx = useMemo(
     () => transactions.find((t) => t.id === editingId) ?? null,
@@ -242,18 +281,117 @@ export default function TransactionsScreen() {
     setEditingCurrency(cur);
     setAmountText(formatAmountTextFromMinor(amtMinor, cur));
     setNote(tx.note ?? "");
+
+    const baseCategory =
+      nextType === "SAVING" ? "savings" : String(tx.category ?? "");
+    const baseSavingsGoalId =
+      nextType === "SAVING" ? String((tx as any)?.savingsGoalId ?? "") : "";
+    const baseNoteTrim = String(tx.note ?? "").trim();
+
+    setEditingBaseline({
+      type: nextType,
+      category: baseCategory,
+      savingsGoalId: baseSavingsGoalId,
+      amountMinorAbs: amtMinor,
+      noteTrim: baseNoteTrim,
+      currency: cur,
+    });
   }
 
   function closeEdit() {
     if (isLoading) return;
+    setEditingBaseline(null);
     setEditingId(null);
   }
+
+  function requestCloseEdit() {
+    if (isLoading) return;
+    if (!editingId) return;
+
+    // If there are unsaved changes, confirm discard.
+    if (isEditDirty) {
+      Alert.alert(
+        tr("Discard changes?", "변경사항을 버릴까요?"),
+        tr(
+          "You have unsaved changes. If you close now, they will be lost.",
+          "저장하지 않은 변경사항이 있어요. 지금 닫으면 사라집니다."
+        ),
+        [
+          { text: tr("Keep editing", "계속 편집"), style: "cancel" },
+          {
+            text: tr("Discard", "버리기"),
+            style: "destructive",
+            onPress: () => closeEdit(),
+          },
+        ]
+      );
+      return;
+    }
+
+    closeEdit();
+  }
+
+  // Dirty and validity tracking for edit modal
+  const currentForDirty = editingBaseline;
+  const { dirty: isEditDirty, nextAmountMinorAbs: nextEditAmountMinorAbs } =
+    currentForDirty
+      ? deriveTransactionDirty({
+          draftType: type,
+          currentType: currentForDirty.type,
+          // For SAVING, the server category is always "savings"; compare that literal.
+          draftCategory: type === "SAVING" ? "savings" : category,
+          currentCategory: currentForDirty.category,
+          draftSavingsGoalId: type === "SAVING" ? savingsGoalId : "",
+          currentSavingsGoalId: currentForDirty.savingsGoalId,
+          draftAmountText: amountText,
+          currentAmountMinor: currentForDirty.amountMinorAbs,
+          currency: editingCurrency,
+          draftNote: note.trim(),
+          currentNote: currentForDirty.noteTrim,
+        })
+      : { dirty: false, nextAmountMinorAbs: 0 };
+
+  // ✅ Unassigned selection policy (edit modal)
+  // - If the original tx was SAVING and already unassigned (baseline goalId blank),
+  //   allow keeping/selecting Unassigned.
+  // - Otherwise (originally assigned or originally not SAVING), do NOT allow selecting Unassigned.
+  const baselineAllowsUnassigned =
+    !!editingBaseline &&
+    editingBaseline.type === "SAVING" &&
+    !String(editingBaseline.savingsGoalId ?? "").trim();
+
+  const canSelectUnassignedNow =
+    type === "SAVING" ? baselineAllowsUnassigned : false;
+
+  const firstAssignableGoalId = useMemo(() => {
+    // pick first non-empty goal id
+    const hit = (savingsGoalOptions ?? []).find((x) => String(x).trim());
+    return hit ? String(hit) : "";
+  }, [savingsGoalOptions]);
+  const isValidAmount = nextEditAmountMinorAbs > 0;
+
+  // ✅ Saving goal validity:
+  // - If canSelectUnassignedNow: empty is allowed (baseline already unassigned)
+  // - Else: must pick a real goal id (non-empty)
+  const isValidSavingGoal =
+    type !== "SAVING"
+      ? true
+      : canSelectUnassignedNow
+      ? true
+      : !!String(savingsGoalId ?? "").trim();
+  const canSave =
+    !!editingId &&
+    !isLoading &&
+    isEditDirty &&
+    isValidAmount &&
+    isValidSavingGoal;
 
   async function onSave() {
     if (!editingTx?.id) return;
     if (isLoading) return;
+    if (!isEditDirty) return;
 
-    const absMinor = Math.abs(parseInputToMinor(amountText, editingCurrency));
+    const absMinor = nextEditAmountMinorAbs;
     if (!absMinor || absMinor <= 0) {
       Alert.alert(
         tr("Invalid amount", "금액 오류"),
@@ -265,6 +403,21 @@ export default function TransactionsScreen() {
     // DB 모델에서는 amountMinor를 항상 0 이상으로 저장하고,
     // EXPENSE / INCOME / SAVING은 type으로 구분합니다.
     const nextAmountMinor = absMinor;
+
+    // ✅ Guard: prevent assigning to Unassigned unless baseline allows it.
+    if (type === "SAVING") {
+      const nextGoal = String(savingsGoalId ?? "").trim();
+      if (!nextGoal && !canSelectUnassignedNow) {
+        Alert.alert(
+          tr("Selection not allowed", "선택할 수 없어요"),
+          tr(
+            "You cannot change an assigned savings transaction to Unassigned.",
+            "저축 목표가 지정된 거래를 '미지정'으로 변경할 수 없어요."
+          )
+        );
+        return;
+      }
+    }
 
     const noteTrimmed = note.trim();
     const patch: UpdateTransactionDTO = {
@@ -280,20 +433,13 @@ export default function TransactionsScreen() {
         : ({ savingsGoalId: null } as any)),
     };
 
-    if (type === "SAVING" && !savingsGoalId) {
-      Alert.alert(
-        tr("Select a savings goal", "저축 목표를 선택해 주세요"),
-        tr(
-          "Please choose which savings goal this belongs to.",
-          "이 저축 거래가 어떤 목표에 해당하는지 선택해 주세요."
-        )
-      );
-      return;
-    }
-
     try {
       // delegate update to transactions store which handles refresh + bootstrap
       await updateTransaction(editingTx.id, patch);
+
+      // Refresh dashboard so edits reflect immediately.
+      await refreshDashboard();
+
       closeEdit();
     } catch (e) {
       console.error("[TransactionsScreen] failed to patch transaction", e);
@@ -313,6 +459,10 @@ export default function TransactionsScreen() {
 
     try {
       await deleteTransaction(editingTx.id);
+
+      // Refresh dashboard so deletions reflect immediately.
+      await refreshDashboard();
+
       closeEdit();
     } catch (e) {
       console.error("[TransactionsScreen] failed to delete transaction", e);
@@ -508,7 +658,7 @@ export default function TransactionsScreen() {
 
                 <Text style={[CardSpacing.cardTitle, styles.txCategory]}>
                   {txType === "SAVING"
-                    ? savingsGoalLabel(String((tx as any)?.savingsGoalId ?? ""))
+                    ? savingsGoalLabel((tx as any)?.savingsGoalId)
                     : categoryLabelText(tx.category, language)}
                 </Text>
                 <Text style={[styles.txAmount, { color: pill.pillText }]}>
@@ -557,7 +707,7 @@ export default function TransactionsScreen() {
       {/* Modal은 ScreenLayout 밖에 그대로 유지 */}
       <TransactionEditModal
         visible={!!editingId}
-        onRequestClose={closeEdit}
+        onRequestClose={requestCloseEdit}
         title={tr("Edit transaction", "거래 수정")}
       >
         {/* Type */}
@@ -575,7 +725,14 @@ export default function TransactionsScreen() {
                   setType(nextType);
 
                   if (nextType === "SAVING") {
-                    setSavingsGoalId(nextCat);
+                    // If Unassigned is not allowed, never land on "".
+                    const nextGoalId = String(nextCat ?? "");
+                    const forced =
+                      !String(nextGoalId).trim() && !canSelectUnassignedNow
+                        ? firstAssignableGoalId
+                        : nextGoalId;
+
+                    setSavingsGoalId(forced);
                   } else {
                     setCategory(nextCat);
                     setSavingsGoalId("");
@@ -653,14 +810,30 @@ export default function TransactionsScreen() {
               const selected = type === "SAVING" ? savingsGoalId : category;
               const active = selected === c;
 
+              const isUnassignedOption = type === "SAVING" && !String(c ?? "").trim();
+              const disabled =
+                isUnassignedOption && !canSelectUnassignedNow; // ✅ 핵심: baseline이 unassigned였던 경우만 허용
+
               return (
                 <Pressable
                   key={c}
+                  disabled={disabled}
                   onPress={() => {
-                    if (type === "SAVING") setSavingsGoalId(c);
-                    else setCategory(c);
+                    if (disabled) return;
+
+                    if (type === "SAVING") {
+                      // If not allowed, don't allow setting empty anyway.
+                      const next = String(c ?? "");
+                      if (!next.trim() && !canSelectUnassignedNow) return;
+                      setSavingsGoalId(next);
+                    } else {
+                      setCategory(c);
+                    }
                   }}
-                  style={chipStyle(active)}
+                  style={[
+                    ...chipStyle(active),
+                    disabled ? { opacity: 0.35 } : null,
+                  ]}
                 >
                   <Text style={chipTextStyle(active)}>
                     {type === "SAVING"
@@ -701,6 +874,7 @@ export default function TransactionsScreen() {
               alignItems: "center",
               borderWidth: 1,
               borderColor: "#f0caca",
+              opacity: isLoading ? 0.45 : 1,
             }}
             disabled={isLoading}
           >
@@ -717,8 +891,9 @@ export default function TransactionsScreen() {
               borderRadius: 12,
               paddingVertical: 12,
               alignItems: "center",
+              opacity: canSave ? 1 : 0.45,
             }}
-            disabled={isLoading}
+            disabled={!canSave}
           >
             <Text style={{ fontWeight: "900", color: "white" }}>
               {tr("Save", "저장")}
@@ -726,10 +901,21 @@ export default function TransactionsScreen() {
           </Pressable>
         </View>
 
-        <Pressable onPress={closeEdit} style={{ paddingVertical: 12 }}>
-          <Text
-            style={{ textAlign: "center", color: "#666", fontWeight: "800" }}
-          >
+        <Pressable
+          onPress={requestCloseEdit}
+          style={{
+            marginTop: 10,
+            width: "100%",
+            backgroundColor: "white",
+            borderRadius: 12,
+            paddingVertical: 12,
+            alignItems: "center",
+            borderWidth: 1,
+            borderColor: "#ddd",
+          }}
+          disabled={isLoading}
+        >
+          <Text style={{ fontWeight: "900", color: "#111" }}>
             {tr("Cancel", "취소")}
           </Text>
         </Pressable>

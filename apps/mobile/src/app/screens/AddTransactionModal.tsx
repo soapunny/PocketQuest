@@ -24,6 +24,7 @@ import type { Currency } from "../../../../../packages/shared/src/money/types";
 
 import { useTransactions } from "../store/transactionsStore";
 import { usePlan } from "../store/planStore";
+import { useDashboardStore } from "../store/dashboardStore";
 
 import { categoryLabelText } from "../domain/categories";
 import {
@@ -35,19 +36,26 @@ import {
 export default function AddTransactionModal() {
   const navigation = useNavigation();
   const txStore = useTransactions();
+  const { refreshDashboard } = useDashboardStore();
 
-  const plan = usePlan();
-  const { homeCurrency, displayCurrency, language } = plan;
-  const savingsGoals = (plan as any)?.savingsGoals as
-    | Array<{ id: string; name: string }>
-    | undefined;
-  const savingsGoalOptions = (savingsGoals ?? []).map((g) => ({
-    id: String(g.id),
-    name: String(g.name ?? "Savings"),
-  }));
+  const planStore = usePlan() as any;
+  const { homeCurrency, displayCurrency, language } = planStore;
+
+  // Savings goals can live on either `planStore.plan.savingsGoals` (hydrated plan)
+  // or `planStore.savingsGoals` (legacy/local). Mirror TransactionsScreen.
+  const savingsGoals: Array<{ id: string; name: string }> =
+    planStore?.plan?.savingsGoals ?? planStore?.savingsGoals ?? [];
 
   const isKo = language === "ko";
   const tr = (en: string, ko: string) => (isKo ? ko : en);
+
+  const savingsGoalOptions = [
+    { id: "", name: tr("Unassigned", "미지정") },
+    ...(savingsGoals ?? []).map((g) => ({
+      id: String(g.id),
+      name: String(g.name ?? "Savings"),
+    })),
+  ];
 
   const chipStyle = (active: boolean) => [
     styles.chip,
@@ -78,9 +86,8 @@ export default function AddTransactionModal() {
   const [categoryKey, setCategoryKey] = useState<string>(
     defaultExpenseCategory
   );
-  const [selectedSavingsGoalId, setSelectedSavingsGoalId] = useState<string>(
-    savingsGoalOptions[0]?.id ?? ""
-  );
+  const [selectedSavingsGoalId, setSelectedSavingsGoalId] =
+    useState<string>("");
   const [note, setNote] = useState<string>("");
 
   const [fxUsdKrwText, setFxUsdKrwText] = useState<string>("");
@@ -101,6 +108,7 @@ export default function AddTransactionModal() {
     // When the type or available options change, ensure the currently selected category is valid.
     if (categoryOptions.includes(categoryKey)) {
       // If we are not in SAVING mode, keep savingsGoalId empty to avoid accidental sends.
+      // In SAVING mode, do not clear selectedSavingsGoalId.
       if (type !== "SAVING" && selectedSavingsGoalId) {
         setSelectedSavingsGoalId("");
       }
@@ -121,9 +129,10 @@ export default function AddTransactionModal() {
     }
 
     // SAVING
-    const firstId = savingsGoalOptions[0]?.id ?? "";
-    setCategoryKey(firstId);
-    setSelectedSavingsGoalId(firstId);
+    const firstRealId =
+      savingsGoalOptions.find((x) => String(x.id).trim() !== "")?.id ?? "";
+    setCategoryKey(firstRealId);
+    setSelectedSavingsGoalId(firstRealId);
   }, [
     type,
     categoryOptions,
@@ -133,6 +142,19 @@ export default function AddTransactionModal() {
     defaultExpenseCategory,
     defaultIncomeCategory,
   ]);
+
+  useEffect(() => {
+    if (type !== "SAVING") return;
+
+    const firstRealId =
+      savingsGoalOptions.find((x) => String(x.id).trim() !== "")?.id ?? "";
+
+    if (String(selectedSavingsGoalId || "").trim()) return;
+
+    // real goal이 있으면 그걸로, 없으면 Unassigned("") 허용
+    setSelectedSavingsGoalId(firstRealId);
+    setCategoryKey(firstRealId);
+  }, [type, savingsGoalOptions, selectedSavingsGoalId]);
 
   useEffect(() => {
     // If the user changes currency in Settings, clear the FX snapshot input.
@@ -152,18 +174,19 @@ export default function AddTransactionModal() {
   const onSave = async () => {
     if (!canSave) return;
     if (isSaving) return;
-    if (
-      type === "SAVING" &&
-      !String(selectedSavingsGoalId || categoryKey || "").trim()
-    ) {
-      Alert.alert(
-        tr("No savings goal", "저축 목표 없음"),
-        tr(
-          "Create a Savings Goal in Plan first, then record a Saving transaction.",
-          "Plan에서 저축 목표를 먼저 만든 뒤 저축 거래를 추가해 주세요."
-        )
-      );
-      return;
+    if (type === "SAVING") {
+      // Unassigned("") is allowed.
+      // Block only if there are literally no options (should never happen).
+      if (!savingsGoalOptions.length) {
+        Alert.alert(
+          tr("No savings goal", "저축 목표 없음"),
+          tr(
+            "Create a Savings Goal in Plan first, then record a Saving transaction.",
+            "Plan에서 저축 목표를 먼저 만든 뒤 저축 거래를 추가해 주세요."
+          )
+        );
+        return;
+      }
     }
 
     // 항상 양수(또는 0 이상)로 minor 단위를 저장하고,
@@ -178,18 +201,21 @@ export default function AddTransactionModal() {
     try {
       setIsSaving(true);
 
-      const savingsGoalIdFinal =
+      const rawSavingsGoalId =
         type === "SAVING"
           ? String(selectedSavingsGoalId || categoryKey || "").trim()
-          : undefined;
+          : "";
+
+      const savingsGoalIdFinal =
+        type === "SAVING" && rawSavingsGoalId ? rawSavingsGoalId : undefined;
 
       // Normalize category for server (SSOT):
       // - EXPENSE/INCOME: canonical keys + aliases
       // - SAVING: always "savings" (goal id is sent separately)
-      let categoryForServer = canonicalCategoryKeyForServer(
-        String(categoryKey ?? ""),
-        type
-      );
+      let categoryForServer =
+        type === "SAVING"
+          ? "savings"
+          : canonicalCategoryKeyForServer(String(categoryKey ?? ""), type);
 
       // Final allowlist clamp (defense-in-depth)
       if (type === "EXPENSE") {
@@ -209,6 +235,9 @@ export default function AddTransactionModal() {
           categoryForServer = defaultIncomeCategory;
         }
       }
+      if (type === "SAVING") {
+        categoryForServer = "savings";
+      }
 
       await txStore.createTransaction({
         type,
@@ -220,6 +249,8 @@ export default function AddTransactionModal() {
         occurredAtISO: new Date().toISOString(),
         note: noteTrimmed || undefined,
       });
+      // Ensure Dashboard reflects the new transaction immediately.
+      await refreshDashboard();
 
       navigation.goBack();
     } catch (error) {
@@ -370,7 +401,7 @@ export default function AddTransactionModal() {
                 <Text style={chipTextStyle(categoryKey === c)}>
                   {type === "SAVING"
                     ? savingsGoalOptions.find((g) => g.id === c)?.name ??
-                      tr("Savings", "저축")
+                      tr("Unassigned", "미지정")
                     : categoryLabelText(c, language)}
                 </Text>
               </Pressable>

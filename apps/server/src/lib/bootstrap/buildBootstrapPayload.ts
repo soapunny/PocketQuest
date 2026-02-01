@@ -1,3 +1,5 @@
+// apps/server/src/lib/bootstrap/buildBootstrapPayload.ts
+
 import { prisma } from "@/lib/prisma";
 import { CurrencyCode, PeriodType, TxType } from "@prisma/client";
 import { normalizeTimeZone } from "@/lib/plan/periodUtils";
@@ -151,6 +153,8 @@ async function buildDashboardPayload(params: {
       currency: true,
       fxUsdKrw: true,
       category: true,
+      savingsGoalId: true,
+      savingsGoal: { select: { name: true } },
       occurredAt: true,
       note: true,
     },
@@ -164,8 +168,9 @@ async function buildDashboardPayload(params: {
   // Expense by canonical category
   const spentByCategoryMap = new Map<string, number>();
 
-  // Savings by canonical goal-name key
-  const savedByGoalKey = new Map<string, number>();
+  // Savings by goal id (SSOT). Keep a legacy fallback keyed by canonicalized goal name.
+  const savedByGoalId = new Map<string, number>();
+  const savedByLegacyGoalKey = new Map<string, number>();
 
   for (const t of txs) {
     const conv = convertTxMinorToHome({
@@ -191,10 +196,26 @@ async function buildDashboardPayload(params: {
     if (t.type === TxType.EXPENSE) {
       spentByCategoryMap.set(
         catKey,
-        (spentByCategoryMap.get(catKey) ?? 0) + amtHome,
+        (spentByCategoryMap.get(catKey) ?? 0) + amtHome
       );
     } else if (t.type === TxType.SAVING) {
-      savedByGoalKey.set(catKey, (savedByGoalKey.get(catKey) ?? 0) + amtHome);
+      const goalId =
+        typeof (t as any).savingsGoalId === "string"
+          ? String((t as any).savingsGoalId)
+          : "";
+      if (goalId) {
+        savedByGoalId.set(goalId, (savedByGoalId.get(goalId) ?? 0) + amtHome);
+      } else {
+        // Legacy: fall back to goal name if present (older rows may not have savingsGoalId)
+        const legacyName = String((t as any).savingsGoal?.name ?? "");
+        const legacyKey = canonicalizeCategory(legacyName);
+        if (legacyKey) {
+          savedByLegacyGoalKey.set(
+            legacyKey,
+            (savedByLegacyGoalKey.get(legacyKey) ?? 0) + amtHome
+          );
+        }
+      }
     }
   }
 
@@ -211,7 +232,7 @@ async function buildDashboardPayload(params: {
   // Budget status rows (assumes limits are in homeCurrency minor units)
   if (activePlan.currency !== homeCurrency) {
     warnings.push(
-      `plan_currency_mismatch:${activePlan.currency}->${homeCurrency}`,
+      `plan_currency_mismatch:${activePlan.currency}->${homeCurrency}`
     );
   }
 
@@ -242,7 +263,8 @@ async function buildDashboardPayload(params: {
         ? Math.trunc(g.targetMinor)
         : 0;
       const key = canonicalizeCategory(name);
-      const savedMinor = savedByGoalKey.get(key) ?? 0;
+      const savedMinor =
+        savedByGoalId.get(goalId) ?? savedByLegacyGoalKey.get(key) ?? 0;
       const progressRatio = targetMinor > 0 ? savedMinor / targetMinor : 0;
       return { goalId, name, targetMinor, savedMinor, progressRatio };
     })
@@ -270,6 +292,7 @@ async function buildDashboardPayload(params: {
       type: t.type,
       amountMinor: conv.amountMinor,
       categoryKey: canonicalizeCategory(t.category ?? ""),
+      savingsGoalId: (t as any).savingsGoalId ?? null,
       occurredAtUTC: t.occurredAt.toISOString(),
       occurredAtLocal: fmtLocalDateTime(t.occurredAt, timeZone),
       note: t.note ?? null,
@@ -349,7 +372,7 @@ export async function buildBootstrapPayload(args: BootstrapArgs) {
       const created = await ensureDefaultActivePlan(
         args.userId,
         userTimeZone,
-        args.now,
+        args.now
       );
       activePlan = await prisma.plan.findUnique({
         where: { id: created.id },
@@ -369,7 +392,7 @@ export async function buildBootstrapPayload(args: BootstrapArgs) {
   const planTimeZone = normalizeTimeZone(
     typeof activePlan?.timeZone === "string" && activePlan.timeZone.trim()
       ? activePlan.timeZone.trim()
-      : userTimeZone,
+      : userTimeZone
   );
 
   // 3) monthly list (dashboard에서 월 이동/히스토리 UI용)
@@ -460,7 +483,7 @@ export async function buildBootstrapPayload(args: BootstrapArgs) {
     activePlan.periodStart,
     activePlan.periodEnd ?? null,
     activePeriodType,
-    planTimeZone,
+    planTimeZone
   );
 
   // Unify periodEnd truth across bootstrap: activePlan DTO and dashboard range.

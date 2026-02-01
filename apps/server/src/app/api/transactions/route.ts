@@ -3,6 +3,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthUser } from "@/lib/auth";
+import { Prisma } from "@prisma/client";
 import {
   getMonthlyPeriodStartUTC,
   getNextMonthlyPeriodStartUTC,
@@ -13,7 +14,7 @@ import {
 import { DEFAULT_TIME_ZONE } from "@/lib/plan/defaults";
 import { toZonedTime } from "date-fns-tz";
 import { format } from "date-fns";
-import { z } from "zod";
+import { z, ZodError } from "zod";
 import {
   transactionCreateSchema,
   rangeSchema,
@@ -332,6 +333,9 @@ export async function POST(request: NextRequest) {
     const timeZone = dbUser?.timeZone || DEFAULT_TIME_ZONE;
 
     const data = transactionCreateSchema.parse(body);
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[transactions] POST body", body);
+    }
     // Defensive: ensure tx type is one of the supported literals.
     if (
       data.type !== "EXPENSE" &&
@@ -349,6 +353,7 @@ export async function POST(request: NextRequest) {
       typeof data.savingsGoalId === "string"
         ? data.savingsGoalId.trim()
         : undefined;
+    if (savingsGoalId === "") savingsGoalId = undefined;
 
     // Canonicalize category to shared server-accepted keys (aliases/casing)
     const txType: TxType = data.type;
@@ -433,6 +438,9 @@ export async function POST(request: NextRequest) {
       occurredAt,
       note: data.note ?? null,
     };
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[transactions] POST createData", createData);
+    }
 
     const created = (await prisma.transaction.create({
       data: createData,
@@ -456,17 +464,41 @@ export async function POST(request: NextRequest) {
       { status: 201 }
     );
   } catch (error) {
-    if (error instanceof z.ZodError) {
+    if (error instanceof ZodError) {
       return NextResponse.json(
         { error: "Invalid request data", details: error.errors },
         { status: 400 }
       );
     }
 
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      // e.g. P2025 (record not found), P2002 (unique), etc.
+      const payload: any = {
+        error: "Database error",
+        code: error.code,
+      };
+      if (process.env.NODE_ENV !== "production") {
+        payload.message = error.message;
+        payload.meta = (error as any).meta ?? null;
+      }
+      return NextResponse.json(payload, { status: 400 });
+    }
+
+    if (error instanceof Prisma.PrismaClientValidationError) {
+      const payload: any = { error: "Database validation error" };
+      if (process.env.NODE_ENV !== "production") {
+        payload.message = error.message;
+      }
+      return NextResponse.json(payload, { status: 400 });
+    }
+
     console.error("Create transaction error:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+
+    const payload: any = { error: "Internal server error" };
+    if (process.env.NODE_ENV !== "production") {
+      payload.message = (error as any)?.message ?? String(error);
+    }
+
+    return NextResponse.json(payload, { status: 500 });
   }
 }

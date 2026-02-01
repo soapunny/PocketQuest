@@ -1,7 +1,5 @@
 // apps/server/src/app/api/bootstrap/route.ts
 
-// apps/server/src/app/api/bootstrap/route.ts
-
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth";
 import { buildBootstrapPayload } from "@/lib/bootstrap/buildBootstrapPayload";
@@ -31,7 +29,7 @@ async function handleBootstrap(request: NextRequest) {
   if (!parsedQuery.success) {
     return NextResponse.json(
       { error: "Invalid query", details: parsedQuery.error.flatten() },
-      { status: 400 },
+      { status: 400 }
     );
   }
 
@@ -48,7 +46,7 @@ async function handleBootstrap(request: NextRequest) {
     console.error("Bootstrap error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 },
+      { status: 500 }
     );
   }
 }

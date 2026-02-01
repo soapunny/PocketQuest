@@ -1,3 +1,5 @@
+// apps/mobile/src/app/store/transactionsStore.ts
+
 import React, {
   createContext,
   useContext,
@@ -67,8 +69,8 @@ function normalizeTx(tx: Transaction | TransactionDTO): Transaction {
     typeof anyTx?.occurredAtISO === "string" && anyTx.occurredAtISO
       ? String(anyTx.occurredAtISO)
       : typeof anyTx?.occurredAt === "string" && anyTx.occurredAt
-        ? String(anyTx.occurredAt)
-        : "";
+      ? String(anyTx.occurredAt)
+      : "";
 
   // Build a clean domain Transaction (id/userId required)
   return {
@@ -94,22 +96,22 @@ function normalizeTx(tx: Transaction | TransactionDTO): Transaction {
       anyTx?.note === undefined
         ? undefined
         : anyTx.note === null
-          ? null
-          : String(anyTx.note),
+        ? null
+        : String(anyTx.note),
 
     savingsGoalId:
       anyTx?.savingsGoalId === undefined
         ? undefined
         : anyTx.savingsGoalId === null
-          ? null
-          : String(anyTx.savingsGoalId),
+        ? null
+        : String(anyTx.savingsGoalId),
 
     savingsGoalName:
       anyTx?.savingsGoalName === undefined
         ? undefined
         : anyTx.savingsGoalName === null
-          ? null
-          : String(anyTx.savingsGoalName),
+        ? null
+        : String(anyTx.savingsGoalName),
 
     // Keep server-read field optional for debugging/compat if present
     occurredAt:
@@ -130,7 +132,7 @@ export function TransactionsProvider({
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<TransactionsSummary | null>(null);
   const [filterInfo, setFilterInfo] = useState<TransactionsFilterInfo | null>(
-    null,
+    null
   );
 
   const { token } = useAuthStore();
@@ -165,13 +167,13 @@ export function TransactionsProvider({
         setRangeState(r);
       } catch (e: any) {
         setError(
-          e?.message ? String(e.message) : "Failed to load transactions",
+          e?.message ? String(e.message) : "Failed to load transactions"
         );
       } finally {
         setLoading(false);
       }
     },
-    [range, token],
+    [range, token]
   );
 
   const refresh = useCallback(async () => {
@@ -182,7 +184,7 @@ export function TransactionsProvider({
     (r: Range) => {
       void load(r);
     },
-    [load],
+    [load]
   );
 
   useEffect(() => {
@@ -225,7 +227,7 @@ export function TransactionsProvider({
         setLoading(false);
       }
     },
-    [token, refresh, runBootstrap],
+    [token, refresh, runBootstrap]
   );
 
   const updateTransaction = useCallback(
@@ -272,7 +274,7 @@ export function TransactionsProvider({
         setLoading(false);
       }
     },
-    [token, refresh, runBootstrap, transactions],
+    [token, refresh, runBootstrap, transactions]
   );
 
   const deleteTransaction = useCallback(
@@ -296,7 +298,7 @@ export function TransactionsProvider({
         setLoading(false);
       }
     },
-    [token, refresh, runBootstrap],
+    [token, refresh, runBootstrap]
   );
 
   const value = useMemo(
@@ -327,7 +329,7 @@ export function TransactionsProvider({
       createTransaction,
       updateTransaction,
       deleteTransaction,
-    ],
+    ]
   );
 
   return React.createElement(TransactionsContext.Provider, { value }, children);
