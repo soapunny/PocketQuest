@@ -35,9 +35,14 @@ enum PeriodType {
   MONTHLY
 }
 
+
 enum LanguageCode {
   en
   ko
+}
+
+enum CashflowCarryoverMode {
+  ROLLING
 }
 
 // =====================
@@ -57,6 +62,10 @@ model User {
 
   // Preferred UI language for this user.
   language LanguageCode @default(en)
+
+  // Cashflow carryover policy (Settings). Default OFF.
+  cashflowCarryoverEnabled Boolean @default(false)
+  cashflowCarryoverMode    CashflowCarryoverMode @default(ROLLING)
 
   provider   AuthProvider //auth provider type(GOOGLE, KAKAO, etc.)
   providerId String //auth provider id(google id, kakao id, etc. external id)

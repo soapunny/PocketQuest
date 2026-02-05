@@ -1,3 +1,5 @@
+// apps/mobile/src/app/screens/ProfileImageModal.tsx
+
 import { useState } from "react";
 import {
   View,
@@ -11,11 +13,12 @@ import {
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // UI components
 import LoadingButton from "../components/LoadingButton";
 
-import { useAuth } from "../store/authStore";
+import { useAuthStore } from "../store/authStore";
 import { usePlan } from "../store/planStore";
 
 type RouteParams = {
@@ -27,16 +30,38 @@ export default function ProfileImageModal() {
   const navigation = useNavigation();
   const route = useRoute();
   const insets = useSafeAreaInsets();
-  const { user, updateUser } = useAuth();
+  const { session } = useAuthStore();
+  const supaUser = session?.user ?? null;
+  const meta = (supaUser?.user_metadata as any) ?? {};
   const { language } = usePlan();
   const isKo = language === "ko";
   const tr = (en: string, ko: string) => (isKo ? ko : en);
   const routeParams = (route.params || {}) as RouteParams;
-  const [profileImageUri, setProfileImageUri] = useState<string | null>(
-    routeParams.profileImageUri || user?.profileImageUri || null,
-  );
+
+  const baseProfileImageUri = meta.avatar_url || meta.picture || null;
+
+  const initialProfileImageUri =
+    routeParams.profileImageUri || baseProfileImageUri || null;
+
+  const [draftProfileImageUri, setDraftProfileImageUri] = useState<
+    string | null
+  >(() => initialProfileImageUri);
   const [isLoading, setIsLoading] = useState(false);
-  const profileName = routeParams.profileName || user?.name || "User";
+  const [isApplying, setIsApplying] = useState(false);
+
+  const isDirty =
+    (draftProfileImageUri || null) !== (initialProfileImageUri || null);
+
+  const applyButtonStyle = StyleSheet.flatten([
+    styles.headerButton,
+    !isDirty ? styles.headerButtonDisabled : null,
+  ]);
+
+  const email = supaUser?.email ?? "";
+  const derivedName = String(
+    meta.full_name ?? meta.name ?? (email ? email.split("@")[0] : "")
+  );
+  const profileName = routeParams.profileName || derivedName || "User";
 
   const handleChangeImage = async () => {
     if (isLoading) return; // 중복 클릭 방지
@@ -53,8 +78,8 @@ export default function ProfileImageModal() {
             tr("Permission required", "권한 필요"),
             tr(
               "Sorry, we need camera roll permissions to change your profile picture!",
-              "프로필 사진을 변경하려면 사진 라이브러리 권한이 필요해요!",
-            ),
+              "프로필 사진을 변경하려면 사진 라이브러리 권한이 필요해요!"
+            )
           );
           return;
         }
@@ -70,9 +95,7 @@ export default function ProfileImageModal() {
 
       if (!result.canceled && result.assets[0]) {
         const uri = result.assets[0].uri;
-        setProfileImageUri(uri);
-        // authStore에 프로필 이미지 업데이트
-        updateUser({ profileImageUri: uri });
+        setDraftProfileImageUri(uri);
       }
     } catch (error) {
       console.error("이미지 선택 중 오류:", error);
@@ -80,11 +103,49 @@ export default function ProfileImageModal() {
         tr("Error", "오류"),
         tr(
           "Failed to select image. Please try again.",
-          "이미지 선택에 실패했어요. 다시 시도해주세요.",
-        ),
+          "이미지 선택에 실패했어요. 다시 시도해주세요."
+        )
       );
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleReset = () => {
+    if (isLoading || isApplying) return;
+    setDraftProfileImageUri(baseProfileImageUri || null);
+  };
+
+  const handleApply = async () => {
+    if (isApplying || isLoading) return;
+    if (!isDirty) {
+      navigation.goBack();
+      return;
+    }
+
+    setIsApplying(true);
+    try {
+      const next = draftProfileImageUri || null;
+      const base = baseProfileImageUri || null;
+
+      // If user applies the base avatar (metadata) or clears, remove local override.
+      if (!next || next === base) {
+        await AsyncStorage.removeItem("pq_profile_image_uri");
+      } else {
+        await AsyncStorage.setItem("pq_profile_image_uri", next);
+      }
+      navigation.goBack();
+    } catch (e) {
+      console.error("[ProfileImageModal] apply failed", e);
+      Alert.alert(
+        tr("Error", "오류"),
+        tr(
+          "Failed to apply changes. Please try again.",
+          "변경사항 반영에 실패했어요. 다시 시도해주세요."
+        )
+      );
+    } finally {
+      setIsApplying(false);
     }
   };
 
@@ -106,22 +167,44 @@ export default function ProfileImageModal() {
         >
           <Text style={styles.headerButtonText}>✕</Text>
         </Pressable>
-        <LoadingButton
-          onPress={handleChangeImage}
-          isLoading={isLoading}
-          title={tr("Change", "변경")}
-          style={styles.headerButton}
-          textStyle={styles.headerButtonText}
-          loadingColor="white"
-        />
+        <View style={styles.headerRight}>
+          <LoadingButton
+            onPress={handleReset}
+            isLoading={false}
+            title={tr("Reset", "초기화")}
+            style={StyleSheet.flatten([
+              styles.headerButton,
+              styles.headerButtonSecondary,
+              !isDirty ? styles.headerButtonDisabled : null,
+            ])}
+            textStyle={styles.headerButtonText}
+            loadingColor="white"
+          />
+          <LoadingButton
+            onPress={handleChangeImage}
+            isLoading={isLoading}
+            title={tr("Change", "변경")}
+            style={styles.headerButton}
+            textStyle={styles.headerButtonText}
+            loadingColor="white"
+          />
+          <LoadingButton
+            onPress={handleApply}
+            isLoading={isApplying}
+            title={tr("Apply", "반영")}
+            style={applyButtonStyle}
+            textStyle={styles.headerButtonText}
+            loadingColor="white"
+          />
+        </View>
       </View>
 
       {/* 이미지 영역 */}
       <View style={styles.imageContainer}>
-        {profileImageUri ? (
+        {draftProfileImageUri ? (
           <View style={styles.imageWrapper}>
             <Image
-              source={{ uri: profileImageUri }}
+              source={{ uri: draftProfileImageUri }}
               style={styles.image}
               resizeMode="cover"
             />
@@ -162,6 +245,17 @@ const styles = StyleSheet.create({
   },
   headerButtonText: {
     color: "white",
+  },
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  headerButtonDisabled: {
+    opacity: 0.5,
+  },
+  headerButtonSecondary: {
+    opacity: 0.9,
   },
   imageContainer: {
     flex: 1,

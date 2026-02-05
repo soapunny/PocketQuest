@@ -19,6 +19,9 @@
     "paths": {
       "@/*": [
         "./src/*"
+      ],
+      "@pq/shared/*": [
+        "../../packages/shared/src/*"
       ]
     },
     "plugins": [

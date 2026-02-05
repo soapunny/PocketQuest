@@ -363,6 +363,9 @@ export default function TransactionsScreen() {
   const canSelectUnassignedNow =
     type === "SAVING" ? baselineAllowsUnassigned : false;
 
+  const showTypeChangeHint =
+    !!editingBaseline && String(editingBaseline.type) !== String(type);
+
   const firstAssignableGoalId = useMemo(() => {
     // pick first non-empty goal id
     const hit = (savingsGoalOptions ?? []).find((x) => String(x).trim());
@@ -728,7 +731,7 @@ export default function TransactionsScreen() {
                     // If Unassigned is not allowed, never land on "".
                     const nextGoalId = String(nextCat ?? "");
                     const forced =
-                      !String(nextGoalId).trim() && !canSelectUnassignedNow
+                      !String(nextGoalId).trim() && !baselineAllowsUnassigned
                         ? firstAssignableGoalId
                         : nextGoalId;
 
@@ -751,6 +754,15 @@ export default function TransactionsScreen() {
             );
           })}
         </View>
+        {showTypeChangeHint ? (
+          <Text style={styles.typeHintText}>
+            ⚠️{" "}
+            {tr(
+              "Changing type will move this transaction between Budget and Savings.",
+              "유형을 변경하면 이 거래가 예산/저축 합계에 다르게 반영돼요."
+            )}
+          </Text>
+        ) : null}
 
         {/* Currency (read-only) */}
         <Text style={CardSpacing.fieldLabel}>{tr("Currency", "통화")}</Text>
@@ -810,9 +822,9 @@ export default function TransactionsScreen() {
               const selected = type === "SAVING" ? savingsGoalId : category;
               const active = selected === c;
 
-              const isUnassignedOption = type === "SAVING" && !String(c ?? "").trim();
-              const disabled =
-                isUnassignedOption && !canSelectUnassignedNow; // ✅ 핵심: baseline이 unassigned였던 경우만 허용
+              const isUnassignedOption =
+                type === "SAVING" && !String(c ?? "").trim();
+              const disabled = isUnassignedOption && !canSelectUnassignedNow; // ✅ 핵심: baseline이 unassigned였던 경우만 허용
 
               return (
                 <Pressable
@@ -995,6 +1007,14 @@ const styles = StyleSheet.create({
     marginTop: 6,
     color: "#777",
     fontSize: 12,
+  },
+  typeHintText: {
+    marginTop: 6,
+    fontSize: 12,
+    color: "#D97706", // amber-600
+    opacity: 0.95,
+    marginBottom: 6,
+    fontWeight: "700",
   },
   noteText: {
     marginTop: 8,

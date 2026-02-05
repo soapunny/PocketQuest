@@ -3,7 +3,7 @@
 import { z } from "zod";
 
 import type { Currency } from "../money/types";
-import { CURRENCY_VALUES } from "../money/types";
+import { CURRENCY_VALUES, currencySchema } from "../money/types";
 
 // 2.1 Common enum/union (const arrays + types)
 export const RANGE_VALUES = [
@@ -122,9 +122,6 @@ export type DeleteTransactionResponseDTO = { success: boolean };
 // 2.4 Zod schemas (basic shapes only, no server-only category enforcement)
 export const rangeSchema = z.enum(
   RANGE_VALUES as unknown as [string, ...string[]]
-);
-export const currencySchema = z.enum(
-  CURRENCY_VALUES as unknown as [string, ...string[]]
 );
 export const txTypeSchema = z.enum(
   TX_TYPE_VALUES as unknown as [string, ...string[]]

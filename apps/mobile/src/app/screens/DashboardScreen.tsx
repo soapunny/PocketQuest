@@ -8,7 +8,7 @@ import ScreenHeader from "../components/layout/ScreenHeader";
 import ScreenCard from "../components/layout/ScreenCard";
 import { CardSpacing } from "../components/Typography";
 
-import type { Currency } from "../../../../../packages/shared/src/money/types";
+import type { Currency } from "@pq/shared/money";
 
 import { useDashboardStore } from "../store/dashboardStore";
 import { useUserPrefsStore } from "../store/userPrefsStore";
@@ -86,6 +86,7 @@ export default function DashboardScreen() {
 
   const [isBudgetDetailsOpen, setIsBudgetDetailsOpen] = useState(false);
   const [isSavingsDetailsOpen, setIsSavingsDetailsOpen] = useState(false);
+  const [isCashflowDetailsOpen, setIsCashflowDetailsOpen] = useState(false);
 
   type StatusDescriptor = { text: string; color: string; arrow: string };
 
@@ -278,52 +279,17 @@ export default function DashboardScreen() {
     return periodLabelText(key);
   }, [plan]);
 
-  // Server payload (SSOT) for dashboard contains: { range, totals, budgetStatusRows, ... }
-  // Derive the UI-friendly summaries here to avoid coupling mobile to a changing DTO.
-  const { totals, range } = dashboard as unknown as {
-    totals: {
-      incomeMinor: number;
-      spentMinor: number;
-      savingMinor: number;
-      netMinor: number;
-    };
-    range: {
-      periodStartLocal: string;
-      periodEndLocal: string;
-    };
-    budgetStatusRows?: Array<{
-      category?: string | null;
-      limitMinor: number;
-      spentMinor: number;
-      remainingMinor: number;
-    }>;
-    savingsProgressRows?: Array<{
-      goalId: string | null;
-      name: string;
-      targetMinor: number;
-      savedMinor: number;
-      progressRatio: number;
-    }>;
-  };
+  const { totals, range, budgetStatusRows, savingsProgressRows } = dashboard;
 
-  const budgetStatusRows = (dashboard as any).budgetStatusRows as
-    | Array<{
-        category?: string | null;
-        limitMinor: number;
-        spentMinor: number;
-        remainingMinor: number;
-      }>
-    | undefined;
+  // Cashflow SSOT (operational main)
+  const cfOp = dashboard?.cashflow?.operational;
+  const opIncome = cfOp?.incomeMinor ?? totals?.incomeMinor ?? 0;
+  const opExpense = cfOp?.expenseMinor ?? totals?.spentMinor ?? 0;
+  const opNet = cfOp?.netMinor ?? opIncome - opExpense;
 
-  const savingsProgressRows = (dashboard as any).savingsProgressRows as
-    | Array<{
-        goalId: string | null;
-        name: string;
-        targetMinor: number;
-        savedMinor: number;
-        progressRatio: number;
-      }>
-    | undefined;
+  const cfSp = dashboard?.cashflow?.spendable;
+  const spSaving = cfSp?.savingMinor ?? totals?.savingMinor ?? 0;
+  const spNet = cfSp?.netMinor ?? opIncome - opExpense - spSaving;
 
   const totalBudgetLimitMinor = (budgetStatusRows ?? []).reduce(
     (sum, row) => sum + (Number.isFinite(row.limitMinor) ? row.limitMinor : 0),
@@ -341,15 +307,11 @@ export default function DashboardScreen() {
     remainingMinor: totalBudgetRemainingMinor,
   };
 
-  const spendRate =
-    totals?.incomeMinor && totals.incomeMinor > 0
-      ? totalBudgetSpentMinor / totals.incomeMinor
-      : 0;
+  const hasIncome = opIncome > 0;
 
-  const cashflowRemainingRatio =
-    totals?.incomeMinor && totals.incomeMinor > 0
-      ? (totals.netMinor ?? 0) / totals.incomeMinor
-      : 0;
+  const spendRate = hasIncome ? opExpense / opIncome : 0;
+
+  const cashflowRemainingRatio = hasIncome ? (opNet ?? 0) / opIncome : 0;
   const cashflowRemainingPct = pctFromRatio(cashflowRemainingRatio);
 
   const cashflowHealth = {
@@ -374,10 +336,12 @@ export default function DashboardScreen() {
     key: budgetHealthKeyFromRatio(budgetSpentRatio, totalBudgetLimitMinor),
   };
 
-  const cashflowStatus = (() => {
-    const s = cashflowHealthDescriptor(cashflowHealth.key);
-    return { label: `${s.arrow} ${s.text}`, color: s.color };
-  })();
+  const cashflowStatus = hasIncome
+    ? (() => {
+        const s = cashflowHealthDescriptor(cashflowHealth.key);
+        return { label: `${s.arrow} ${s.text}`, color: s.color };
+      })()
+    : undefined;
 
   const budgetStatus = (() => {
     const s = budgetHealthDescriptor(budgetHealth.key);
@@ -416,14 +380,20 @@ export default function DashboardScreen() {
 
   // Unassigned SAVING amount in this period:
   // Server does not emit a null-goal row, so derive from totals.savingMinor.
-  const trackedSavedMinor = (savingsProgressRows ?? [])
-    .filter((r) => Number.isFinite(r.targetMinor) && r.targetMinor > 0)
-    .reduce((sum, r) => sum + Math.trunc(Number(r.savedMinor) || 0), 0);
+  const trackedSavedMinor = (savingsProgressRows ?? []).reduce(
+    (sum, r) => sum + Math.trunc(Number(r.savedMinor) || 0),
+    0
+  );
 
-  const totalSavingMinor = Math.trunc(Number((totals as any)?.savingMinor) || 0);
+  const totalSavingMinor = Math.trunc(
+    Number((totals as any)?.savingMinor) || 0
+  );
 
   // Derived unassigned = all savings - tracked goal savings
-  const unassignedSavedMinor = Math.max(0, totalSavingMinor - trackedSavedMinor);
+  const unassignedSavedMinor = Math.max(
+    0,
+    totalSavingMinor - trackedSavedMinor
+  );
 
   const perSavingsGoals = (savingsProgressRows ?? [])
     .filter((r) => Number.isFinite(r.targetMinor) && r.targetMinor > 0)
@@ -518,40 +488,136 @@ export default function DashboardScreen() {
       </View>
 
       {/* Cashflow */}
-      <Text style={CardSpacing.section}>{tr("Cashflow", "현금 흐름")}</Text>
+      <View style={styles.sectionRow}>
+        <Text style={CardSpacing.section}>{tr("Cashflow", "현금 흐름")}</Text>
+        <Pressable
+          onPress={() => setIsCashflowDetailsOpen((v) => !v)}
+          style={styles.detailsBtn}
+        >
+          <Text style={styles.detailsBtnText}>
+            {isCashflowDetailsOpen ? tr("Hide", "닫기") : tr("Details", "상세")}
+          </Text>
+        </Pressable>
+      </View>
       <View style={styles.grid2}>
         <MetricCard
           title={tr("Cashflow", "현금 흐름")}
           value={tr(
-            `${formatMoney(totals.spentMinor, hc)} / ${formatMoney(
-              totals.incomeMinor,
-              hc
-            )}`,
-            `${formatMoney(totals.spentMinor, hc)} / ${formatMoney(
-              totals.incomeMinor,
-              hc
-            )}`
+            `${formatMoney(opExpense, hc)} / ${formatMoney(opIncome, hc)}`,
+            `${formatMoney(opExpense, hc)} / ${formatMoney(opIncome, hc)}`
           )}
           status={cashflowStatus}
-          progress={{
-            ratio: cashflowHealth.spendRate,
-            color: cashflowStatus.color,
-          }}
+          progress={
+            cashflowStatus
+              ? { ratio: cashflowHealth.spendRate, color: cashflowStatus.color }
+              : undefined
+          }
           sub={
             <>
               <Text style={styles.metricSub}>
                 {tr(
-                  `Remaining: ${formatMoney(totals.netMinor, hc)} · `,
-                  `남음: ${formatMoney(totals.netMinor, hc)} · `
+                  `Remaining: ${formatMoney(opNet, hc)} · `,
+                  `남음: ${formatMoney(opNet, hc)} · `
                 )}
               </Text>
-              <Text style={[styles.metricSub, { color: cashflowStatus.color }]}>
-                {`${cashflowRemainingPct}%`}
-              </Text>
+              {hasIncome && cashflowStatus ? (
+                <Text
+                  style={[styles.metricSub, { color: cashflowStatus.color }]}
+                >
+                  {`${cashflowRemainingPct}%`}
+                </Text>
+              ) : (
+                <Text
+                  style={[
+                    styles.metricSub,
+                    { color: styles.statusMuted.color },
+                  ]}
+                >
+                  —
+                </Text>
+              )}
             </>
           }
         />
       </View>
+
+      {isCashflowDetailsOpen ? (
+        <>
+          <View style={styles.detailsBox}>
+            <Text style={styles.detailsBoxTitle}>
+              {tr("Cashflow details", "현금 흐름 상세")}
+            </Text>
+            <View style={styles.grid2}>
+              <MetricCard
+                title={tr("Cashflow (Spendable)", "현금 흐름 (사용 가능)")}
+                value={formatMoney(spNet, hc)}
+                sub={tr(
+                  `Income: ${formatMoney(
+                    opIncome,
+                    hc
+                  )} · Expense: ${formatMoney(
+                    opExpense,
+                    hc
+                  )} · Savings: ${formatMoney(spSaving, hc)}`,
+                  `수입: ${formatMoney(opIncome, hc)} · 지출: ${formatMoney(
+                    opExpense,
+                    hc
+                  )} · 저축: ${formatMoney(spSaving, hc)}`
+                )}
+                variant="detail"
+              />
+
+              <ScreenCard style={[styles.metricCard, styles.metricCardDetail]}>
+                <View style={styles.metricTopRow}>
+                  <Text style={[styles.metricTitle, styles.metricTitleDetail]}>
+                    {tr("Savings by goal", "목표별 저축")}
+                  </Text>
+                </View>
+
+                <View style={styles.sectionDivider} />
+
+                <View style={styles.savingsByGoalList}>
+                  {(savingsProgressRows ?? []).map((r) => (
+                    <View key={r.goalId} style={styles.savingsByGoalRow}>
+                      <Text style={styles.savingsByGoalName} numberOfLines={1}>
+                        {String(r.name || tr("Savings", "저축"))}
+                      </Text>
+                      <Text style={styles.savingsByGoalAmount}>
+                        {formatMoney(Math.trunc(Number(r.savedMinor) || 0), hc)}
+                      </Text>
+                    </View>
+                  ))}
+
+                  {unassignedSavedMinor > 0 ? (
+                    <View style={styles.savingsByGoalRow}>
+                      <Text
+                        style={[
+                          styles.savingsByGoalName,
+                          styles.unassignedLabel,
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {tr("(auto) Unassigned", "(자동) 미지정")}
+                      </Text>
+                      <Text style={styles.savingsByGoalAmount}>
+                        {formatMoney(unassignedSavedMinor, hc)}
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  {(!savingsProgressRows?.length ||
+                    (savingsProgressRows ?? []).every(
+                      (r) => Math.trunc(Number(r.savedMinor) || 0) === 0
+                    )) &&
+                  unassignedSavedMinor <= 0 ? (
+                    <Text style={styles.savingsByGoalEmpty}>—</Text>
+                  ) : null}
+                </View>
+              </ScreenCard>
+            </View>
+          </View>
+        </>
+      ) : null}
 
       {/* Budget */}
       <View style={styles.sectionRow}>
@@ -902,6 +968,45 @@ const styles = StyleSheet.create({
     color: "#7C3AED", // purple
   },
 
+  sectionDivider: {
+    height: 1,
+    backgroundColor: "rgba(0,0,0,0.06)",
+    marginBottom: 10,
+  },
+
+  savingsByGoalList: {
+    gap: 10,
+  },
+  savingsByGoalRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  savingsByGoalName: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#111",
+    opacity: 0.72,
+  },
+  savingsByGoalAmount: {
+    fontSize: 12,
+    fontWeight: "900",
+    color: "#111",
+    opacity: 0.85,
+  },
+  savingsByGoalEmpty: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#6B7280",
+    opacity: 0.8,
+  },
+  unassignedLabel: {
+    opacity: 0.7,
+    color: "#6B7280",
+    fontWeight: "600",
+  },
   // Nested details container
   detailsBox: {
     paddingLeft: 10,

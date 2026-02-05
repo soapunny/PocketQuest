@@ -1,0 +1,17 @@
+{
+  "name": "@pq/shared",
+  "private": true,
+  "type": "module",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./bootstrap": "./src/bootstrap/index.ts",
+    "./bootstrap/*": "./src/bootstrap/*",
+    "./transactions": "./src/transactions/index.ts",
+    "./transactions/*": "./src/transactions/*",
+    "./plans": "./src/plans/index.ts",
+    "./plans/*": "./src/plans/*",
+    "./money": "./src/money/index.ts",
+    "./money/*": "./src/plans/*"
+  }
+}

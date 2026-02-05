@@ -57,6 +57,10 @@ export default function AddTransactionModal() {
     })),
   ];
 
+  const firstRealSavingsGoalId = useMemo(() => {
+    return savingsGoalOptions.find((x) => String(x.id).trim() !== "")?.id ?? "";
+  }, [savingsGoalOptions]);
+
   const chipStyle = (active: boolean) => [
     styles.chip,
     active ? styles.chipActive : styles.chipInactive,
@@ -129,10 +133,9 @@ export default function AddTransactionModal() {
     }
 
     // SAVING
-    const firstRealId =
-      savingsGoalOptions.find((x) => String(x.id).trim() !== "")?.id ?? "";
-    setCategoryKey(firstRealId);
-    setSelectedSavingsGoalId(firstRealId);
+    // SAVING (force real goal selection; Unassigned disabled in Add)
+    setCategoryKey(firstRealSavingsGoalId);
+    setSelectedSavingsGoalId(firstRealSavingsGoalId);
   }, [
     type,
     categoryOptions,
@@ -146,15 +149,12 @@ export default function AddTransactionModal() {
   useEffect(() => {
     if (type !== "SAVING") return;
 
-    const firstRealId =
-      savingsGoalOptions.find((x) => String(x.id).trim() !== "")?.id ?? "";
-
+    // Force real goal selection; Unassigned is disabled in Add.
     if (String(selectedSavingsGoalId || "").trim()) return;
 
-    // real goal이 있으면 그걸로, 없으면 Unassigned("") 허용
-    setSelectedSavingsGoalId(firstRealId);
-    setCategoryKey(firstRealId);
-  }, [type, savingsGoalOptions, selectedSavingsGoalId]);
+    setSelectedSavingsGoalId(firstRealSavingsGoalId);
+    setCategoryKey(firstRealSavingsGoalId);
+  }, [type, firstRealSavingsGoalId, selectedSavingsGoalId]);
 
   useEffect(() => {
     // If the user changes currency in Settings, clear the FX snapshot input.
@@ -175,14 +175,13 @@ export default function AddTransactionModal() {
     if (!canSave) return;
     if (isSaving) return;
     if (type === "SAVING") {
-      // Unassigned("") is allowed.
-      // Block only if there are literally no options (should never happen).
-      if (!savingsGoalOptions.length) {
+      const goalId = String(selectedSavingsGoalId || categoryKey || "").trim();
+      if (!goalId) {
         Alert.alert(
           tr("No savings goal", "저축 목표 없음"),
           tr(
-            "Create a Savings Goal in Plan first, then record a Saving transaction.",
-            "Plan에서 저축 목표를 먼저 만든 뒤 저축 거래를 추가해 주세요."
+            "Select a Savings Goal first (Unassigned is not available when adding a new Saving transaction).",
+            "저축 거래를 추가하려면 저축 목표를 선택해야 해요(거래 추가에서는 '미지정'을 선택할 수 없어요)."
           )
         );
         return;
@@ -293,7 +292,25 @@ export default function AddTransactionModal() {
             {(["EXPENSE", "INCOME", "SAVING"] as TxType[]).map((t) => (
               <Pressable
                 key={t}
-                onPress={() => setType(t)}
+                onPress={() => {
+                  setType(t);
+
+                  if (t === "EXPENSE") {
+                    setCategoryKey(defaultExpenseCategory);
+                    setSelectedSavingsGoalId("");
+                    return;
+                  }
+
+                  if (t === "INCOME") {
+                    setCategoryKey(defaultIncomeCategory);
+                    setSelectedSavingsGoalId("");
+                    return;
+                  }
+
+                  // SAVING: force real goal selection (Unassigned disabled)
+                  setCategoryKey(firstRealSavingsGoalId);
+                  setSelectedSavingsGoalId(firstRealSavingsGoalId);
+                }}
                 style={[
                   styles.typeChip,
                   type === t ? styles.typeChipActive : styles.typeChipInactive,
@@ -389,23 +406,35 @@ export default function AddTransactionModal() {
               : tr("Category", "카테고리")}
           </Text>
           <View style={styles.chipRow}>
-            {categoryOptions.map((c) => (
-              <Pressable
-                key={c}
-                onPress={() => {
-                  setCategoryKey(c);
-                  if (type === "SAVING") setSelectedSavingsGoalId(c);
-                }}
-                style={chipStyle(categoryKey === c)}
-              >
-                <Text style={chipTextStyle(categoryKey === c)}>
-                  {type === "SAVING"
-                    ? savingsGoalOptions.find((g) => g.id === c)?.name ??
-                      tr("Unassigned", "미지정")
-                    : categoryLabelText(c, language)}
-                </Text>
-              </Pressable>
-            ))}
+            {categoryOptions.map((c) => {
+              const isUnassignedOption =
+                type === "SAVING" && !String(c ?? "").trim();
+              const disabled = isUnassignedOption; // Unassigned disabled in Add
+              const active = categoryKey === c;
+
+              return (
+                <Pressable
+                  key={c}
+                  disabled={disabled}
+                  onPress={() => {
+                    if (disabled) return;
+                    setCategoryKey(c);
+                    if (type === "SAVING") setSelectedSavingsGoalId(c);
+                  }}
+                  style={[
+                    ...chipStyle(active),
+                    disabled ? styles.chipDisabled : null,
+                  ]}
+                >
+                  <Text style={chipTextStyle(active)}>
+                    {type === "SAVING"
+                      ? savingsGoalOptions.find((g) => g.id === c)?.name ??
+                        tr("Unassigned", "미지정")
+                      : categoryLabelText(c, language)}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
         </View>
 
@@ -537,6 +566,9 @@ const styles = StyleSheet.create({
   chipInactive: {
     borderColor: "#ddd",
     backgroundColor: "white",
+  },
+  chipDisabled: {
+    opacity: 0.35,
   },
   chipText: {
     fontWeight: "800",

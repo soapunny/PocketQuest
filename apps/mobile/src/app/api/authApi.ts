@@ -1,3 +1,5 @@
+// apps/mobile/src/app/api/authApi.ts
+
 import { supabase } from "../lib/supabase";
 
 export const authApi = {

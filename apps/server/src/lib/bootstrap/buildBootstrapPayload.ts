@@ -1,7 +1,7 @@
 // apps/server/src/lib/bootstrap/buildBootstrapPayload.ts
 
 import { prisma } from "@/lib/prisma";
-import { CurrencyCode, PeriodType, TxType } from "@prisma/client";
+import { CurrencyCode, PeriodType } from "@prisma/client";
 import { normalizeTimeZone } from "@/lib/plan/periodUtils";
 import {
   buildPeriodStartListUTC,
@@ -9,6 +9,9 @@ import {
 } from "@/lib/plan/periodRules";
 import { ensureDefaultActivePlan } from "@/lib/plan/planCreateFactory";
 import { formatInTimeZone } from "date-fns-tz";
+
+import { buildDashboardPayload } from "@/lib/bootstrap/buildDashboardPayload";
+import type { BootstrapResponseDTO } from "@pq/shared/bootstrap";
 
 type BootstrapArgs = {
   userId: string;
@@ -20,11 +23,6 @@ type BootstrapArgs = {
 function fmtLocalDate(d: Date, timeZone: string): string {
   // Calendar date in the user's timezone
   return formatInTimeZone(d, timeZone, "yyyy-MM-dd");
-}
-
-function fmtLocalDateTime(d: Date, timeZone: string): string {
-  // Display-friendly local date-time (minutes precision)
-  return formatInTimeZone(d, timeZone, "yyyy-MM-dd HH:mm");
 }
 
 function fmtLocalMonth(d: Date, timeZone: string): string {
@@ -72,257 +70,9 @@ function parseMonthsOrDefault(months?: string, fallback = 3): number {
   return Math.min(12, Math.max(1, Math.trunc(n)));
 }
 
-function canonicalizeCategory(raw: string): string {
-  const s = typeof raw === "string" ? raw.trim().toLowerCase() : "";
-  if (!s) return "uncategorized";
-  // Remove whitespace and special chars, keep alnum only (canonical key)
-  const cleaned = s.replace(/[^a-z0-9]/g, "");
-  return cleaned || "uncategorized";
-}
-
-function convertTxMinorToHome(params: {
-  amountMinor: number;
-  currency: CurrencyCode;
-  homeCurrency: CurrencyCode;
-  fxUsdKrw: number | null;
-}): { ok: true; amountMinor: number } | { ok: false; warning: string } {
-  const { amountMinor, currency, homeCurrency, fxUsdKrw } = params;
-
-  const amt = Number.isFinite(amountMinor) ? Math.trunc(amountMinor) : 0;
-  if (amt === 0) return { ok: true, amountMinor: 0 };
-
-  if (currency === homeCurrency) return { ok: true, amountMinor: amt };
-
-  const fx = typeof fxUsdKrw === "number" ? fxUsdKrw : NaN;
-  if (!Number.isFinite(fx) || fx <= 0) {
-    return {
-      ok: false,
-      warning: `missing_fx_excluded:${currency}->${homeCurrency}`,
-    };
-  }
-
-  // Supported pair: USD <-> KRW, fxUsdKrw means 1 USD (major) = fx KRW (major)
-  if (currency === CurrencyCode.USD && homeCurrency === CurrencyCode.KRW) {
-    // cents -> won: (cents / 100) * fx
-    return { ok: true, amountMinor: Math.round((amt / 100) * fx) };
-  }
-
-  if (currency === CurrencyCode.KRW && homeCurrency === CurrencyCode.USD) {
-    // won -> cents: (won / fx) * 100
-    return { ok: true, amountMinor: Math.round((amt / fx) * 100) };
-  }
-
-  return {
-    ok: false,
-    warning: `unsupported_currency_pair_excluded:${currency}->${homeCurrency}`,
-  };
-}
-
-async function buildDashboardPayload(params: {
-  userId: string;
-  timeZone: string;
-  homeCurrency: CurrencyCode;
-  activePlan: {
-    id: string;
-    periodStart: Date;
-    periodEnd: Date; // exclusive end (nextPeriodStart)
-    budgetGoals: Array<{ id: string; category: string; limitMinor: number }>;
-    savingsGoals: Array<{ id: string; name: string; targetMinor: number }>;
-    currency: CurrencyCode;
-  };
-}) {
-  const { userId, activePlan, timeZone, homeCurrency } = params;
-
-  const rangeWhere = {
-    userId,
-    occurredAt: {
-      gte: activePlan.periodStart,
-      lt: activePlan.periodEnd,
-    },
-  } as const;
-
-  const warnings: string[] = [];
-
-  const txs = await prisma.transaction.findMany({
-    where: rangeWhere,
-    orderBy: { occurredAt: "desc" },
-    select: {
-      id: true,
-      type: true,
-      amountMinor: true,
-      currency: true,
-      fxUsdKrw: true,
-      category: true,
-      savingsGoalId: true,
-      savingsGoal: { select: { name: true } },
-      occurredAt: true,
-      note: true,
-    },
-  });
-
-  // Totals (homeCurrency)
-  let incomeMinor = 0;
-  let spentMinor = 0;
-  let savingMinor = 0;
-
-  // Expense by canonical category
-  const spentByCategoryMap = new Map<string, number>();
-
-  // Savings by goal id (SSOT). Keep a legacy fallback keyed by canonicalized goal name.
-  const savedByGoalId = new Map<string, number>();
-  const savedByLegacyGoalKey = new Map<string, number>();
-
-  for (const t of txs) {
-    const conv = convertTxMinorToHome({
-      amountMinor: t.amountMinor,
-      currency: t.currency,
-      homeCurrency,
-      fxUsdKrw: t.fxUsdKrw ?? null,
-    });
-
-    if (!conv.ok) {
-      warnings.push(conv.warning);
-      continue;
-    }
-
-    const amtHome = conv.amountMinor;
-
-    if (t.type === TxType.INCOME) incomeMinor += amtHome;
-    else if (t.type === TxType.EXPENSE) spentMinor += amtHome;
-    else if (t.type === TxType.SAVING) savingMinor += amtHome;
-
-    const catKey = canonicalizeCategory(t.category ?? "");
-
-    if (t.type === TxType.EXPENSE) {
-      spentByCategoryMap.set(
-        catKey,
-        (spentByCategoryMap.get(catKey) ?? 0) + amtHome
-      );
-    } else if (t.type === TxType.SAVING) {
-      const goalId =
-        typeof (t as any).savingsGoalId === "string"
-          ? String((t as any).savingsGoalId)
-          : "";
-      if (goalId) {
-        savedByGoalId.set(goalId, (savedByGoalId.get(goalId) ?? 0) + amtHome);
-      } else {
-        // Legacy: fall back to goal name if present (older rows may not have savingsGoalId)
-        const legacyName = String((t as any).savingsGoal?.name ?? "");
-        const legacyKey = canonicalizeCategory(legacyName);
-        if (legacyKey) {
-          savedByLegacyGoalKey.set(
-            legacyKey,
-            (savedByLegacyGoalKey.get(legacyKey) ?? 0) + amtHome
-          );
-        }
-      }
-    }
-  }
-
-  const netMinor = incomeMinor - spentMinor;
-
-  const spentByCategory = Array.from(spentByCategoryMap.entries())
-    .map(([categoryKey, spentMinor]) => ({
-      category: categoryKey,
-      categoryKey,
-      spentMinor,
-    }))
-    .sort((a, b) => b.spentMinor - a.spentMinor);
-
-  // Budget status rows (assumes limits are in homeCurrency minor units)
-  if (activePlan.currency !== homeCurrency) {
-    warnings.push(
-      `plan_currency_mismatch:${activePlan.currency}->${homeCurrency}`
-    );
-  }
-
-  const budgetStatusRows = (activePlan.budgetGoals ?? [])
-    .map((g) => {
-      const categoryKey = canonicalizeCategory(g.category ?? "");
-      const limitMinor = Number.isFinite(g.limitMinor)
-        ? Math.trunc(g.limitMinor)
-        : 0;
-      const spentMinor = spentByCategoryMap.get(categoryKey) ?? 0;
-      const remainingMinor = limitMinor - spentMinor;
-      return {
-        category: categoryKey,
-        categoryKey,
-        limitMinor,
-        spentMinor,
-        remainingMinor,
-      };
-    })
-    .filter((r) => r.limitMinor > 0);
-
-  // Savings progress rows (assumes targets are in homeCurrency minor units)
-  const savingsProgressRows = (activePlan.savingsGoals ?? [])
-    .map((g) => {
-      const goalId = String(g.id);
-      const name = String(g.name ?? "");
-      const targetMinor = Number.isFinite(g.targetMinor)
-        ? Math.trunc(g.targetMinor)
-        : 0;
-      const key = canonicalizeCategory(name);
-      const savedMinor =
-        savedByGoalId.get(goalId) ?? savedByLegacyGoalKey.get(key) ?? 0;
-      const progressRatio = targetMinor > 0 ? savedMinor / targetMinor : 0;
-      return { goalId, name, targetMinor, savedMinor, progressRatio };
-    })
-    .filter((r) => r.targetMinor > 0);
-
-  // Recent transactions (take 10) - must be in active range, canonical category, homeCurrency amount
-  const recentTransactions = [];
-  for (const t of txs) {
-    if (recentTransactions.length >= 10) break;
-
-    const conv = convertTxMinorToHome({
-      amountMinor: t.amountMinor,
-      currency: t.currency,
-      homeCurrency,
-      fxUsdKrw: t.fxUsdKrw ?? null,
-    });
-
-    if (!conv.ok) {
-      warnings.push(conv.warning);
-      continue;
-    }
-
-    recentTransactions.push({
-      id: t.id,
-      type: t.type,
-      amountMinor: conv.amountMinor,
-      categoryKey: canonicalizeCategory(t.category ?? ""),
-      savingsGoalId: (t as any).savingsGoalId ?? null,
-      occurredAtUTC: t.occurredAt.toISOString(),
-      occurredAtLocal: fmtLocalDateTime(t.occurredAt, timeZone),
-      note: t.note ?? null,
-    });
-  }
-
-  return {
-    range: {
-      periodStartUTC: activePlan.periodStart.toISOString(),
-      periodEndUTC: activePlan.periodEnd.toISOString(),
-      periodStartLocal: fmtLocalDate(activePlan.periodStart, timeZone),
-      periodEndLocal: fmtLocalDate(activePlan.periodEnd, timeZone),
-    },
-    totals: {
-      incomeMinor,
-      spentMinor,
-      savingMinor,
-      netMinor,
-    },
-    spentByCategory,
-    budgetStatusRows,
-    savingsProgressRows,
-    recentTransactions,
-    meta: {
-      warnings,
-    },
-  };
-}
-
-export async function buildBootstrapPayload(args: BootstrapArgs) {
+export async function buildBootstrapPayload(
+  args: BootstrapArgs
+): Promise<BootstrapResponseDTO | { error: string }> {
   const navCount = parseMonthsOrDefault(args.months, 3);
 
   // 1) user prefs
@@ -334,6 +84,8 @@ export async function buildBootstrapPayload(args: BootstrapArgs) {
       activePlanId: true,
       currency: true,
       language: true,
+      cashflowCarryoverEnabled: true,
+      cashflowCarryoverMode: true,
     },
   });
 
@@ -521,6 +273,10 @@ export async function buildBootstrapPayload(args: BootstrapArgs) {
       currency,
       language,
       activePlanId: activePlan.id,
+      cashflowCarryoverEnabled: !!(user as any).cashflowCarryoverEnabled,
+      cashflowCarryoverMode: String(
+        (user as any).cashflowCarryoverMode ?? "ROLLING"
+      ) as any,
     },
     activePlan: withPlanUtcFields(activePlanForDTO, userTimeZone),
     monthly: {

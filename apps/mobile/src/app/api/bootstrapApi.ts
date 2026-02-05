@@ -2,36 +2,21 @@
 
 import { request } from "./http";
 
-export type BootstrapResponse = {
-  user: {
-    id: string;
-    timeZone: string;
-    currency: string;
-    language: string;
-  };
-  activePlan: any;
-  periodNav: any;
-  goals: {
-    budget: any[];
-    savings: any[];
-  };
-  txSummary: any;
-  recentTransactions?: any[];
-};
+import type { BootstrapResponseDTO } from "@pq/shared/bootstrap";
 
 export async function fetchBootstrap(
-  token: string,
-): Promise<BootstrapResponse> {
+  token: string
+): Promise<BootstrapResponseDTO> {
   if (!token) {
     throw new Error(
-      "bootstrap failed: missing auth token (expected server JWT)",
+      "bootstrap failed: missing auth token (expected server JWT)"
     );
   }
 
   // Helpful debug (does not print the token)
   console.log("[bootstrapApi] GET /api/bootstrap (auth: yes)");
 
-  return await request<BootstrapResponse>("/api/bootstrap", {
+  return await request<BootstrapResponseDTO>("/api/bootstrap", {
     method: "GET",
     headers: {
       Accept: "application/json",

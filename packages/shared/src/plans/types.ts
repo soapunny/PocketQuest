@@ -3,7 +3,7 @@
 import { z } from "zod";
 
 import type { Currency } from "../money/types";
-import { CURRENCY_VALUES } from "../money/types";
+import { CURRENCY_VALUES, currencySchema } from "../money/types";
 
 // ---------------------------------------------------------------------------
 // 1) Common enum/union types (SSOT)
@@ -72,12 +72,7 @@ export const serverPlanDTOSchema = z
     periodAnchorUTC: z.string().datetime().optional(),
 
     timeZone: z.string().min(1).optional(),
-    totalBudgetLimitMinor: z
-      .number()
-      .int()
-      .nonnegative()
-      .optional()
-      .nullable(),
+    totalBudgetLimitMinor: z.number().int().nonnegative().optional().nullable(),
 
     // Keep these for compatibility with existing store logic, but treat `currency` as canonical.
     homeCurrency: z.enum(CURRENCY_VALUES).optional(),
@@ -89,7 +84,7 @@ export const serverPlanDTOSchema = z
           id: z.string().optional().nullable(),
           category: z.string().min(1),
           limitMinor: z.number().int().nonnegative().optional().nullable(),
-        }),
+        })
       )
       .optional()
       .nullable(),
@@ -99,7 +94,7 @@ export const serverPlanDTOSchema = z
           id: z.string().optional().nullable(),
           name: z.string().min(1),
           targetMinor: z.number().int().nonnegative().optional().nullable(),
-        }),
+        })
       )
       .optional()
       .nullable(),
@@ -156,7 +151,6 @@ export type GetPlanQueryDTO = z.infer<typeof getPlanQuerySchema>;
 export const periodTypeSchema = z.enum(PLAN_PERIOD_TYPE_VALUES);
 export const languageSchema = z.enum(LANGUAGE_VALUES);
 export const uiLanguageSchema = languageSchema;
-export const currencySchema = z.enum(CURRENCY_VALUES);
 
 export const budgetGoalDTOSchema = z.object({
   id: z.string().optional().nullable(),
@@ -245,7 +239,7 @@ export const patchBudgetGoalsRequestSchema = z.object({
     z.object({
       category: z.string().min(1),
       limitMinor: z.number().int().nonnegative(),
-    }),
+    })
   ),
 });
 
@@ -268,7 +262,11 @@ export type UpsertSavingsGoalRequestDTO = {
 };
 
 export type PatchSavingsGoalsRequestDTO = {
-  savingsGoals: Array<{ id?: string | null; name: string; targetMinor: number }>;
+  savingsGoals: Array<{
+    id?: string | null;
+    name: string;
+    targetMinor: number;
+  }>;
 };
 
 export const savingsGoalItemSchema = z.object({

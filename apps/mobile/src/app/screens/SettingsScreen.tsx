@@ -1,12 +1,17 @@
+// apps/mobile/src/app/screens/SettingsScreen.tsx
+
 import React, { useMemo } from "react";
-import { View, Text, Pressable, StyleSheet } from "react-native";
+import { View, Text, Pressable, StyleSheet, Alert } from "react-native";
 
 import ScreenHeader from "../components/layout/ScreenHeader";
 import ScreenLayout from "../components/layout/ScreenLayout";
 
 import type { Currency } from "../../../../../packages/shared/src/money/types";
 
-import { usePlan, type PeriodType, type UILanguage } from "../store/planStore";
+import { useAuthStore } from "../store/authStore";
+import { useUserPrefsStore } from "../store/userPrefsStore";
+import { userApi } from "../api/userApi";
+import { usePlan, type PeriodType } from "../store/planStore";
 
 const OPTIONS: Array<{ label: string; value: PeriodType; help: string }> = [
   { label: "Weekly", value: "WEEKLY", help: "Resets every Monday." },
@@ -27,26 +32,32 @@ const CURRENCY_OPTIONS: Array<{ label: string; value: Currency }> = [
   { label: "KRW (₩)", value: "KRW" },
 ];
 
-const LANGUAGE_OPTIONS: Array<{ label: string; value: UILanguage }> = [
+const LANGUAGE_OPTIONS: Array<{ label: string; value: "en" | "ko" }> = [
   { label: "English", value: "en" },
   { label: "한국어", value: "ko" },
 ];
 
 export default function SettingsScreen() {
+  const { plan, setPeriodType, switchPeriodType, switchPlanCurrency } =
+    usePlan();
+
+  const auth = useAuthStore();
+  const serverToken = (auth as any)?.serverToken as string | null | undefined;
+
   const {
-    plan,
-    setPeriodType,
-    switchPeriodType,
+    language,
+    setLanguage,
+    advancedCurrencyMode,
+    setAdvancedCurrencyMode,
     homeCurrency,
     displayCurrency,
     setHomeCurrency,
     setDisplayCurrency,
-    switchPlanCurrency,
-    advancedCurrencyMode,
-    setAdvancedCurrencyMode,
-    language,
-    setLanguage,
-  } = usePlan();
+    cashflowCarryoverEnabled,
+    cashflowCarryoverMode,
+    setCashflowCarryoverEnabled,
+    setCashflowCarryoverMode,
+  } = useUserPrefsStore();
 
   const current = (plan.periodType ?? "MONTHLY") as PeriodType;
   const isAdvanced = !!advancedCurrencyMode;
@@ -59,7 +70,7 @@ export default function SettingsScreen() {
       "USD") as Currency;
   }, [plan, displayCurrency, homeCurrency]);
 
-  const lang = (language ?? "en") as UILanguage;
+  const lang = (language ?? "en") as "en" | "ko";
   const isKo = lang === "ko";
 
   return (
@@ -328,7 +339,7 @@ export default function SettingsScreen() {
                       if (!ok) {
                         // 실패해도 일단 UI는 유지 (원하면 여기서 revert도 가능)
                         console.warn(
-                          "[SettingsScreen] switchPlanCurrency failed; kept local currency",
+                          "[SettingsScreen] switchPlanCurrency failed; kept local currency"
                         );
                       }
                     }}
@@ -360,6 +371,87 @@ export default function SettingsScreen() {
             </View>
           </>
         )}
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>
+          {isKo ? "캐시플로우 이월" : "Cashflow carryover"}
+        </Text>
+        <Text style={styles.help}>
+          {isKo
+            ? "이월을 켜면 이전 기간의 잔액이 다음 기간 계산에 반영됩니다. (현재: Rolling)"
+            : "When enabled, remaining balance carries over into the next period. (Mode: Rolling)"}
+        </Text>
+
+        <View style={styles.segment}>
+          {[
+            { label: isKo ? "끔" : "Off", value: false },
+            { label: isKo ? "켬" : "On", value: true },
+          ].map((opt) => {
+            const selected = opt.value === !!cashflowCarryoverEnabled;
+
+            return (
+              <Pressable
+                key={String(opt.label)}
+                onPress={async () => {
+                  const token = String(serverToken ?? "").trim();
+                  if (!token) {
+                    Alert.alert(
+                      isKo ? "로그인이 필요합니다" : "Login required",
+                      isKo ? "서버 토큰이 없습니다." : "Missing server token."
+                    );
+                    return;
+                  }
+
+                  const prevEnabled = !!cashflowCarryoverEnabled;
+                  const nextEnabled = !!opt.value;
+
+                  // optimistic
+                  setCashflowCarryoverEnabled(nextEnabled);
+                  setCashflowCarryoverMode("ROLLING");
+
+                  try {
+                    await userApi.updateMe(token, {
+                      cashflowCarryoverEnabled: nextEnabled,
+                      cashflowCarryoverMode: "ROLLING",
+                    });
+                  } catch (e) {
+                    // rollback
+                    setCashflowCarryoverEnabled(prevEnabled);
+                    Alert.alert(
+                      isKo ? "저장 실패" : "Save failed",
+                      isKo
+                        ? "설정을 저장할 수 없습니다. 다시 시도해 주세요."
+                        : "Could not save settings. Please try again."
+                    );
+                  }
+                }}
+                style={[
+                  styles.segmentBtn,
+                  selected && styles.segmentBtnSelected,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.segmentText,
+                    selected && styles.segmentTextSelected,
+                  ]}
+                >
+                  {opt.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {cashflowCarryoverMode ? (
+          <Text style={styles.help}>
+            {isKo ? "모드:" : "Mode:"}{" "}
+            <Text style={{ fontWeight: "900" }}>
+              {String(cashflowCarryoverMode)}
+            </Text>
+          </Text>
+        ) : null}
       </View>
 
       <View style={styles.card}>

@@ -1,3 +1,5 @@
+// apps/server/src/app/api/users/me/route.ts
+
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthUser } from "@/lib/auth";
@@ -18,6 +20,8 @@ export async function GET(request: NextRequest) {
         name: true,
         profileImageUri: true,
         provider: true,
+        cashflowCarryoverEnabled: true,
+        cashflowCarryoverMode: true,
       },
     });
 
@@ -46,6 +50,8 @@ export async function PATCH(request: NextRequest) {
     const body = (await request.json()) as {
       name?: unknown;
       profileImageUri?: unknown;
+      cashflowCarryoverEnabled?: unknown;
+      cashflowCarryoverMode?: unknown;
     };
 
     // Sanitize & validate inputs
@@ -89,6 +95,29 @@ export async function PATCH(request: NextRequest) {
       }
     }
 
+    let cashflowCarryoverEnabled: boolean | null = null;
+    if (body.cashflowCarryoverEnabled !== undefined) {
+      if (typeof body.cashflowCarryoverEnabled !== "boolean") {
+        return NextResponse.json(
+          { error: "Invalid cashflowCarryoverEnabled" },
+          { status: 400 }
+        );
+      }
+      cashflowCarryoverEnabled = body.cashflowCarryoverEnabled;
+    }
+
+    let cashflowCarryoverMode: "ROLLING" | null = null;
+    if (body.cashflowCarryoverMode !== undefined) {
+      const v = String(body.cashflowCarryoverMode || "").trim().toUpperCase();
+      if (v !== "ROLLING") {
+        return NextResponse.json(
+          { error: "Invalid cashflowCarryoverMode" },
+          { status: 400 }
+        );
+      }
+      cashflowCarryoverMode = "ROLLING";
+    }
+
     const existingUser = await prisma.user.findUnique({
       where: { id: user.userId },
     });
@@ -102,6 +131,12 @@ export async function PATCH(request: NextRequest) {
       data: {
         ...(name !== null && { name }),
         ...(profileImageUri !== null && { profileImageUri }),
+        ...(cashflowCarryoverEnabled !== null && {
+          cashflowCarryoverEnabled,
+        }),
+        ...(cashflowCarryoverMode !== null && {
+          cashflowCarryoverMode,
+        }),
       },
       select: {
         id: true,
@@ -109,6 +144,8 @@ export async function PATCH(request: NextRequest) {
         name: true,
         profileImageUri: true,
         provider: true,
+        cashflowCarryoverEnabled: true,
+        cashflowCarryoverMode: true,
       },
     });
 

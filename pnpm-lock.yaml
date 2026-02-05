@@ -10,8 +10,11 @@ importers:
 
   apps/mobile:
     dependencies:
+      '@pq/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@react-native-async-storage/async-storage':
-        specifier: ~2.2.0
+        specifier: 2.2.0
         version: 2.2.0(react-native@0.81.5(@babel/core@7.28.5)(@types/react@19.1.17)(react@19.1.0))
       '@react-navigation/bottom-tabs':
         specifier: ^7.4.0
@@ -37,6 +40,9 @@ importers:
       expo-status-bar:
         specifier: ~3.0.9
         version: 3.0.9(react-native@0.81.5(@babel/core@7.28.5)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)
+      expo-web-browser:
+        specifier: ~15.0.10
+        version: 15.0.10(expo@54.0.31)(react-native@0.81.5(@babel/core@7.28.5)(@types/react@19.1.17)(react@19.1.0))
       react:
         specifier: 19.1.0
         version: 19.1.0
@@ -80,6 +86,9 @@ importers:
 
   apps/server:
     dependencies:
+      '@pq/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@prisma/client':
         specifier: ^6.19.1
         version: 6.19.1(prisma@6.19.1(typescript@5.9.3))(typescript@5.9.3)
@@ -135,6 +144,8 @@ importers:
       typescript:
         specifier: ^5.5.0
         version: 5.9.3
+
+  packages/shared: {}
 
 packages:
 
@@ -1991,6 +2002,12 @@ packages:
     resolution: {integrity: sha512-xyYyVg6V1/SSOZWh4Ni3U129XHCnFHBTcUo0dhWtFDrZbNp/duw5AGsQfb2sVeU0gxWHXSY1+5F0jnKYC7WuOw==}
     peerDependencies:
       react: '*'
+      react-native: '*'
+
+  expo-web-browser@15.0.10:
+    resolution: {integrity: sha512-fvDhW4bhmXAeWFNFiInmsGCK83PAqAcQaFyp/3pE/jbdKmFKoRCWr46uZGIfN4msLK/OODhaQ/+US7GSJNDHJg==}
+    peerDependencies:
+      expo: '*'
       react-native: '*'
 
   expo@54.0.31:
@@ -5813,6 +5830,11 @@ snapshots:
       react: 19.1.0
       react-native: 0.81.5(@babel/core@7.28.5)(@types/react@19.1.17)(react@19.1.0)
       react-native-is-edge-to-edge: 1.2.1(react-native@0.81.5(@babel/core@7.28.5)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)
+
+  expo-web-browser@15.0.10(expo@54.0.31)(react-native@0.81.5(@babel/core@7.28.5)(@types/react@19.1.17)(react@19.1.0)):
+    dependencies:
+      expo: 54.0.31(@babel/core@7.28.5)(@expo/metro-runtime@6.1.2)(expo-router@6.0.21)(react-native@0.81.5(@babel/core@7.28.5)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0)
+      react-native: 0.81.5(@babel/core@7.28.5)(@types/react@19.1.17)(react@19.1.0)
 
   expo@54.0.31(@babel/core@7.28.5)(@expo/metro-runtime@6.1.2)(expo-router@6.0.21)(react-native@0.81.5(@babel/core@7.28.5)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0):
     dependencies:

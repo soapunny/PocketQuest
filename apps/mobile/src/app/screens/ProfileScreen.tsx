@@ -1,5 +1,8 @@
-import { useLayoutEffect, useMemo } from "react";
+// apps/mobile/src/app/screens/ProfileScreen.tsx
+
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { View, Text, StyleSheet, Image, Pressable } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useNavigation } from "@react-navigation/native";
 
 import ScreenHeader from "../components/layout/ScreenHeader";
@@ -7,7 +10,7 @@ import ScreenLayout from "../components/layout/ScreenLayout";
 import ScreenCard from "../components/layout/ScreenCard";
 import { CardSpacing } from "../components/Typography";
 
-import { useAuth } from "../store/authStore";
+import { useAuthStore } from "../store/authStore";
 import { usePlan } from "../store/planStore";
 import { useTransactions } from "../store/transactionsStore";
 
@@ -19,11 +22,43 @@ import { formatMoney, convertMinor, absMinor } from "../domain/money";
 
 export default function ProfileScreen() {
   const navigation = useNavigation<any>();
-  const { user, updateUser } = useAuth();
+  const { session } = useAuthStore();
+  const supaUser = session?.user ?? null;
   const { plan, language, homeCurrency } = usePlan();
   const isKo = language === "ko";
   const tr = (en: string, ko: string) => (isKo ? ko : en);
   const { transactions } = useTransactions();
+
+  const [storedProfileImageUri, setStoredProfileImageUri] = useState<
+    string | null
+  >(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const load = async () => {
+      try {
+        const v = await AsyncStorage.getItem("pq_profile_image_uri");
+        if (!isMounted) return;
+        setStoredProfileImageUri(v ? String(v) : null);
+      } catch {
+        // ignore
+      }
+    };
+
+    // Load on mount
+    load();
+
+    // Reload whenever screen regains focus (after closing modal)
+    const unsub = navigation.addListener("focus", () => {
+      load();
+    });
+
+    return () => {
+      isMounted = false;
+      unsub();
+    };
+  }, [navigation]);
 
   // 전체 기간 동안 총 계획 달성률
   const allTimeProgressPercent = useMemo(() => {
@@ -41,9 +76,18 @@ export default function ProfileScreen() {
     return sum;
   }, [transactions, homeCurrency]);
 
-  const profileName = user?.name || "User";
-  const profileEmail = user?.email || "";
-  const profileImageUri = user?.profileImageUri || null;
+  const profileEmail = supaUser?.email ?? "";
+  const profileName =
+    String(
+      (supaUser?.user_metadata as any)?.full_name ??
+        (supaUser?.user_metadata as any)?.name ??
+        (profileEmail ? profileEmail.split("@")[0] : "")
+    ) || "User";
+  const profileImageUri =
+    storedProfileImageUri ||
+    (supaUser?.user_metadata as any)?.avatar_url ||
+    (supaUser?.user_metadata as any)?.picture ||
+    null;
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -112,7 +156,7 @@ export default function ProfileScreen() {
         <Text style={CardSpacing.description}>
           {tr(
             "Overall plan completion rate across all periods",
-            "모든 기간에 걸친 전체 계획 완료율",
+            "모든 기간에 걸친 전체 계획 완료율"
           )}
         </Text>
       </ScreenCard>
@@ -127,7 +171,7 @@ export default function ProfileScreen() {
         <Text style={CardSpacing.description}>
           {tr(
             "Total amount saved across all periods",
-            "모든 기간에 걸쳐 저축한 총 금액",
+            "모든 기간에 걸쳐 저축한 총 금액"
           )}
         </Text>
       </ScreenCard>

@@ -1,11 +1,12 @@
 // apps/mobile/src/app/api/http.ts
+
 import { API_BASE_URL } from "../config/env";
 
 export class ApiError extends Error {
   constructor(
     public status: number,
     public message: string,
-    public details?: any,
+    public details?: any
   ) {
     super(message);
     this.name = "ApiError";
@@ -14,7 +15,7 @@ export class ApiError extends Error {
 
 export async function request<T>(
   endpoint: string,
-  options: RequestInit = {},
+  options: RequestInit = {}
 ): Promise<T> {
   const base = String(API_BASE_URL ?? "").replace(/\/$/, "");
   const path = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
@@ -48,7 +49,7 @@ export async function request<T>(
     throw new ApiError(
       response.status,
       details.error || "Request failed",
-      details,
+      details
     );
   }
 

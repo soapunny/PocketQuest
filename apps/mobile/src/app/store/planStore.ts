@@ -13,6 +13,7 @@ import { AppState, AppStateStatus } from "react-native";
 
 import { useAuthStore } from "./authStore";
 import { useDashboardStore } from "./dashboardStore";
+import { useUserPrefsStore } from "./userPrefsStore";
 import { plansApi } from "../api/plansApi";
 import type { Currency } from "../../../../../packages/shared/src/money/types";
 import type {
@@ -417,6 +418,8 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   // Server JWT issued by /api/auth/sign-in (required by bootstrap)
   const serverToken = (auth as any)?.serverToken as string | null | undefined;
 
+  const userPrefs = useUserPrefsStore();
+
   const refreshDashboardAfterPlanGoalSave = useCallback(async () => {
     const t = String(serverToken ?? "").trim();
     if (!t) {
@@ -458,6 +461,21 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     _latestPlanSnapshot = { plan };
   }, [plan]);
 
+  useEffect(() => {
+    setPlan((p) => ({
+      ...p,
+      homeCurrency: (userPrefs.homeCurrency as any) ?? p.homeCurrency,
+      displayCurrency: (userPrefs.displayCurrency as any) ?? p.displayCurrency,
+      advancedCurrencyMode: !!userPrefs.advancedCurrencyMode,
+      language: (userPrefs.language as any) ?? p.language,
+    }));
+  }, [
+    userPrefs.homeCurrency,
+    userPrefs.displayCurrency,
+    userPrefs.advancedCurrencyMode,
+    userPrefs.language,
+  ]);
+
   const [isInitialized, setIsInitialized] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const setErrorSafe = useCallback(() => {
@@ -478,46 +496,21 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   };
 
   const setHomeCurrency: Store["setHomeCurrency"] = (c) => {
-    const next: Currency = c === "KRW" ? "KRW" : "USD";
-    setPlan((p) => ({ ...p, homeCurrency: next }));
+    userPrefs.setHomeCurrency(c);
   };
 
   const setDisplayCurrency: Store["setDisplayCurrency"] = (c) => {
-    const next: Currency = c === "KRW" ? "KRW" : "USD";
-    setPlan((p) => ({ ...p, displayCurrency: next }));
+    userPrefs.setDisplayCurrency(c);
   };
 
   const setAdvancedCurrencyMode: Store["setAdvancedCurrencyMode"] = (
     enabled
   ) => {
-    const on = !!enabled;
-
-    setPlan((p) => {
-      // If turning OFF advanced mode, keep currencies aligned to the current display currency
-      // so the app behaves like a single-currency experience.
-      if (!on) {
-        const base: Currency = p.displayCurrency === "KRW" ? "KRW" : "USD";
-        return {
-          ...p,
-          advancedCurrencyMode: false,
-          homeCurrency: base,
-          displayCurrency: base,
-        };
-      }
-
-      return {
-        ...p,
-        advancedCurrencyMode: true,
-      };
-    });
+    userPrefs.setAdvancedCurrencyMode(!!enabled);
   };
 
   const setLanguage: Store["setLanguage"] = (lang) => {
-    const next: Language = lang === "ko" ? "ko" : "en";
-    setPlan((p) => ({
-      ...p,
-      language: next,
-    }));
+    userPrefs.setLanguage(lang);
   };
 
   const setPeriodType: Store["setPeriodType"] = (type) => {
@@ -1283,10 +1276,10 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       switchPeriodType,
       switchPlanCurrency,
       refreshPeriodIfNeeded,
-      homeCurrency: plan.homeCurrency,
-      displayCurrency: plan.displayCurrency,
-      advancedCurrencyMode: !!plan.advancedCurrencyMode,
-      language: (plan.language ?? "en") as Language,
+      homeCurrency: userPrefs.homeCurrency as any,
+      displayCurrency: userPrefs.displayCurrency as any,
+      advancedCurrencyMode: !!userPrefs.advancedCurrencyMode,
+      language: (userPrefs.language ?? "en") as any,
       setHomeCurrency,
       setDisplayCurrency,
       setAdvancedCurrencyMode,
@@ -1318,6 +1311,10 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       switchPlanCurrency,
       setAdvancedCurrencyMode,
       setLanguage,
+      userPrefs.homeCurrency,
+      userPrefs.displayCurrency,
+      userPrefs.advancedCurrencyMode,
+      userPrefs.language,
       setTotalBudgetLimitMinor,
       upsertBudgetGoalLimit,
       upsertSavingsGoalTarget,
@@ -1347,3 +1344,4 @@ export const usePlan = usePlanStore;
 // Back-compat type aliases (some screens import these from planStore)
 export type PeriodType = PlanPeriodType;
 export type UILanguage = Language;
+export type { Plan };

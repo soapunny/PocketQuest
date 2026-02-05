@@ -241,11 +241,43 @@ PocketQuest prioritizes correctness, clarity, and long-term extensibility.
 ## 정책
 
 - General
-- SavingsGoal
-  - 생성
-  - 편집
-  - 삭제
-    - 삭제된 goal에 연결된 saving transactions 처리 정책(유지 + goalId null)
-    - Transactions: savingsGoalId가 null/빈 문자열이면 라벨을 **“Unassigned / 미지정”**으로 표시, 필터/검색에도 정상적으로 걸리게, 미지정 트랜잭션”을 유저가 다시 어떤 goal로 재할당할 수 있게, 특정 goal로 할당된 tx를 Unassigned로 바꾸는 것은 금지
-    - Dashboard: goalId=null로 묶인 savedMinor를 “Unassigned” 한 줄로 보여주기
-    - Add Transaction: Unassigned도 선택 가능하게 열어두되, 기본값은 “첫 번째 goal”로 세팅
+- Cashflow
+  - UI
+    - 메인 Cashflow = Income − Expense (Operational Cashflow)
+    - Cashflow 섹션에서 Details를 누르면
+    - 하위 카드로 Cashflow (Spendable) (Income − Expense − Savings)
+    - 그리고 목표(Goal)별 누적 저축액 목록(타겟/진행률 없이 “금액만”)
+  - Rolling은 아직 구현하지 말고, 구조만 확장 가능하게
+  - Carryout
+    - Carryover 범위: Rolling (최초 시작부터 누적 net)
+      - 특정 달만 이월 X
+      - 항상 “전체 기간 누적 결과”가 현재에 반영
+    - 과거 tx 수정 시: 이후 모든 기간 재계산
+      - SSOT 관점에서 정답
+    - 첫 사용 carryover: 0
+      - 초기 잔액 입력 UI 없음
+      - 필요하면 “Income(또는 adjustment)” tx로 처리
+    - 기본값 OFF, 설정에서 ON
+- Transaction
+  - SAVING ↔ EXPENSE 전환 허용
+    - EXPENSE → SAVING
+      - 반드시 Savings Goal 선택 필수
+      - Unassigned 선택 불가
+      - goal 선택 전까지 Save 비활성화
+      - SAVING → EXPENSE
+      - 반드시 Expense category 선택 필수
+      - fallback 자동선택 OK (예: 첫 category)
+- Plan
+  - Type
+    - Weekly
+    - Biweekly
+    - Monthly
+  - BudgetGoal
+  - SavingsGoal
+    - 생성
+    - 편집
+    - 삭제
+      - 삭제된 goal에 연결된 saving transactions 처리 정책(유지 + goalId null)
+      - Transactions: savingsGoalId가 null/빈 문자열이면 라벨을 **“Unassigned / 미지정”**으로 표시, 필터/검색에도 정상적으로 걸리게, 미지정 트랜잭션”을 유저가 다시 어떤 goal로 재할당할 수 있게, 특정 goal로 할당된 tx를 Unassigned로 바꾸는 것은 금지
+      - Dashboard: goalId=null로 묶인 savedMinor를 “Unassigned” 한 줄로 보여주기
+      - Add Transaction: Unassigned도 선택 가능하게 열어두되, 기본값은 “첫 번째 goal”로 세팅
