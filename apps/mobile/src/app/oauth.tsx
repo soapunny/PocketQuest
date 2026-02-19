@@ -1,18 +1,21 @@
-import { useEffect } from "react";
+// apps/mobile/src/app/oauth.tsx
+
+import { useEffect, useRef } from "react";
 import { View, Text } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 
 import { supabase } from "./lib/supabase";
 
 export default function OAuthCallbackScreen() {
-  console.log("OAUTH ROUTE MOUNTED");
   const router = useRouter();
+  const handledCodeRef = useRef<string | null>(null);
   const params = useLocalSearchParams<{
     code?: string;
     error?: string;
     error_code?: string;
     error_description?: string;
   }>();
+  const code = typeof params?.code === "string" ? params.code : null;
 
   useEffect(() => {
     (async () => {
@@ -23,27 +26,54 @@ export default function OAuthCallbackScreen() {
             error_code: params?.error_code,
             error_description: params?.error_description,
           });
+          router.replace("/login");
           return;
         }
 
-        const code = params?.code;
-        if (!code || typeof code !== "string") {
+        if (!code) {
           console.error("OAuth callback missing code param:", params);
+          router.replace("/login");
           return;
         }
+
+        if (handledCodeRef.current === code) {
+          // Prevent duplicate exchanges on re-render / StrictMode
+          return;
+        }
+        handledCodeRef.current = code;
 
         console.log("oauth code:", code);
 
-        // ✅ auth code만 넘겨야 함 (PKCE verifier는 storage에서 읽음)
+        // ✅ Only pass auth code (PKCE verifier is read from storage)
         const { error } = await supabase.auth.exchangeCodeForSession(code);
-        if (error) console.error("exchangeCodeForSession error:", error);
+        if (error) {
+          console.error("exchangeCodeForSession error:", error);
+          router.replace("/login");
+          return;
+        }
+
+        // Confirm session exists before entering app
+        const { data } = await supabase.auth.getSession();
+        const hasSession = !!data?.session?.access_token;
+        if (!hasSession) {
+          console.error("OAuth exchange succeeded but session is missing");
+          router.replace("/login");
+          return;
+        }
+
+        router.replace("/");
       } catch (e) {
         console.error("OAuth callback failed:", e);
-      } finally {
-        router.replace("/");
+        router.replace("/login");
       }
     })();
-  }, [params, router]);
+  }, [
+    code,
+    params?.error,
+    params?.error_code,
+    params?.error_description,
+    router,
+  ]);
 
   return (
     <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>

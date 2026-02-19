@@ -1,22 +1,20 @@
 // apps/mobile/src/app/store/dashboardStore.ts
 
 import { create } from "zustand";
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import type { DashboardPayloadDTO } from "@pq/shared/bootstrap";
 import { fetchBootstrap } from "../api/bootstrapApi";
-import type {
-  BootstrapResponseDTO,
-  DashboardPayloadDTO,
-} from "@pq/shared/bootstrap";
-const SERVER_TOKEN_KEY = "pq_server_jwt";
 
-type DashboardState = {
+interface DashboardState {
   dashboard: DashboardPayloadDTO | null;
   isHydrated: boolean;
   isRefreshing: boolean;
-  applyDashboardFromBootstrap: (bootstrap: BootstrapResponseDTO) => void;
-  refreshDashboard: (token?: string) => Promise<void>;
+
+  applyDashboardFromBootstrap: (bootstrap: {
+    dashboard: DashboardPayloadDTO | null;
+  }) => void;
+  refreshDashboard: (supabaseAccessToken: string) => Promise<void>;
   resetDashboard: () => void;
-};
+}
 
 export const useDashboardStore = create<DashboardState>((set) => ({
   dashboard: null,
@@ -25,32 +23,26 @@ export const useDashboardStore = create<DashboardState>((set) => ({
 
   applyDashboardFromBootstrap: (bootstrap) => {
     set({
-      dashboard: bootstrap.dashboard,
-      isHydrated: !!bootstrap.dashboard,
+      dashboard: bootstrap?.dashboard ?? null,
+      isHydrated: true,
     });
   },
 
-  refreshDashboard: async (token) => {
+  refreshDashboard: async (supabaseAccessToken) => {
     try {
       set({ isRefreshing: true });
 
-      const fromArg = String(token ?? "").trim();
-      const fromStorage = String(
-        (await AsyncStorage.getItem(SERVER_TOKEN_KEY).catch(() => null)) ?? ""
-      ).trim();
-
-      const resolvedToken = fromArg || fromStorage;
-
-      if (!resolvedToken) {
+      const token = String(supabaseAccessToken ?? "").trim();
+      if (!token) {
         console.warn("[dashboardStore] refreshDashboard: missing token");
         return;
       }
 
-      const bootstrap = await fetchBootstrap(resolvedToken);
+      const bootstrap = await fetchBootstrap(token);
 
       set({
-        dashboard: bootstrap.dashboard,
-        isHydrated: !!bootstrap.dashboard,
+        dashboard: bootstrap.dashboard ?? null,
+        isHydrated: true,
       });
     } catch (e) {
       console.warn("[dashboardStore] refreshDashboard failed", e);
@@ -59,6 +51,11 @@ export const useDashboardStore = create<DashboardState>((set) => ({
     }
   },
 
-  resetDashboard: () =>
-    set({ dashboard: null, isHydrated: false, isRefreshing: false }),
+  resetDashboard: () => {
+    set({
+      dashboard: null,
+      isHydrated: false,
+      isRefreshing: false,
+    });
+  },
 }));

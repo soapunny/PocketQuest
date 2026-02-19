@@ -3,15 +3,32 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthUser } from "@/lib/auth";
+// Helper to resolve internal user id from request
+async function resolveInternalUserId(
+  request: NextRequest,
+): Promise<string | null> {
+  const authed = await getAuthUser(request);
+
+  if (!authed?.supabaseUserId) {
+    return null;
+  }
+
+  const internal = await prisma.user.findUnique({
+    where: { supabaseUserId: authed.supabaseUserId },
+    select: { id: true },
+  });
+
+  return internal?.id ?? null;
+}
 import {
   patchSavingsGoalsRequestSchema,
   serverPlanDTOSchema,
   upsertSavingsGoalRequestSchema,
-} from "../../../../../../../../../packages/shared/src/plans/types";
+} from "@pq/shared/plans/types";
 import type {
   PatchSavingsGoalsRequestDTO,
   ServerPlanDTO,
-} from "../../../../../../../../../packages/shared/src/plans/types";
+} from "@pq/shared/plans/types";
 
 import { ZodError } from "zod";
 
@@ -63,7 +80,7 @@ function toServerPlanDTO(plan: any): ServerPlanDTO {
     totalBudgetLimitMinor:
       typeof plan?.totalBudgetLimitMinor === "number"
         ? plan.totalBudgetLimitMinor
-        : plan?.totalBudgetLimitMinor ?? null,
+        : (plan?.totalBudgetLimitMinor ?? null),
     currency: plan?.currency,
     homeCurrency: plan?.currency,
     displayCurrency: plan?.currency,
@@ -89,12 +106,11 @@ function toServerPlanDTO(plan: any): ServerPlanDTO {
 // GET /api/plans/[id]/goals/savings - Get savings goals for a specific plan
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: { id: string } },
 ) {
   const planId = params.id;
 
-  const user = getAuthUser(request);
-  const actorUserId = user?.userId;
+  const actorUserId = await resolveInternalUserId(request);
   if (!actorUserId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -118,7 +134,7 @@ export async function GET(
     console.error("Get savings goals error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -126,7 +142,7 @@ export async function GET(
 // POST /api/plans/[id]/goals/savings - Create or update a single savings goal for a specific plan
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: { id: string } },
 ) {
   const planId = params.id;
 
@@ -135,12 +151,11 @@ export async function POST(
   if (!parsedBody.success) {
     return NextResponse.json(
       { error: "Invalid request data", details: parsedBody.error.flatten() },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
-  const user = getAuthUser(request);
-  const actorUserId = user?.userId;
+  const actorUserId = await resolveInternalUserId(request);
   if (!actorUserId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -149,7 +164,7 @@ export async function POST(
   const name = normalizeSavingsName((parsedBody.data as any).name);
   const cleanTarget = Math.max(
     0,
-    Math.trunc(Number((parsedBody.data as any).targetMinor) || 0)
+    Math.trunc(Number((parsedBody.data as any).targetMinor) || 0),
   );
 
   try {
@@ -249,7 +264,7 @@ export async function POST(
     if ((updated as any)?.kind === "LIMIT") {
       return NextResponse.json(
         { error: "Savings goals limit reached" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -259,14 +274,14 @@ export async function POST(
     console.error("Create/update savings goal error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: { id: string } },
 ) {
   const planId = params.id;
 
@@ -278,14 +293,13 @@ export async function PATCH(
     if (e instanceof ZodError) {
       return NextResponse.json(
         { error: "Invalid body", details: e.flatten() },
-        { status: 400 }
+        { status: 400 },
       );
     }
     return NextResponse.json({ error: "Invalid body" }, { status: 400 });
   }
 
-  const user = getAuthUser(request);
-  const actorUserId = user?.userId;
+  const actorUserId = await resolveInternalUserId(request);
   if (!actorUserId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -323,7 +337,7 @@ export async function PATCH(
     // Requirement explicitly uses existingCount (before sync) + creates count.
     const simById = new Set(existingGoals.map((g) => g.id));
     const simByNameLower = new Set(
-      existingGoals.map((g) => normalizeSavingsNameLower(g.name))
+      existingGoals.map((g) => normalizeSavingsNameLower(g.name)),
     );
     let creates = 0;
 
@@ -358,7 +372,7 @@ export async function PATCH(
       const nameLower = normalizeSavingsNameLower(name);
       const targetMinor = Math.max(
         0,
-        Math.trunc(Number((incoming as any).targetMinor) || 0)
+        Math.trunc(Number((incoming as any).targetMinor) || 0),
       );
 
       if (!name) {
@@ -460,14 +474,14 @@ export async function PATCH(
   if ((result as any)?.kind === "LIMIT") {
     return NextResponse.json(
       { error: "Savings goals limit reached" },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
   if ((result as any)?.kind === "BAD_REQUEST") {
     return NextResponse.json(
       { error: (result as any).error ?? "Invalid request" },
-      { status: 400 }
+      { status: 400 },
     );
   }
 

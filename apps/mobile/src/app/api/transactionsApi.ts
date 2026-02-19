@@ -1,7 +1,7 @@
 // apps/mobile/src/app/api/transactionsApi.ts
 
 import { request } from "./http";
-import { canonicalCategoryKeyForServer } from "../../../../../packages/shared/src/transactions/categories";
+import { canonicalCategoryKeyForServer } from "@pq/shared/transactions/categories";
 import type {
   Range,
   TxType,
@@ -10,7 +10,7 @@ import type {
   UpdateTransactionDTO,
   CreateTransactionResponseDTO,
   DeleteTransactionResponseDTO,
-} from "../../../../../packages/shared/src/transactions/types";
+} from "@pq/shared/transactions/types";
 
 function normalizeCreateDTO(input: CreateTransactionDTO): CreateTransactionDTO {
   const type = input.type;
@@ -18,7 +18,7 @@ function normalizeCreateDTO(input: CreateTransactionDTO): CreateTransactionDTO {
     ...input,
     category: canonicalCategoryKeyForServer(
       String((input as any).category ?? ""),
-      type
+      type,
     ),
     // savingsGoalId must only be sent for SAVING
     savingsGoalId: type === "SAVING" ? (input as any).savingsGoalId : undefined,
@@ -30,11 +30,11 @@ function normalizeUpdateDTO(input: UpdateTransactionDTO): UpdateTransactionDTO {
   const type = (input as any).type as TxType | undefined;
   const hasCategory = Object.prototype.hasOwnProperty.call(
     input as any,
-    "category"
+    "category",
   );
   const hasSavingsGoalId = Object.prototype.hasOwnProperty.call(
     input as any,
-    "savingsGoalId"
+    "savingsGoalId",
   );
 
   const out: any = { ...input };
@@ -49,7 +49,7 @@ function normalizeUpdateDTO(input: UpdateTransactionDTO): UpdateTransactionDTO {
     } else {
       out.category = canonicalCategoryKeyForServer(
         String((input as any).category ?? ""),
-        type
+        type,
       );
     }
   }

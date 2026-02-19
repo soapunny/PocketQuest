@@ -5,11 +5,11 @@ import { request } from "./http";
 import type { BootstrapResponseDTO } from "@pq/shared/bootstrap";
 
 export async function fetchBootstrap(
-  token: string
+  supabaseAccessToken: string,
 ): Promise<BootstrapResponseDTO> {
-  if (!token) {
+  if (!supabaseAccessToken) {
     throw new Error(
-      "bootstrap failed: missing auth token (expected server JWT)"
+      "bootstrap failed: missing auth token (expected Supabase access token)",
     );
   }
 
@@ -20,7 +20,7 @@ export async function fetchBootstrap(
     method: "GET",
     headers: {
       Accept: "application/json",
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${supabaseAccessToken}`,
     },
   });
 }

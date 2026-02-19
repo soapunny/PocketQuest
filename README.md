@@ -241,6 +241,12 @@ PocketQuest prioritizes correctness, clarity, and long-term extensibility.
 ## 정책
 
 - General
+  - Logout:
+    - Navigation reset은 별도로 호출하지 않아도 된다.
+      - 이유: RootNavigator가 Auth 상태에 따라 Navigator 트리를 교체한다.
+  - 로그아웃 시 보안/잔재 방지 정책:
+    - authStore.signOut()이 serverToken을 지우고 AsyncStorage에서도 제거한다.
+    - token이 없어지면 각 store가 민감 상태를 즉시 clear 한다 (transactionsStore/planStore 등).
 - Cashflow
   - UI
     - 메인 Cashflow = Income − Expense (Operational Cashflow)
@@ -249,7 +255,7 @@ PocketQuest prioritizes correctness, clarity, and long-term extensibility.
     - 그리고 목표(Goal)별 누적 저축액 목록(타겟/진행률 없이 “금액만”)
   - Rolling은 아직 구현하지 말고, 구조만 확장 가능하게
   - Carryout
-    - Carryover 범위: Rolling (최초 시작부터 누적 net)
+    - Carryover 범위: Rolling (Rolling을 activate 한 시점부터 누적 net)
       - 특정 달만 이월 X
       - 항상 “전체 기간 누적 결과”가 현재에 반영
     - 과거 tx 수정 시: 이후 모든 기간 재계산
@@ -281,3 +287,46 @@ PocketQuest prioritizes correctness, clarity, and long-term extensibility.
       - Transactions: savingsGoalId가 null/빈 문자열이면 라벨을 **“Unassigned / 미지정”**으로 표시, 필터/검색에도 정상적으로 걸리게, 미지정 트랜잭션”을 유저가 다시 어떤 goal로 재할당할 수 있게, 특정 goal로 할당된 tx를 Unassigned로 바꾸는 것은 금지
       - Dashboard: goalId=null로 묶인 savedMinor를 “Unassigned” 한 줄로 보여주기
       - Add Transaction: Unassigned도 선택 가능하게 열어두되, 기본값은 “첫 번째 goal”로 세팅
+
+### Auth
+
+- Authentication Architecture:
+  - PocketQuest uses **Supabase Auth** as the OAuth provider handler.
+  - The mobile app performs `supabase.auth.signInWithOAuth(...)`.
+  - Supabase verifies Google/Kakao identity and issues a session:
+    - `access_token` (JWT)
+    - `refresh_token`
+  - The backend does NOT issue a separate PocketQuest JWT.
+  - The Supabase `access_token` is the single session token used for authenticated API calls.
+
+- Server Verification Policy:
+  - Every authenticated API request MUST include:
+    - `Authorization: Bearer <supabase_access_token>`
+  - The backend MUST validate the Supabase `access_token` before trusting identity.
+    - Recommended: Supabase SDK `auth.getUser(accessToken)`
+  - The backend derives identity strictly from verified Supabase claims:
+    - `supabaseUser.id` (SSOT)
+    - `supabaseUser.email`
+    - provider identity information
+  - The backend must NOT trust client-sent identity fields.
+
+- User Identity Policy (Final):
+  - **Supabase user id (`supabaseUser.id`) is the single source of truth (SSOT).**
+  - Internal users are looked up strictly by `supabaseUserId`.
+  - `User.email` is enforced as `@unique` at the database level.
+  - Automatic email-based account linking is NOT allowed.
+  - If a verified Supabase user has an email that already exists in the database
+    but is associated with a different `supabaseUserId`, the server MUST:
+    - Reject the login attempt
+    - Return `409 Conflict`
+
+- Error Mapping Policy:
+  - Prisma unique constraint violations (`P2002`) are mapped to `409 Conflict`.
+  - Explicit business rule violations (e.g. different login method) return `409 Conflict`.
+  - Invalid or expired Supabase tokens return `401 Unauthorized`.
+  - All other unexpected errors return `500 Internal Server Error`.
+
+- Security Principle:
+  - Supabase is the source of truth for authentication.
+  - The backend relies only on verified Supabase identity.
+  - Duplicate accounts with the same email but different providers are blocked by policy and DB constraints.

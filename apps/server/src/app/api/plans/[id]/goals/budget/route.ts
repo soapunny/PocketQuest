@@ -7,18 +7,30 @@ import {
   patchBudgetGoalsRequestSchema,
   serverPlanDTOSchema,
   upsertBudgetGoalRequestSchema,
-} from "../../../../../../../../../packages/shared/src/plans/types";
+} from "@pq/shared/plans/types";
 import type {
   PatchBudgetGoalsRequestDTO,
   ServerPlanDTO,
-} from "../../../../../../../../../packages/shared/src/plans/types";
+} from "@pq/shared/plans/types";
 import { ZodError } from "zod";
 
 type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
 
-function requireActorUserId(request: NextRequest): string | null {
-  const user = getAuthUser(request);
-  return user?.userId ?? null;
+async function requireActorUserId(
+  request: NextRequest,
+): Promise<string | null> {
+  const authed = await getAuthUser(request);
+
+  if (!authed?.supabaseUserId) {
+    return null;
+  }
+
+  const internal = await prisma.user.findUnique({
+    where: { supabaseUserId: authed.supabaseUserId },
+    select: { id: true },
+  });
+
+  return internal?.id ?? null;
 }
 
 function normalizeCategoryKey(v: unknown) {
@@ -107,7 +119,7 @@ export async function GET(
 ) {
   const planId = params.id;
 
-  const actorUserId = requireActorUserId(request);
+  const actorUserId = await requireActorUserId(request);
   if (!actorUserId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -152,7 +164,7 @@ export async function POST(
     );
   }
 
-  const actorUserId = requireActorUserId(request);
+  const actorUserId = await requireActorUserId(request);
   if (!actorUserId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -255,7 +267,7 @@ export async function PATCH(
     return NextResponse.json({ error: "Invalid body" }, { status: 400 });
   }
 
-  const actorUserId = requireActorUserId(request);
+  const actorUserId = await requireActorUserId(request);
   if (!actorUserId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

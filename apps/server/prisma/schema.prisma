@@ -51,9 +51,14 @@ enum CashflowCarryoverMode {
 
 model User {
   id              String  @id @default(cuid()) //primary key/auto-create unique id(cuid)
+
+  // Supabase UUID (SSOT for identity)
+  supabaseUserId  String  @unique
+
   email           String? @unique //unique constraint/email is required
   name            String? // nickname
   profileImageUri String? // profile image url
+  
   // IANA timezone identifier (e.g., "America/New_York") used to compute plan period boundaries.
   timeZone        String  @default("America/New_York") //default value: America/New_York
 
@@ -78,6 +83,9 @@ model User {
 
   activePlanId String? @unique
   activePlan   Plan?   @relation("ActivePlan", fields: [activePlanId], references: [id], onDelete: SetNull)
+
+  // 🔥 Ensure provider identity uniqueness
+  @@unique([provider, providerId])
 }
 
 model Transaction {

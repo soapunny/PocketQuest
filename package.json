@@ -5,7 +5,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev:mobile": "pnpm --filter ./apps/mobile start",
+    "dev:mobile": "pnpm -C apps/mobile start --tunnel",
+    "dev:mobile_expo": "pnpm --filter ./apps/mobile start",
     "dev:server": "pnpm --filter ./apps/server dev",
     "dev:api": "pnpm --filter ./apps/api dev",
     "dev": "pnpm -r --parallel dev"

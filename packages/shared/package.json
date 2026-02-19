@@ -5,6 +5,8 @@
   "types": "src/index.ts",
   "exports": {
     ".": "./src/index.ts",
+    "./auth": "./src/auth/index.ts",
+    "./auth/*": "./src/auth/*",
     "./bootstrap": "./src/bootstrap/index.ts",
     "./bootstrap/*": "./src/bootstrap/*",
     "./transactions": "./src/transactions/index.ts",

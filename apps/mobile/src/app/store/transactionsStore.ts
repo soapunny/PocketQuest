@@ -17,8 +17,8 @@ import type {
   TxType,
   CreateTransactionDTO,
   UpdateTransactionDTO,
-} from "../../../../../packages/shared/src/transactions/types";
-import type { Currency } from "../../../../../packages/shared/src/money/types";
+} from "@pq/shared/transactions/types";
+import type { Currency } from "@pq/shared/money/types";
 import { transactionsApi } from "../api/transactionsApi";
 import { useAuthStore } from "./authStore";
 import { useBootStrap } from "../hooks/useBootStrap";
@@ -69,8 +69,8 @@ function normalizeTx(tx: Transaction | TransactionDTO): Transaction {
     typeof anyTx?.occurredAtISO === "string" && anyTx.occurredAtISO
       ? String(anyTx.occurredAtISO)
       : typeof anyTx?.occurredAt === "string" && anyTx.occurredAt
-      ? String(anyTx.occurredAt)
-      : "";
+        ? String(anyTx.occurredAt)
+        : "";
 
   // Build a clean domain Transaction (id/userId required)
   return {
@@ -96,22 +96,22 @@ function normalizeTx(tx: Transaction | TransactionDTO): Transaction {
       anyTx?.note === undefined
         ? undefined
         : anyTx.note === null
-        ? null
-        : String(anyTx.note),
+          ? null
+          : String(anyTx.note),
 
     savingsGoalId:
       anyTx?.savingsGoalId === undefined
         ? undefined
         : anyTx.savingsGoalId === null
-        ? null
-        : String(anyTx.savingsGoalId),
+          ? null
+          : String(anyTx.savingsGoalId),
 
     savingsGoalName:
       anyTx?.savingsGoalName === undefined
         ? undefined
         : anyTx.savingsGoalName === null
-        ? null
-        : String(anyTx.savingsGoalName),
+          ? null
+          : String(anyTx.savingsGoalName),
 
     // Keep server-read field optional for debugging/compat if present
     occurredAt:
@@ -132,10 +132,11 @@ export function TransactionsProvider({
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<TransactionsSummary | null>(null);
   const [filterInfo, setFilterInfo] = useState<TransactionsFilterInfo | null>(
-    null
+    null,
   );
 
-  const { token } = useAuthStore();
+  const { supabaseAccessToken } = useAuthStore();
+  const token = supabaseAccessToken ?? "";
   const { runBootstrap } = useBootStrap();
 
   const load = useCallback(
@@ -167,13 +168,13 @@ export function TransactionsProvider({
         setRangeState(r);
       } catch (e: any) {
         setError(
-          e?.message ? String(e.message) : "Failed to load transactions"
+          e?.message ? String(e.message) : "Failed to load transactions",
         );
       } finally {
         setLoading(false);
       }
     },
-    [range, token]
+    [range, token],
   );
 
   const refresh = useCallback(async () => {
@@ -184,11 +185,10 @@ export function TransactionsProvider({
     (r: Range) => {
       void load(r);
     },
-    [load]
+    [load],
   );
 
   useEffect(() => {
-    // When logging out: immediately clear sensitive state.
     if (!token) {
       setTransactions([]);
       setSummary(null);
@@ -197,10 +197,8 @@ export function TransactionsProvider({
       setError(null);
       return;
     }
-
-    // When logging in (token becomes available): load current range.
     void load(range);
-  }, [token]);
+  }, [token, load, range]);
 
   const createTransaction = useCallback(
     async (tx: CreateTransactionDTO) => {
@@ -227,7 +225,7 @@ export function TransactionsProvider({
         setLoading(false);
       }
     },
-    [token, refresh, runBootstrap]
+    [token, refresh, runBootstrap],
   );
 
   const updateTransaction = useCallback(
@@ -274,7 +272,7 @@ export function TransactionsProvider({
         setLoading(false);
       }
     },
-    [token, refresh, runBootstrap, transactions]
+    [token, refresh, runBootstrap, transactions],
   );
 
   const deleteTransaction = useCallback(
@@ -298,7 +296,7 @@ export function TransactionsProvider({
         setLoading(false);
       }
     },
-    [token, refresh, runBootstrap]
+    [token, refresh, runBootstrap],
   );
 
   const value = useMemo(
@@ -329,7 +327,7 @@ export function TransactionsProvider({
       createTransaction,
       updateTransaction,
       deleteTransaction,
-    ]
+    ],
   );
 
   return React.createElement(TransactionsContext.Provider, { value }, children);

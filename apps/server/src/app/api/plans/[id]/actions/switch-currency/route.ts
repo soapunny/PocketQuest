@@ -1,10 +1,27 @@
 // apps/src/app/api/plans/[id]/actions/switch-currency/route.ts
+
 import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/prisma";
 import { CurrencyCode, PeriodType } from "@prisma/client";
 
 import { getAuthUser } from "@/lib/auth";
+
+async function resolveInternalUserId(req: Request): Promise<string | null> {
+  const authed = await getAuthUser(req as any);
+
+  if (!authed?.supabaseUserId) {
+    return null;
+  }
+
+  const internal = await prisma.user.findUnique({
+    where: { supabaseUserId: authed.supabaseUserId },
+    select: { id: true },
+  });
+
+  return internal?.id ?? null;
+}
+
 import { ensureActivePlan } from "@/lib/plan/activePlan";
 import { buildPeriodForNowUTC } from "@/lib/plan/periodFactory";
 import { convertPlanMinorPayload } from "@/lib/plan/goalsPolicy";
@@ -14,11 +31,11 @@ import {
   switchCurrencyRequestSchema,
   type GoalsMode,
   type SwitchMode,
-} from "../../../../../../../../../packages/shared/src/plans/types";
+} from "@pq/shared/plans/types";
 import type {
   ServerPlanDTO,
   SwitchCurrencyRequestDTO,
-} from "../../../../../../../../../packages/shared/src/plans/types";
+} from "@pq/shared/plans/types";
 import { ZodError } from "zod";
 
 export const runtime = "nodejs";
@@ -91,8 +108,8 @@ function toServerPlanDTO(plan: any, timeZone: string): ServerPlanDTO {
 
 export async function POST(req: Request) {
   try {
-    const auth = getAuthUser(req as any);
-    if (!auth?.userId) {
+    const userId = await resolveInternalUserId(req);
+    if (!userId) {
       return jsonError(401, "Unauthorized");
     }
 
@@ -114,11 +131,11 @@ export async function POST(req: Request) {
     const goalsMode: GoalsMode = body.goalsMode ?? "COPY_AS_IS";
 
     // Active plan (with goals)
-    const activePlan = await ensureActivePlan(prisma, auth.userId);
+    const activePlan = await ensureActivePlan(prisma, userId);
 
     // Timezone source of truth: request -> user -> UTC
     const user = await prisma.user.findUnique({
-      where: { id: auth.userId },
+      where: { id: userId },
       select: { timeZone: true },
     });
 
@@ -152,13 +169,13 @@ export async function POST(req: Request) {
       const plan = await tx.plan.upsert({
         where: {
           userId_periodType_periodStart: {
-            userId: auth.userId,
+            userId: userId,
             periodType: targetPeriodType,
             periodStart: periodStartUTC,
           },
         },
         create: {
-          userId: auth.userId,
+          userId: userId,
           periodType: targetPeriodType,
           periodAnchor: periodAnchorUTC,
           periodStart: periodStartUTC,
@@ -222,7 +239,7 @@ export async function POST(req: Request) {
       }
 
       await tx.user.update({
-        where: { id: auth.userId },
+        where: { id: userId },
         data: { activePlanId: plan.id },
       });
 

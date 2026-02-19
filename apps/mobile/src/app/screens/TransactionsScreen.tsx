@@ -24,9 +24,10 @@ import type {
   Range,
   Transaction,
   UpdateTransactionDTO,
-} from "../../../../../packages/shared/src/transactions/types";
-import type { Currency } from "../../../../../packages/shared/src/money/types";
+} from "@pq/shared/transactions/types";
+import type { Currency } from "@pq/shared/money/types";
 
+import { useAuthStore } from "../store/authStore";
 import { useTransactions } from "../store/transactionsStore";
 // bootstrap handled in transactions store
 import { usePlan } from "../store/planStore";
@@ -36,7 +37,7 @@ import { categoryLabelText } from "../domain/categories/categoryLabels";
 import {
   EXPENSE_CATEGORY_KEYS,
   INCOME_CATEGORY_KEYS,
-} from "../../../../../packages/shared/src/transactions/categories";
+} from "@pq/shared/transactions/categories";
 import {
   formatAmountTextFromMinor,
   parseInputToMinor,
@@ -110,6 +111,8 @@ function TransactionEditModal(props: {
 export default function TransactionsScreen() {
   const txStore = useTransactions();
   const { refreshDashboard } = useDashboardStore();
+  const auth = useAuthStore();
+  const supabaseAccessToken = auth.supabaseAccessToken ?? "";
   const {
     transactions,
     loading: isLoading,
@@ -136,7 +139,7 @@ export default function TransactionsScreen() {
         } catch (error) {
           console.error(
             "[TransactionsScreen] failed to load transactions from server",
-            error
+            error,
           );
         }
       })();
@@ -145,7 +148,7 @@ export default function TransactionsScreen() {
       return () => {
         isActive = false;
       };
-    }, [periodFilter, loadTransactions])
+    }, [periodFilter, loadTransactions]),
   );
 
   const planStore = usePlan() as any;
@@ -157,7 +160,7 @@ export default function TransactionsScreen() {
 
   const savingsGoalOptions = useMemo(
     () => ["", ...savingsGoals.map((g) => String(g.id))],
-    [savingsGoals]
+    [savingsGoals],
   );
 
   const isKo = language === "ko";
@@ -183,7 +186,7 @@ export default function TransactionsScreen() {
 
   const editingTx = useMemo(
     () => transactions.find((t) => t.id === editingId) ?? null,
-    [transactions, editingId]
+    [transactions, editingId],
   );
 
   const [type, setType] = useState<TxType>("EXPENSE");
@@ -206,8 +209,8 @@ export default function TransactionsScreen() {
       nextType === "EXPENSE"
         ? (EXPENSE_CATEGORY_KEYS as readonly string[])
         : nextType === "INCOME"
-        ? (INCOME_CATEGORY_KEYS as readonly string[])
-        : (savingsGoalOptions as readonly string[]);
+          ? (INCOME_CATEGORY_KEYS as readonly string[])
+          : (savingsGoalOptions as readonly string[]);
 
     if (opts.length === 0) return "";
     if (opts.includes(current)) return current;
@@ -215,8 +218,8 @@ export default function TransactionsScreen() {
     return nextType === "EXPENSE"
       ? EXPENSE_CATEGORY_KEYS[0]
       : nextType === "INCOME"
-      ? INCOME_CATEGORY_KEYS[0]
-      : String(opts[0]);
+        ? INCOME_CATEGORY_KEYS[0]
+        : String(opts[0]);
   }
 
   const filteredTransactions = useMemo(() => {
@@ -314,7 +317,7 @@ export default function TransactionsScreen() {
         tr("Discard changes?", "변경사항을 버릴까요?"),
         tr(
           "You have unsaved changes. If you close now, they will be lost.",
-          "저장하지 않은 변경사항이 있어요. 지금 닫으면 사라집니다."
+          "저장하지 않은 변경사항이 있어요. 지금 닫으면 사라집니다.",
         ),
         [
           { text: tr("Keep editing", "계속 편집"), style: "cancel" },
@@ -323,7 +326,7 @@ export default function TransactionsScreen() {
             style: "destructive",
             onPress: () => closeEdit(),
           },
-        ]
+        ],
       );
       return;
     }
@@ -380,8 +383,8 @@ export default function TransactionsScreen() {
     type !== "SAVING"
       ? true
       : canSelectUnassignedNow
-      ? true
-      : !!String(savingsGoalId ?? "").trim();
+        ? true
+        : !!String(savingsGoalId ?? "").trim();
   const canSave =
     !!editingId &&
     !isLoading &&
@@ -398,7 +401,7 @@ export default function TransactionsScreen() {
     if (!absMinor || absMinor <= 0) {
       Alert.alert(
         tr("Invalid amount", "금액 오류"),
-        tr("Please enter a positive amount.", "0보다 큰 금액을 입력해 주세요.")
+        tr("Please enter a positive amount.", "0보다 큰 금액을 입력해 주세요."),
       );
       return;
     }
@@ -415,8 +418,8 @@ export default function TransactionsScreen() {
           tr("Selection not allowed", "선택할 수 없어요"),
           tr(
             "You cannot change an assigned savings transaction to Unassigned.",
-            "저축 목표가 지정된 거래를 '미지정'으로 변경할 수 없어요."
-          )
+            "저축 목표가 지정된 거래를 '미지정'으로 변경할 수 없어요.",
+          ),
         );
         return;
       }
@@ -441,7 +444,7 @@ export default function TransactionsScreen() {
       await updateTransaction(editingTx.id, patch);
 
       // Refresh dashboard so edits reflect immediately.
-      await refreshDashboard();
+      await refreshDashboard(supabaseAccessToken);
 
       closeEdit();
     } catch (e) {
@@ -450,8 +453,8 @@ export default function TransactionsScreen() {
         tr("Update failed", "수정 실패"),
         tr(
           "Could not save changes. Please try again.",
-          "저장에 실패했어요. 다시 시도해 주세요."
-        )
+          "저장에 실패했어요. 다시 시도해 주세요.",
+        ),
       );
     } finally {
     }
@@ -464,7 +467,7 @@ export default function TransactionsScreen() {
       await deleteTransaction(editingTx.id);
 
       // Refresh dashboard so deletions reflect immediately.
-      await refreshDashboard();
+      await refreshDashboard(supabaseAccessToken);
 
       closeEdit();
     } catch (e) {
@@ -473,8 +476,8 @@ export default function TransactionsScreen() {
         tr("Delete failed", "삭제 실패"),
         tr(
           "Could not delete. Please try again.",
-          "삭제에 실패했어요. 다시 시도해 주세요."
-        )
+          "삭제에 실패했어요. 다시 시도해 주세요.",
+        ),
       );
     } finally {
     }
@@ -496,7 +499,7 @@ export default function TransactionsScreen() {
             void deleteEditingTransaction();
           },
         },
-      ]
+      ],
     );
   }
 
@@ -509,7 +512,7 @@ export default function TransactionsScreen() {
             title={tr("Transactions", "거래 내역")}
             subtitle={tr(
               "Filter, search, and tap a card to edit.",
-              "필터/검색 후 카드를 눌러 수정하세요."
+              "필터/검색 후 카드를 눌러 수정하세요.",
             )}
             rightSlot={
               <View style={styles.resultPill}>
@@ -578,7 +581,7 @@ export default function TransactionsScreen() {
               onChangeText={setSearchText}
               placeholder={tr(
                 "Search by category or note",
-                "카테고리/메모로 검색"
+                "카테고리/메모로 검색",
               )}
               autoCorrect={false}
               style={styles.searchInput}
@@ -672,7 +675,7 @@ export default function TransactionsScreen() {
                   <Text style={styles.metaText}>
                     {tr(
                       `Base totals use ${homeCurrency}. This transaction is in ${cur}.`,
-                      `기준 합계 통화는 ${homeCurrency}이고, 이 거래는 ${cur}로 기록되어 있어요.`
+                      `기준 합계 통화는 ${homeCurrency}이고, 이 거래는 ${cur}로 기록되어 있어요.`,
                     )}
                   </Text>
                 ) : null}
@@ -700,7 +703,7 @@ export default function TransactionsScreen() {
           <Text style={styles.emptyText}>
             {tr(
               "No matching transactions. Try changing filters or search.",
-              "조건에 맞는 거래가 없어요. 필터나 검색어를 바꿔보세요."
+              "조건에 맞는 거래가 없어요. 필터나 검색어를 바꿔보세요.",
             )}
           </Text>
         }
@@ -747,8 +750,8 @@ export default function TransactionsScreen() {
                   {t === "EXPENSE"
                     ? tr("Expense", "지출")
                     : t === "INCOME"
-                    ? tr("Income", "수입")
-                    : tr("Saving", "저축")}
+                      ? tr("Income", "수입")
+                      : tr("Saving", "저축")}
                 </Text>
               </Pressable>
             );
@@ -759,7 +762,7 @@ export default function TransactionsScreen() {
             ⚠️{" "}
             {tr(
               "Changing type will move this transaction between Budget and Savings.",
-              "유형을 변경하면 이 거래가 예산/저축 합계에 다르게 반영돼요."
+              "유형을 변경하면 이 거래가 예산/저축 합계에 다르게 반영돼요.",
             )}
           </Text>
         ) : null}
@@ -784,7 +787,7 @@ export default function TransactionsScreen() {
           <Text style={{ alignSelf: "center", color: "#666" }}>
             {tr(
               "(currency is set when created)",
-              "(통화는 생성 시점에 결정돼요)"
+              "(통화는 생성 시점에 결정돼요)",
             )}
           </Text>
         </View>
@@ -806,15 +809,15 @@ export default function TransactionsScreen() {
           {type === "SAVING"
             ? tr("Savings Goal", "저축 목표")
             : type === "INCOME"
-            ? tr("Income Category", "수입 카테고리")
-            : tr("Category", "카테고리")}
+              ? tr("Income Category", "수입 카테고리")
+              : tr("Category", "카테고리")}
         </Text>
         <View style={styles.categoryWrap}>
           {categoryOptions.length === 0 ? (
             <Text style={{ color: "#777" }}>
               {tr(
                 "No savings goals yet. Create one in Plan > Savings.",
-                "저축 목표가 아직 없어요. Plan > Savings에서 만들어 주세요."
+                "저축 목표가 아직 없어요. Plan > Savings에서 만들어 주세요.",
               )}
             </Text>
           ) : (

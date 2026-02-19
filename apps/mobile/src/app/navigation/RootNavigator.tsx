@@ -1,12 +1,21 @@
+// apps/mobile/src/app/navigation/RootNavigator.tsx
+// 앱의 화면 흐름 정책 관리
+
 import { View, ActivityIndicator, StyleSheet } from "react-native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
+
+//RootNavigator는 Auth에만 의존, Plan/Transactions에는 의존하지 않음
 import { useAuthStore } from "../store/authStore";
+
+// Tap 바깥에서 보여지는 화면들
+import LoginScreen from "../screens/LoginScreen"; // 인증
+import BootstrapScreen from "../screens/BootstrapScreen"; // 인증 후 데이터 준비
+import AddTransactionModal from "../screens/AddTransactionModal"; // 거래 추가
+import SettingsScreen from "../screens/SettingsScreen"; // 설정
+import ProfileImageModal from "../screens/ProfileImageModal"; // 프로필 이미지 수정
+
+// Tap 바 안에서 보여지는 화면들(Dashboard, Transactions, Plan, Profile)
 import TabNavigator from "./TabNavigator";
-import LoginScreen from "../screens/LoginScreen";
-import BootstrapScreen from "../screens/BootstrapScreen";
-import AddTransactionModal from "../screens/AddTransactionModal";
-import SettingsScreen from "../screens/SettingsScreen";
-import ProfileImageModal from "../screens/ProfileImageModal";
 
 export type RootStackParamList = {
   Login: undefined;

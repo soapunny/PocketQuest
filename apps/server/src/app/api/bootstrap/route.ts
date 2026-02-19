@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthUser } from "@/lib/auth";
 import { buildBootstrapPayload } from "@/lib/bootstrap/buildBootstrapPayload";
 import { z } from "zod";
+import { prisma } from "@/lib/prisma";
 
 const bootstrapQuerySchema = z.object({
   // 대시보드 월 리스트를 몇 개월치 준비할지 (기본 3)
@@ -13,12 +14,24 @@ const bootstrapQuerySchema = z.object({
 });
 
 async function handleBootstrap(request: NextRequest) {
-  const authed = getAuthUser(request);
-  const userId = authed?.userId;
+  const authed = await getAuthUser(request);
+  const supabaseUserId = authed?.supabaseUserId;
 
-  if (!userId) {
+  if (!supabaseUserId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  // Map Supabase UUID -> internal User.id (cuid)
+  const internal = await prisma.user.findUnique({
+    where: { supabaseUserId },
+    select: { id: true },
+  });
+
+  if (!internal?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const userId = internal.id;
 
   const url = new URL(request.url);
   const parsedQuery = bootstrapQuerySchema.safeParse({
@@ -29,7 +42,7 @@ async function handleBootstrap(request: NextRequest) {
   if (!parsedQuery.success) {
     return NextResponse.json(
       { error: "Invalid query", details: parsedQuery.error.flatten() },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -46,7 +59,7 @@ async function handleBootstrap(request: NextRequest) {
     console.error("Bootstrap error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

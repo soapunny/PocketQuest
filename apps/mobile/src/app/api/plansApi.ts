@@ -13,7 +13,7 @@ import type {
   UpsertSavingsGoalRequestDTO,
   PatchSavingsGoalsRequestDTO,
   SwitchCurrencyRequestDTO,
-} from "../../../../../packages/shared/src/plans/types";
+} from "@pq/shared/plans/types";
 
 function normalizeServerPlanDTO(payload: any): ServerPlanDTO {
   // Server responses may wrap the plan under { plan }, or use legacy keys like { activePlan }.
@@ -47,7 +47,7 @@ export const plansApi = {
   // Optional: monthly list (dashboard/analytics)
   getMonthlyList: async (
     token: string,
-    params: { at: string; months: number | string }
+    params: { at: string; months: number | string },
   ) => {
     const qs = new URLSearchParams();
     qs.set("periodType", "MONTHLY");
@@ -61,7 +61,7 @@ export const plansApi = {
 
   update: async (
     token: string,
-    data: PatchPlanDTO
+    data: PatchPlanDTO,
   ): Promise<{ plan: ServerPlanDTO }> => {
     const res = await request<any>("/api/plans", {
       method: "PATCH",
@@ -81,14 +81,14 @@ export const plansApi = {
       `/api/plans/${planId}/goals/budget`,
       {
         headers: { Authorization: `Bearer ${token}` },
-      }
+      },
     );
   },
 
   upsertBudgetGoal: async (
     token: string,
     planId: string,
-    data: UpsertBudgetGoalRequestDTO
+    data: UpsertBudgetGoalRequestDTO,
   ): Promise<{ plan: ServerPlanDTO }> => {
     const res = await request<any>(`/api/plans/${planId}/goals/budget`, {
       method: "POST",
@@ -101,7 +101,7 @@ export const plansApi = {
   patchBudgetGoals: async (
     token: string,
     planId: string,
-    data: PatchBudgetGoalsRequestDTO
+    data: PatchBudgetGoalsRequestDTO,
   ): Promise<{ plan: ServerPlanDTO }> => {
     const res = await request<any>(`/api/plans/${planId}/goals/budget`, {
       method: "PATCH",
@@ -121,14 +121,14 @@ export const plansApi = {
       `/api/plans/${planId}/goals/savings`,
       {
         headers: { Authorization: `Bearer ${token}` },
-      }
+      },
     );
   },
 
   upsertSavingsGoal: async (
     token: string,
     planId: string,
-    data: UpsertSavingsGoalRequestDTO
+    data: UpsertSavingsGoalRequestDTO,
   ): Promise<{ plan: ServerPlanDTO }> => {
     const res = await request<any>(`/api/plans/${planId}/goals/savings`, {
       method: "POST",
@@ -141,7 +141,7 @@ export const plansApi = {
   patchSavingsGoals: async (
     token: string,
     planId: string,
-    data: PatchSavingsGoalsRequestDTO
+    data: PatchSavingsGoalsRequestDTO,
   ): Promise<{ plan: ServerPlanDTO }> => {
     const res = await request<any>(`/api/plans/${planId}/goals/savings`, {
       method: "PATCH",
@@ -176,7 +176,7 @@ export const plansApi = {
   switchCurrency: async (
     token: string,
     planId: string,
-    data: SwitchCurrencyRequestDTO
+    data: SwitchCurrencyRequestDTO,
   ): Promise<{ plan: ServerPlanDTO }> => {
     const res = await request<any>(
       `/api/plans/${planId}/actions/switch-currency`,
@@ -184,7 +184,7 @@ export const plansApi = {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
         body: JSON.stringify(data),
-      }
+      },
     );
     return normalizePlanEnvelope(res);
   },

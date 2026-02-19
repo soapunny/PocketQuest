@@ -5,17 +5,17 @@ import { prisma } from "@/lib/prisma";
 import { getAuthUser } from "@/lib/auth";
 import { z, ZodError } from "zod";
 import { Prisma } from "@prisma/client";
-import { Currency } from "../../../../../../../packages/shared/src/money/types";
+import { Currency } from "@pq/shared/money/types";
 import {
   transactionUpdateSchema,
   TransactionDTO,
   TxType,
-} from "../../../../../../../packages/shared/src/transactions/types";
+} from "@pq/shared/transactions/types";
 import {
   EXPENSE_CATEGORY_KEYS,
   INCOME_CATEGORY_KEYS,
   canonicalCategoryKeyForServer,
-} from "../../../../../../../packages/shared/src/transactions/categories";
+} from "@pq/shared/transactions/categories";
 
 const SAVING_CATEGORY_KEY = "savings" as const;
 
@@ -81,8 +81,39 @@ function getDevUserId(request: NextRequest, body?: unknown): string | null {
   return null;
 }
 
+async function resolveInternalUserId(
+  request: NextRequest,
+  body?: unknown,
+): Promise<{ userId: string | null; devHint: string | null }> {
+  const authed = await getAuthUser(request);
+
+  const devUserId = !authed ? getDevUserId(request, body) : null;
+
+  if (authed?.supabaseUserId) {
+    const internal = await prisma.user.findUnique({
+      where: { supabaseUserId: authed.supabaseUserId },
+      select: { id: true },
+    });
+
+    if (internal?.id) {
+      return { userId: internal.id, devHint: null };
+    }
+
+    return { userId: null, devHint: null };
+  }
+
+  if (devUserId) {
+    return {
+      userId: devUserId,
+      devHint: "DEV: pass x-dev-user-id header or ?userId=... (or body.userId)",
+    };
+  }
+
+  return { userId: null, devHint: null };
+}
+
 async function resolveUserPlanIdForGoals(
-  userId: string
+  userId: string,
 ): Promise<string | null> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -127,22 +158,19 @@ async function assertSavingsGoalOwnership(params: {
 // GET /api/transactions/[id] - Get single transaction
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: { id: string } },
 ) {
-  const user = getAuthUser(request);
-  const devUserId = !user ? getDevUserId(request) : null;
-  const userId = user?.userId ?? devUserId;
+  const { userId, devHint } = await resolveInternalUserId(request);
 
   if (!userId) {
     return NextResponse.json(
       {
         error: "Unauthorized",
-        hint:
-          process.env.NODE_ENV !== "production"
-            ? "DEV: pass x-dev-user-id header or ?userId=..."
-            : undefined,
+        ...(process.env.NODE_ENV !== "production" && devHint
+          ? { hint: devHint }
+          : {}),
       },
-      { status: 401 }
+      { status: 401 },
     );
   }
 
@@ -184,7 +212,7 @@ export async function GET(
     console.error("Get transaction error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -192,26 +220,24 @@ export async function GET(
 // PATCH /api/transactions/[id] - Update transaction
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: { id: string } },
 ) {
-  const user = getAuthUser(request);
+  // const user = getAuthUser(request);
 
   try {
     const body: unknown = await request.json();
 
-    const devUserId = !user ? getDevUserId(request, body) : null;
-    const userId = user?.userId ?? devUserId;
+    const { userId, devHint } = await resolveInternalUserId(request, body);
 
     if (!userId) {
       return NextResponse.json(
         {
           error: "Unauthorized",
-          hint:
-            process.env.NODE_ENV !== "production"
-              ? "DEV: pass x-dev-user-id header or include userId in body"
-              : undefined,
+          ...(process.env.NODE_ENV !== "production" && devHint
+            ? { hint: devHint }
+            : {}),
         },
-        { status: 401 }
+        { status: 401 },
       );
     }
 
@@ -269,7 +295,7 @@ export async function PATCH(
     // Canonicalize category to server-accepted keys (aliases/casing)
     let category = canonicalCategoryKeyForServer(
       String(nextCategoryRaw ?? "").trim(),
-      nextType as TxType
+      nextType as TxType,
     );
 
     // Defaults are handled by shared SSOT (`canonicalCategoryKeyForServer`).
@@ -287,7 +313,7 @@ export async function PATCH(
       if (!savingsGoalId) {
         return NextResponse.json(
           { error: "savingsGoalId is required for SAVING" },
-          { status: 400 }
+          { status: 400 },
         );
       }
 
@@ -297,13 +323,13 @@ export async function PATCH(
         if (err?.code === "PLAN_NOT_FOUND") {
           return NextResponse.json(
             { error: "Plan not found" },
-            { status: 404 }
+            { status: 404 },
           );
         }
         if (err?.code === "SAVINGS_GOAL_FORBIDDEN") {
           return NextResponse.json(
             { error: "savingsGoalId does not belong to you" },
-            { status: 403 }
+            { status: 403 },
           );
         }
         throw err;
@@ -322,7 +348,7 @@ export async function PATCH(
               error: "Invalid expense category",
               allowed: EXPENSE_CATEGORY_KEYS,
             },
-            { status: 400 }
+            { status: 400 },
           );
         }
         category = ok.data;
@@ -333,7 +359,7 @@ export async function PATCH(
         if (!ok.success) {
           return NextResponse.json(
             { error: "Invalid income category", allowed: INCOME_CATEGORY_KEYS },
-            { status: 400 }
+            { status: 400 },
           );
         }
         category = ok.data;
@@ -381,7 +407,7 @@ export async function PATCH(
     if (error instanceof ZodError) {
       return NextResponse.json(
         { error: "Invalid request data", details: error.errors },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -420,22 +446,19 @@ export async function PATCH(
 // DELETE /api/transactions/[id] - Delete transaction
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: { id: string } },
 ) {
-  const user = getAuthUser(request);
-  const devUserId = !user ? getDevUserId(request) : null;
-  const userId = user?.userId ?? devUserId;
+  const { userId, devHint } = await resolveInternalUserId(request);
 
   if (!userId) {
     return NextResponse.json(
       {
         error: "Unauthorized",
-        hint:
-          process.env.NODE_ENV !== "production"
-            ? "DEV: pass x-dev-user-id header or ?userId=..."
-            : undefined,
+        ...(process.env.NODE_ENV !== "production" && devHint
+          ? { hint: devHint }
+          : {}),
       },
-      { status: 401 }
+      { status: 401 },
     );
   }
 
@@ -462,7 +485,7 @@ export async function DELETE(
     console.error("Delete transaction error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

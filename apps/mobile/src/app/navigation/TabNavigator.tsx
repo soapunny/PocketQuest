@@ -1,3 +1,6 @@
+// apps/mobile/src/app/navigation/TabNavigator.tsx
+// Tabs는 메인 앱의 하위 네비게이션 구조(탭 기반 라우팅)를 제공하는 컨테이너다.
+
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Pressable, Text, View } from "react-native";
 import { BottomTabBarButtonProps } from "@react-navigation/bottom-tabs";

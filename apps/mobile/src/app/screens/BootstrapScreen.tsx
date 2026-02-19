@@ -1,3 +1,6 @@
+// apps/mobile/src/app/screens/BootstrapScreen.tsx
+// 인증 후 초기 데이터 로딩과 실패/재시도 처리를 위한 게이트 화면
+
 import { useEffect, useRef } from "react";
 import {
   ActivityIndicator,
@@ -18,13 +21,20 @@ import { useBootStrap } from "../hooks/useBootStrap";
 export default function BootstrapScreen() {
   const navigation = useNavigation<any>();
   const auth = useAuthStore();
-  const isAuthenticated = (auth as any)?.isAuthenticated;
-  const { isInitialized: isPlanHydrated } = usePlanStore();
-  const isPrefsHydrated = useUserPrefsStore((s) => s.isHydrated);
-  const isDashboardHydrated = useDashboardStore((s) => s.isHydrated);
+  const plan = usePlanStore();
+  const prefs = useUserPrefsStore();
+  const dashboard = useDashboardStore();
+
+  const isAuthenticated = !!auth.isAuthenticated;
+  const isPlanHydrated = !!plan.isInitialized;
+  const planError = (plan as any).error;
+  const isPrefsHydrated = !!prefs.isHydrated;
+  const isDashboardHydrated = !!dashboard.isHydrated;
+
   const { isBootstrapping, bootstrapError, runBootstrap } = useBootStrap();
 
   const ranOnceRef = useRef(false);
+  const gateError = bootstrapError || planError;
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -35,11 +45,11 @@ export default function BootstrapScreen() {
 
   useEffect(() => {
     if (!isAuthenticated) return;
-    if (bootstrapError) return;
+    if (gateError) return;
     if (!isPrefsHydrated || !isPlanHydrated || !isDashboardHydrated) return;
-    navigation.replace("Tabs");
+    navigation.replace("Tabs"); // 초기 데이터 로딩 완료 후 Stack에서 Bootstrap을 제거하고(history에서 제거), TabNavigator로 대체
   }, [
-    bootstrapError,
+    gateError,
     isAuthenticated,
     isDashboardHydrated,
     isPlanHydrated,
@@ -52,9 +62,9 @@ export default function BootstrapScreen() {
       <ActivityIndicator size="large" color="#4285F4" />
       <Text style={styles.title}>Loading…</Text>
 
-      {bootstrapError ? (
+      {gateError ? (
         <>
-          <Text style={styles.errorText}>{bootstrapError}</Text>
+          <Text style={styles.errorText}>{String(gateError)}</Text>
           <Pressable
             onPress={() => {
               ranOnceRef.current = false;

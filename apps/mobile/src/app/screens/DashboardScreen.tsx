@@ -252,6 +252,12 @@ export default function DashboardScreen() {
     );
   };
 
+  const periodLabel = useMemo(() => {
+    const periodType = getPlanPeriodType(plan);
+    const key = getPeriodLabelKey(periodType);
+    return periodLabelText(key);
+  }, [plan]);
+
   if (!isHydrated || !dashboard || !currency) {
     return (
       <ScreenLayout
@@ -272,12 +278,6 @@ export default function DashboardScreen() {
   }
 
   const hc = currency as Currency;
-
-  const periodLabel = useMemo(() => {
-    const periodType = getPlanPeriodType(plan);
-    const key = getPeriodLabelKey(periodType);
-    return periodLabelText(key);
-  }, [plan]);
 
   const { totals, range, budgetStatusRows, savingsProgressRows } = dashboard;
 

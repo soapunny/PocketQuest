@@ -1,14 +1,18 @@
 // apps/mobile/src/app/screens/SettingsScreen.tsx
 
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { View, Text, Pressable, StyleSheet, Alert } from "react-native";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 
 import ScreenHeader from "../components/layout/ScreenHeader";
 import ScreenLayout from "../components/layout/ScreenLayout";
 
-import type { Currency } from "../../../../../packages/shared/src/money/types";
+import type { Currency } from "@pq/shared/money/types";
 
+import type { RootStackParamList } from "../navigation/RootNavigator";
 import { useAuthStore } from "../store/authStore";
+import { useDashboardStore } from "../store/dashboardStore";
 import { useUserPrefsStore } from "../store/userPrefsStore";
 import { userApi } from "../api/userApi";
 import { usePlan, type PeriodType } from "../store/planStore";
@@ -41,6 +45,11 @@ export default function SettingsScreen() {
   const { plan, setPeriodType, switchPeriodType, switchPlanCurrency } =
     usePlan();
 
+  const navigation =
+    useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
   const auth = useAuthStore();
   const serverToken = (auth as any)?.serverToken as string | null | undefined;
 
@@ -72,6 +81,45 @@ export default function SettingsScreen() {
 
   const lang = (language ?? "en") as "en" | "ko";
   const isKo = lang === "ko";
+
+  const onPressLogout = () => {
+    if (isLoggingOut) return;
+
+    Alert.alert(
+      isKo ? "로그아웃" : "Logout",
+      isKo ? "정말 로그아웃하시겠습니까?" : "Are you sure you want to log out?",
+      [
+        { text: isKo ? "취소" : "Cancel", style: "cancel" },
+        {
+          text: isKo ? "로그아웃" : "Logout",
+          style: "destructive",
+          onPress: async () => {
+            if (isLoggingOut) return;
+
+            setIsLoggingOut(true);
+
+            try {
+              // 1) 즉시 Dashboard 잔상 제거
+              useDashboardStore.getState().resetDashboard();
+
+              // 2) auth 토큰 제거 (RootNavigator가 Login으로 전환됨)
+              await auth.signOut();
+
+              // RootNavigator의 auth gate가 로그아웃 직후 Login 트리를 렌더링하므로
+              // 여기서 navigation.reset()은 필요 없고, 타이밍에 따라 RESET not handled 에러가 날 수 있음.
+            } catch (e) {
+              Alert.alert(
+                isKo ? "로그아웃 실패" : "Logout failed",
+                isKo ? "다시 시도해 주세요." : "Please try again.",
+              );
+            } finally {
+              setIsLoggingOut(false);
+            }
+          },
+        },
+      ],
+    );
+  };
 
   return (
     <ScreenLayout
@@ -339,7 +387,7 @@ export default function SettingsScreen() {
                       if (!ok) {
                         // 실패해도 일단 UI는 유지 (원하면 여기서 revert도 가능)
                         console.warn(
-                          "[SettingsScreen] switchPlanCurrency failed; kept local currency"
+                          "[SettingsScreen] switchPlanCurrency failed; kept local currency",
                         );
                       }
                     }}
@@ -398,7 +446,7 @@ export default function SettingsScreen() {
                   if (!token) {
                     Alert.alert(
                       isKo ? "로그인이 필요합니다" : "Login required",
-                      isKo ? "서버 토큰이 없습니다." : "Missing server token."
+                      isKo ? "서버 토큰이 없습니다." : "Missing server token.",
                     );
                     return;
                   }
@@ -422,7 +470,7 @@ export default function SettingsScreen() {
                       isKo ? "저장 실패" : "Save failed",
                       isKo
                         ? "설정을 저장할 수 없습니다. 다시 시도해 주세요."
-                        : "Could not save settings. Please try again."
+                        : "Could not save settings. Please try again.",
                     );
                   }
                 }}
@@ -461,6 +509,37 @@ export default function SettingsScreen() {
             ? "테마, 알림, 더 많은 화면 번역을 추가할 예정입니다."
             : "Theme, notifications, and more translations will live here."}
         </Text>
+      </View>
+
+      <View style={[styles.card, styles.logoutCard]}>
+        <Text style={[styles.cardTitle, styles.logoutTitle]}>
+          {isKo ? "로그아웃" : "Logout"}
+        </Text>
+        <Text style={styles.help}>
+          {isKo
+            ? "이 기기에서 로그아웃합니다."
+            : "You will be signed out on this device."}
+        </Text>
+
+        <Pressable
+          onPress={onPressLogout}
+          disabled={isLoggingOut}
+          style={({ pressed }) => [
+            styles.logoutBtn,
+            pressed && !isLoggingOut && { opacity: 0.9 },
+            isLoggingOut && { opacity: 0.5 },
+          ]}
+        >
+          <Text style={styles.logoutBtnText}>
+            {isLoggingOut
+              ? isKo
+                ? "로그아웃 중…"
+                : "Logging out…"
+              : isKo
+                ? "로그아웃"
+                : "Logout"}
+          </Text>
+        </Pressable>
       </View>
     </ScreenLayout>
   );
@@ -527,5 +606,25 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     color: "#111",
     marginBottom: 4,
+  },
+  logoutCard: {
+    borderColor: "#fee4e2",
+  },
+  logoutTitle: {
+    color: "#b42318",
+  },
+  logoutBtn: {
+    marginTop: 12,
+    height: 48,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#b42318",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "white",
+  },
+  logoutBtnText: {
+    fontWeight: "900",
+    color: "#b42318",
   },
 });

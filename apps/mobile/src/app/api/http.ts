@@ -6,7 +6,7 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     public message: string,
-    public details?: any
+    public details?: any,
   ) {
     super(message);
     this.name = "ApiError";
@@ -15,7 +15,7 @@ export class ApiError extends Error {
 
 export async function request<T>(
   endpoint: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
 ): Promise<T> {
   const base = String(API_BASE_URL ?? "").replace(/\/$/, "");
   const path = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
@@ -30,6 +30,8 @@ export async function request<T>(
 
   const response = await fetch(url, { ...options, headers });
 
+  console.log("[http] resp", { url, status: response.status, ok: response.ok });
+
   if (response.ok && method === "GET" && url.endsWith("/api/plans")) {
     const text = await response
       .clone()
@@ -40,17 +42,15 @@ export async function request<T>(
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    let details: any = { error: "Unknown error" };
-    try {
-      details = text ? JSON.parse(text) : details;
-    } catch {
-      details = { error: text || "Request failed" };
-    }
-    throw new ApiError(
-      response.status,
-      details.error || "Request failed",
-      details
+    console.log("[http] error", { url, status: response.status, body: text });
+
+    const err: any = new Error(
+      response.status === 401 ? "Unauthorized" : `HTTP ${response.status}`,
     );
+    err.status = response.status;
+    err.url = url;
+    err.body = text;
+    throw err;
   }
 
   if (response.status === 204) return undefined as any;

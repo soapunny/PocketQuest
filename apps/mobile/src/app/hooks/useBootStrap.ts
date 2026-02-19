@@ -10,14 +10,13 @@ import { useUserPrefsStore } from "../store/userPrefsStore";
 
 export function useBootStrap() {
   const auth = useAuthStore();
-  const serverToken = (auth as any)?.serverToken as string | null | undefined;
   const { applyBootstrapPlan } = usePlanStore();
   const applyDashboardFromBootstrap = useDashboardStore(
-    (s) => s.applyDashboardFromBootstrap
+    (s) => s.applyDashboardFromBootstrap,
   );
 
   const applyUserPrefsFromBootstrap = useUserPrefsStore(
-    (s) => s.applyUserPrefsFromBootstrap
+    (s) => s.applyUserPrefsFromBootstrap,
   );
 
   const [isBootstrapping, setIsBootstrapping] = useState(false);
@@ -29,16 +28,15 @@ export function useBootStrap() {
     setBootstrapError(null);
 
     try {
-      // Bootstrap requires our SERVER JWT (issued by /api/auth/sign-in), not the Supabase access_token.
-      const token = String(serverToken ?? "").trim();
+      // Bootstrap uses the Supabase access_token (SSOT) as our API auth token.
+      const token = String(auth.supabaseAccessToken ?? "").trim();
       console.log({
         hasSession: !!auth.session,
         hasSupabaseToken: !!auth.supabaseAccessToken,
-        hasServerToken: !!auth.serverToken,
       });
       if (!token) {
         throw new Error(
-          "Bootstrap failed: missing server JWT (call /api/auth/sign-in after Supabase OAuth and store it in authStore.serverToken)"
+          "Bootstrap failed: missing auth token (expected Supabase access token)",
         );
       }
 
@@ -46,7 +44,7 @@ export function useBootStrap() {
       const payload = await fetchBootstrap(token);
       console.log(
         "[bootstrap] bootstrap ok, keys:",
-        Object.keys(payload ?? {})
+        Object.keys(payload ?? {}),
       );
       console.log("[bootstrap] txSummary?", !!(payload as any)?.txSummary);
 
@@ -69,7 +67,7 @@ export function useBootStrap() {
     applyDashboardFromBootstrap,
     applyUserPrefsFromBootstrap,
     isBootstrapping,
-    serverToken,
+    auth.supabaseAccessToken,
   ]);
 
   return {

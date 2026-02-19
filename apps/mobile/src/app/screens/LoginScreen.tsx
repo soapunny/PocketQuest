@@ -3,8 +3,8 @@
 import { useState } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 
-import * as Linking from "expo-linking";
 import * as WebBrowser from "expo-web-browser";
+import * as AuthSession from "expo-auth-session";
 
 import ScreenLayout from "../components/layout/ScreenLayout";
 import ScreenHeader from "../components/layout/ScreenHeader";
@@ -14,22 +14,27 @@ import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../config/env";
 
 import { request } from "../api/http";
 import { useAuthStore } from "../store/authStore";
+import { OAuthProvider } from "@pq/shared/auth";
 
 WebBrowser.maybeCompleteAuthSession();
 
-type Provider = "google" | "kakao";
-
 export default function LoginScreen() {
-  const [loading, setLoading] = useState<Provider | null>(null);
+  const [loading, setLoading] = useState<OAuthProvider | null>(null);
   const auth = useAuthStore();
 
-  const handleOAuth = async (provider: Provider) => {
+  const handleOAuth = async (provider: OAuthProvider) => {
     if (loading) return;
     setLoading(provider);
 
     try {
       // In Expo Go, redirect back to the expo-router route `/oauth`.
-      const redirectTo = Linking.createURL("oauth");
+      // NOTE: `useProxy` was removed/deprecated from `makeRedirectUri` in newer `expo-auth-session`.
+      // The redirect host (LAN vs tunnel/exp.direct) will match how Metro is running.
+      // For the most stable OAuth in Expo Go, prefer running Metro with `--tunnel`.
+      const redirectTo = AuthSession.makeRedirectUri({
+        path: "oauth",
+      });
+
       console.log("redirectTo:", redirectTo);
 
       console.log(
@@ -61,6 +66,7 @@ export default function LoginScreen() {
       // Use an auth session so the redirect is captured (prevents falling back to Site URL/localhost).
       const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectTo);
       console.log("oauth result:", result);
+      console.log("authUrl:", authUrl);
 
       if (result.type === "success" && result.url) {
         // Tokens are returned in the URL fragment (#access_token=...)
@@ -83,45 +89,40 @@ export default function LoginScreen() {
           console.error("setSession error:", error);
           return;
         }
+        // New policy (Option 1):
+        // - Do NOT exchange for a server JWT
+        // - Send Supabase access_token to our backend via Authorization header
+        // - Backend verifies the token with Supabase and syncs internal user
 
-        // Exchange Supabase identity for our SERVER JWT (required for /api/bootstrap, /api/plans, ...)
-        const { data: userRes, error: userErr } = await supabase.auth.getUser();
-        if (userErr || !userRes?.user) {
-          console.error("getUser error:", userErr);
+        const { data: sessionRes, error: sessionErr } =
+          await supabase.auth.getSession();
+        if (sessionErr) {
+          console.error("getSession error:", sessionErr);
           return;
         }
 
-        const u = userRes.user;
-
-        const payload = {
-          provider,
-          providerId: u.id,
-          email: u.email ?? "",
-          name:
-            (u.user_metadata?.full_name as string) ||
-            (u.user_metadata?.name as string) ||
-            u.email ||
-            "User",
-          profileImageUri: (u.user_metadata?.avatar_url as string) ?? null,
-        };
+        const accessToken = sessionRes?.session?.access_token;
+        if (!accessToken) {
+          console.error("Missing Supabase access token after setSession");
+          return;
+        }
 
         try {
-          const res = await request<{ token: string }>("/api/auth/sign-in", {
+          // Call backend to sync/create internal user based on verified Supabase identity.
+          // No JSON body needed.
+          await request("/api/auth/sign-in", {
             method: "POST",
             headers: {
               Accept: "application/json",
-              "Content-Type": "application/json",
+              Authorization: `Bearer ${accessToken}`,
             },
-            body: JSON.stringify(payload),
           });
 
-          if (!res?.token) {
-            console.error("/api/auth/sign-in did not return token");
-            return;
-          }
-
-          await auth.setServerToken(res.token);
-          console.log("[auth] serverToken length:", res.token.length);
+          // If you still need to persist something locally, store Supabase session only.
+          // (Server JWT is no longer used)
+          console.log(
+            "[auth] Supabase token sent to backend for verification/sync",
+          );
         } catch (e) {
           console.error("/api/auth/sign-in failed:", e);
           return;

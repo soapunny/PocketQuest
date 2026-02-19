@@ -4,14 +4,34 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { calcNextPeriodEnd, ensurePeriodEnd } from "@/lib/plan/periodRules";
 import { getAuthUser } from "@/lib/auth";
-import { serverPlanDTOSchema } from "../../../../../../../../packages/shared/src/plans/types";
-import type { ServerPlanDTO } from "../../../../../../../../packages/shared/src/plans/types";
+import { serverPlanDTOSchema } from "@pq/shared/plans/types";
+import type { ServerPlanDTO } from "@pq/shared/plans/types";
 import { ZodError } from "zod";
 
 function getDevUserId(): string | null {
   if (process.env.NODE_ENV === "production") return null;
   const envId = process.env.DEV_USER_ID;
   return envId && envId.trim() ? envId.trim() : null;
+}
+
+// Helper to resolve internal userId from request
+async function resolveInternalUserId(
+  request: NextRequest,
+): Promise<string | null> {
+  const authed = await getAuthUser(request);
+
+  if (authed?.supabaseUserId) {
+    const internal = await prisma.user.findUnique({
+      where: { supabaseUserId: authed.supabaseUserId },
+      select: { id: true },
+    });
+
+    return internal?.id ?? null;
+  }
+
+  // DEV fallback
+  const devId = getDevUserId();
+  return devId ?? null;
 }
 
 function toServerPlanDTO(plan: any, timeZone: string): ServerPlanDTO {
@@ -59,8 +79,7 @@ function toServerPlanDTO(plan: any, timeZone: string): ServerPlanDTO {
 
 export async function POST(request: NextRequest) {
   try {
-    const authed = getAuthUser(request);
-    const userId = authed?.userId ?? getDevUserId();
+    const userId = await resolveInternalUserId(request);
 
     if (!userId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

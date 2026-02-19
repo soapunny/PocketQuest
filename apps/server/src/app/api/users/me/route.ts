@@ -4,16 +4,33 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getAuthUser } from "@/lib/auth";
 
+async function resolveInternalUserId(
+  request: NextRequest,
+): Promise<string | null> {
+  const authed = await getAuthUser(request);
+
+  if (!authed?.supabaseUserId) {
+    return null;
+  }
+
+  const internal = await prisma.user.findUnique({
+    where: { supabaseUserId: authed.supabaseUserId },
+    select: { id: true },
+  });
+
+  return internal?.id ?? null;
+}
+
 // GET /api/users/me - Get current user profile
 export async function GET(request: NextRequest) {
-  const user = getAuthUser(request);
-  if (!user) {
+  const userId = await resolveInternalUserId(request);
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
     const userData = await prisma.user.findUnique({
-      where: { id: user.userId },
+      where: { id: userId },
       select: {
         id: true,
         email: true,
@@ -34,15 +51,15 @@ export async function GET(request: NextRequest) {
     console.error("Get user error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
 
 // PATCH /api/users/me - Update current user profile
 export async function PATCH(request: NextRequest) {
-  const user = getAuthUser(request);
-  if (!user) {
+  const userId = await resolveInternalUserId(request);
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -64,7 +81,7 @@ export async function PATCH(request: NextRequest) {
       if (trimmed.length === 0 || trimmed.length > 30) {
         return NextResponse.json(
           { error: "Name must be between 1 and 30 characters" },
-          { status: 400 }
+          { status: 400 },
         );
       }
       name = trimmed;
@@ -75,7 +92,7 @@ export async function PATCH(request: NextRequest) {
       if (typeof body.profileImageUri !== "string") {
         return NextResponse.json(
           { error: "Invalid profileImageUri" },
-          { status: 400 }
+          { status: 400 },
         );
       }
       const trimmed = body.profileImageUri.trim();
@@ -89,7 +106,7 @@ export async function PATCH(request: NextRequest) {
         } catch {
           return NextResponse.json(
             { error: "profileImageUri must be a valid URL" },
-            { status: 400 }
+            { status: 400 },
           );
         }
       }
@@ -100,7 +117,7 @@ export async function PATCH(request: NextRequest) {
       if (typeof body.cashflowCarryoverEnabled !== "boolean") {
         return NextResponse.json(
           { error: "Invalid cashflowCarryoverEnabled" },
-          { status: 400 }
+          { status: 400 },
         );
       }
       cashflowCarryoverEnabled = body.cashflowCarryoverEnabled;
@@ -108,18 +125,20 @@ export async function PATCH(request: NextRequest) {
 
     let cashflowCarryoverMode: "ROLLING" | null = null;
     if (body.cashflowCarryoverMode !== undefined) {
-      const v = String(body.cashflowCarryoverMode || "").trim().toUpperCase();
+      const v = String(body.cashflowCarryoverMode || "")
+        .trim()
+        .toUpperCase();
       if (v !== "ROLLING") {
         return NextResponse.json(
           { error: "Invalid cashflowCarryoverMode" },
-          { status: 400 }
+          { status: 400 },
         );
       }
       cashflowCarryoverMode = "ROLLING";
     }
 
     const existingUser = await prisma.user.findUnique({
-      where: { id: user.userId },
+      where: { id: userId },
     });
 
     if (!existingUser) {
@@ -127,7 +146,7 @@ export async function PATCH(request: NextRequest) {
     }
 
     const userData = await prisma.user.update({
-      where: { id: user.userId },
+      where: { id: userId },
       data: {
         ...(name !== null && { name }),
         ...(profileImageUri !== null && { profileImageUri }),
@@ -154,7 +173,7 @@ export async function PATCH(request: NextRequest) {
     console.error("Update user error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

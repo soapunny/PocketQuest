@@ -6,12 +6,8 @@ import {
   getPlanQuerySchema,
   patchPlanSchema,
   serverPlanDTOSchema,
-} from "../../../../../../packages/shared/src/plans/types";
-import type {
-  PatchPlanDTO,
-  ServerPlanDTO,
-} from "../../../../../../packages/shared/src/plans/types";
-import { ZodError } from "zod";
+} from "@pq/shared/plans/types";
+import type { PatchPlanDTO, ServerPlanDTO } from "@pq/shared/plans/types";
 
 import { prisma } from "@/lib/prisma";
 import { getAuthUser } from "@/lib/auth";
@@ -61,6 +57,40 @@ function getDevUserId(request: NextRequest, body?: unknown): string | null {
   if (envId && envId.trim()) return envId.trim();
 
   return null;
+}
+
+async function resolveInternalUserId(
+  request: NextRequest,
+  body?: unknown,
+): Promise<{ userId: string | null; devHint: string | null }> {
+  const authed = await getAuthUser(request);
+
+  // DEV fallback (only when not authed)
+  const devUserId = !authed ? getDevUserId(request, body) : null;
+
+  if (authed?.supabaseUserId) {
+    // Map Supabase UUID -> internal User.id (cuid)
+    const internal = await prisma.user.findUnique({
+      where: { supabaseUserId: authed.supabaseUserId },
+      select: { id: true },
+    });
+
+    if (internal?.id) {
+      return { userId: internal.id, devHint: null };
+    }
+
+    // Valid Supabase session but no internal user synced yet
+    return { userId: null, devHint: null };
+  }
+
+  if (devUserId) {
+    return {
+      userId: devUserId,
+      devHint: "DEV: set DEV_USER_ID or pass x-dev-user-id / ?userId",
+    };
+  }
+
+  return { userId: null, devHint: null };
 }
 
 function toServerPlanDTO(plan: any, fallbackTimeZone: string): ServerPlanDTO {
@@ -117,15 +147,17 @@ function toServerPlanDTO(plan: any, fallbackTimeZone: string): ServerPlanDTO {
 // 1. 월별 조회, 2. 특정 기간 플랜 조회, 3. active된 플랜 조회
 // 플랜 없으면 자동 생성
 export async function GET(request: NextRequest) {
-  const authed = getAuthUser(request);
-  const devUserId = !authed ? getDevUserId(request) : null;
-  const userId = authed?.userId ?? devUserId;
+  console.log("[plans] GET start", request.url);
+  const startedAt = Date.now();
+  console.log("[plans] 1 before resolveInternalUserId");
+  const { userId, devHint } = await resolveInternalUserId(request);
+  console.log("[plans] 2 after resolveInternalUserId", { hasUserId: !!userId });
 
   if (!userId) {
     return NextResponse.json(
       {
         error: "Unauthorized",
-        hint: "DEV: set DEV_USER_ID or pass x-dev-user-id / ?userId",
+        ...(devHint ? { hint: devHint } : {}),
       },
       { status: 401 },
     );
@@ -241,24 +273,33 @@ export async function GET(request: NextRequest) {
       }
 
       const dto = toServerPlanDTO(plan, timeZone);
+      console.log("[plans] GET end", Date.now() - startedAt, "ms");
       return NextResponse.json(dto);
     }
 
     // 2) 기본 동작: User.activePlanId(=activePlan) 반환
+    console.log("[plans] 3 before findUnique");
     const user = await prisma.user.findUnique({
       where: { id: userId },
       select: { activePlanId: true, timeZone: true },
     });
+    console.log("[plans] 4 after findUnique", {
+      hasActivePlanId: !!user?.activePlanId,
+    });
     const timeZone = normalizeTimeZone(user?.timeZone);
 
     if (user?.activePlanId) {
+      console.log("[plans] 5 before prisma.plan.findUnique(activePlan)");
       const activePlan = await prisma.plan.findUnique({
         where: { id: user.activePlanId },
         include,
       });
-
+      console.log("[plans] 6 after prisma.plan.findUnique(activePlan)", {
+        hasPlan: !!activePlan,
+      });
       if (activePlan) {
         const dto = toServerPlanDTO(activePlan, timeZone);
+        console.log("[plans] GET end", Date.now() - startedAt, "ms");
         return NextResponse.json(dto);
       }
       // activePlanId가 가리키는 plan이 없으면 아래 fallback으로 복구
@@ -300,39 +341,28 @@ export async function GET(request: NextRequest) {
 // PeriodStart/periodEnd, periodAnchor 계산
 // ActivePlan 지정
 export async function POST(request: NextRequest) {
-  const authed = getAuthUser(request);
+  const body = await request.json().catch(() => null);
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
-  let data: PatchPlanDTO;
-  try {
-    data = patchPlanSchema.parse(body);
-  } catch (e: unknown) {
-    if (e instanceof ZodError) {
-      return NextResponse.json(
-        { error: "Invalid body", details: e.flatten() },
-        { status: 400 },
-      );
-    }
-    return NextResponse.json({ error: "Invalid body" }, { status: 400 });
-  }
-
-  const devUserId = !authed ? getDevUserId(request, body) : null;
-  const userId = authed?.userId ?? devUserId;
+  const { userId, devHint } = await resolveInternalUserId(request, body);
 
   if (!userId) {
     return NextResponse.json(
       {
         error: "Unauthorized",
-        hint: "DEV: set DEV_USER_ID or pass x-dev-user-id / ?userId / body.userId",
+        ...(devHint ? { hint: `${devHint} / body.userId` } : {}),
       },
       { status: 401 },
     );
   }
+
+  const parsed = patchPlanSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Invalid body", details: parsed.error.flatten() },
+      { status: 400 },
+    );
+  }
+  const data = parsed.data as PatchPlanDTO;
 
   try {
     const user = await prisma.user.findUnique({
@@ -533,39 +563,28 @@ export async function POST(request: NextRequest) {
 }
 
 export async function PATCH(request: NextRequest) {
-  const authed = getAuthUser(request);
+  const body = await request.json().catch(() => null);
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
-  let data: PatchPlanDTO;
-  try {
-    data = patchPlanSchema.parse(body);
-  } catch (e: unknown) {
-    if (e instanceof ZodError) {
-      return NextResponse.json(
-        { error: "Invalid body", details: e.flatten() },
-        { status: 400 },
-      );
-    }
-    return NextResponse.json({ error: "Invalid body" }, { status: 400 });
-  }
-
-  const devUserId = !authed ? getDevUserId(request, body) : null;
-  const userId = authed?.userId ?? devUserId;
+  const { userId, devHint } = await resolveInternalUserId(request, body);
 
   if (!userId) {
     return NextResponse.json(
       {
         error: "Unauthorized",
-        hint: "DEV: set DEV_USER_ID or pass x-dev-user-id / ?userId / body.userId",
+        ...(devHint ? { hint: `${devHint} / body.userId` } : {}),
       },
       { status: 401 },
     );
   }
+
+  const parsed = patchPlanSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Invalid body", details: parsed.error.flatten() },
+      { status: 400 },
+    );
+  }
+  const data = parsed.data as PatchPlanDTO;
 
   try {
     const user = await prisma.user.findUnique({

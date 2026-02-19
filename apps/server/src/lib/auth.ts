@@ -1,56 +1,59 @@
-// apps/server/src/lib/auth.ts
+//  apps/server/src/lib/auth.ts
 
 import { NextRequest } from "next/server";
-import jwt from "jsonwebtoken";
+import { createClient } from "@supabase/supabase-js";
 
-const JWT_SECRET: string = (() => {
-  const v = process.env.JWT_SECRET;
-  if (!v) {
-    // In production we must not fall back to a default secret.
-    throw new Error("JWT_SECRET is required (production)");
-  }
-  return v;
-})();
+function getSupabaseClient() {
+  const url = process.env.SUPABASE_URL;
+  const anonKey = process.env.SUPABASE_ANON_KEY;
+
+  if (!url) throw new Error("SUPABASE_URL is required");
+  if (!anonKey) throw new Error("SUPABASE_ANON_KEY is required");
+
+  return createClient(url, anonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false,
+    },
+  });
+}
 
 export interface AuthUser {
-  userId: string;
-  email?: string | null;
-  // allow standard JWT claims without typing headaches
-  iat?: number;
-  exp?: number;
+  supabaseUserId: string;
+  email: string;
 }
 
-function isAuthUser(payload: unknown): payload is AuthUser {
-  if (!payload || typeof payload !== "object") return false;
-  const p = payload as any;
-  return typeof p.userId === "string" && p.userId.length > 0;
+export function extractBearerToken(request: NextRequest): string | null {
+  const authHeader =
+    request.headers.get("authorization") ??
+    request.headers.get("Authorization");
+  if (!authHeader) return null;
+
+  const m = authHeader.match(/^Bearer\s+(.+)$/i);
+  return m?.[1]?.trim() ?? null;
 }
 
-export function getAuthUser(request: NextRequest): AuthUser | null {
+/**
+ * Option 1: Supabase access_token is the single session token.
+ * This function verifies the Bearer token with Supabase and returns verified identity.
+ */
+export async function getAuthUser(
+  request: NextRequest,
+): Promise<AuthUser | null> {
+  const token = extractBearerToken(request);
+  if (!token) return null;
+
   try {
-    const authHeader = request.headers.get("authorization");
-    if (!authHeader) {
-      console.warn("[auth] missing Authorization header");
-      return null;
-    }
-    if (!authHeader.startsWith("Bearer ")) {
-      console.warn("[auth] malformed Authorization header");
-      return null;
-    }
+    const supabase = getSupabaseClient();
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error || !data?.user?.id || !data.user.email) return null;
 
-    const token = authHeader.substring(7);
-
-    const decoded = jwt.verify(token, JWT_SECRET);
-    if (!isAuthUser(decoded)) {
-      console.warn("[auth] token missing required userId claim");
-      return null;
-    }
-
-    return decoded;
-  } catch (error: any) {
-    // Helpful debug for 401s (do NOT log the token)
-    const msg = error?.message ? String(error.message) : "jwt verify failed";
-    console.warn("[auth] invalid token:", msg);
+    return {
+      supabaseUserId: data.user.id,
+      email: data.user.email,
+    };
+  } catch {
     return null;
   }
 }

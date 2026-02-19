@@ -12,10 +12,9 @@ import React, {
 import { AppState, AppStateStatus } from "react-native";
 
 import { useAuthStore } from "./authStore";
-import { useDashboardStore } from "./dashboardStore";
 import { useUserPrefsStore } from "./userPrefsStore";
 import { plansApi } from "../api/plansApi";
-import type { Currency } from "../../../../../packages/shared/src/money/types";
+import type { Currency } from "@pq/shared/money/types";
 import type {
   Plan,
   ServerPlanDTO,
@@ -27,9 +26,9 @@ import type {
   PatchBudgetGoalsRequestDTO,
   PatchSavingsGoalsRequestDTO,
   SwitchCurrencyRequestDTO,
-} from "../../../../../packages/shared/src/plans/types";
+} from "@pq/shared/plans/types";
 
-import { EXPENSE_CATEGORY_KEYS } from "../../../../../packages/shared/src/transactions/categories";
+import { EXPENSE_CATEGORY_KEYS } from "@pq/shared/transactions/categories";
 
 export type BudgetCategory = (typeof EXPENSE_CATEGORY_KEYS)[number] | string;
 
@@ -66,7 +65,7 @@ type Store = {
   // Single-goal upsert helper (POST /api/plans/[id]/goals/budget)
   saveBudgetGoal: (
     category: BudgetCategory,
-    limitMinor: number
+    limitMinor: number,
   ) => Promise<boolean>;
 
   // Persist current savings goals to server using SSOT DTOs.
@@ -120,7 +119,7 @@ function safeParseISODateTime(iso: any): Date | null {
 
 function deriveLocalISOFromUTCInstant(
   utcISO: string,
-  timeZone: string
+  timeZone: string,
 ): string {
   const d = safeParseISODateTime(utcISO);
   if (!d) return "";
@@ -169,9 +168,17 @@ function hasOwn(obj: any, key: string): boolean {
   return !!obj && Object.prototype.hasOwnProperty.call(obj, key);
 }
 
+function unwrapPlan(resp: any): ServerPlanDTO | null {
+  if (!resp) return null;
+  if (typeof resp === "object" && resp !== null && "plan" in resp) {
+    return (resp as any).plan as ServerPlanDTO;
+  }
+  return resp as ServerPlanDTO;
+}
+
 function normalizePlan(
   server: ServerPlanDTO | null | undefined,
-  fallback: { existing: Plan }
+  fallback: { existing: Plan },
 ): Plan {
   const existing = fallback.existing;
   const timeZone =
@@ -194,24 +201,24 @@ function normalizePlan(
     server?.currency != null
       ? normalizeCurrency(server.currency)
       : server?.homeCurrency != null
-      ? normalizeCurrency(server.homeCurrency)
-      : server?.displayCurrency != null
-      ? normalizeCurrency(server.displayCurrency)
-      : existing.currency || existing.displayCurrency || "USD";
+        ? normalizeCurrency(server.homeCurrency)
+        : server?.displayCurrency != null
+          ? normalizeCurrency(server.displayCurrency)
+          : existing.currency || existing.displayCurrency || "USD";
 
   const homeCurrency: Currency =
     server?.homeCurrency != null
       ? normalizeCurrency(server.homeCurrency)
       : server?.currency != null
-      ? currency
-      : existing.homeCurrency;
+        ? currency
+        : existing.homeCurrency;
 
   const displayCurrency: Currency =
     server?.displayCurrency != null
       ? normalizeCurrency(server.displayCurrency)
       : server?.currency != null
-      ? currency
-      : existing.displayCurrency;
+        ? currency
+        : existing.displayCurrency;
 
   const periodStartUTC = server?.periodStartUTC || existing.periodStartUTC;
   const periodEndUTC = server?.periodEndUTC || existing.periodEndUTC;
@@ -247,7 +254,7 @@ function normalizePlan(
   const nextBudgetGoals = serverBudgetGoals
     ? mergeBudgetGoalsWithDefaults(
         buildDefaultBudgetGoals(),
-        serverBudgetGoals as any
+        serverBudgetGoals as any,
       )
     : existing.budgetGoals;
 
@@ -286,7 +293,7 @@ function mergeBudgetGoalsWithDefaults(
     id?: string | null;
     category: string;
     limitMinor?: number | null;
-  }[]
+  }[],
 ): BudgetGoal[] {
   // Map by normalized category key: { limit, id? }
   const byCat = new Map<string, { limit: number; id?: string }>();
@@ -318,7 +325,7 @@ function mergeBudgetGoalsWithDefaults(
   // Append any server categories not in defaults
   byCat.forEach((val, cat) => {
     const exists = merged.some(
-      (m) => normalizeCategoryKey(m.category) === normalizeCategoryKey(cat)
+      (m) => normalizeCategoryKey(m.category) === normalizeCategoryKey(cat),
     );
     if (!exists) {
       const key = normalizeCategoryKey(cat);
@@ -339,7 +346,7 @@ function mergeSavingsGoals(
     id?: string | null;
     name: string;
     targetMinor?: number | null;
-  }[]
+  }[],
 ): SavingsGoal[] {
   // ✅ SSOT: id-first.
   // - If server provides an id, we always use that id.
@@ -408,29 +415,15 @@ function mergeSavingsGoals(
 function sumBudgetLimits(goals: BudgetGoal[]) {
   return goals.reduce(
     (sum, g) => sum + (g.limitMinor > 0 ? g.limitMinor : 0),
-    0
+    0,
   );
 }
 
 export function PlanProvider({ children }: { children: React.ReactNode }) {
   const auth = useAuthStore();
-  const token = (auth as any)?.token as string | null | undefined;
-  // Server JWT issued by /api/auth/sign-in (required by bootstrap)
-  const serverToken = (auth as any)?.serverToken as string | null | undefined;
+  const token = auth.supabaseAccessToken;
 
   const userPrefs = useUserPrefsStore();
-
-  const refreshDashboardAfterPlanGoalSave = useCallback(async () => {
-    const t = String(serverToken ?? "").trim();
-    if (!t) {
-      // Plan APIs may still work with other tokens depending on env, but bootstrap/dashboard needs serverToken.
-      console.warn(
-        "[planStore] Missing serverToken; cannot refresh dashboard via bootstrap"
-      );
-      return;
-    }
-    await useDashboardStore.getState().refreshDashboard(t);
-  }, [serverToken]);
 
   const makeInitialPlan = useCallback((): Plan => {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -489,7 +482,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   >(async () => {});
 
   const setTotalBudgetLimitMinor: Store["setTotalBudgetLimitMinor"] = (
-    minor
+    minor,
   ) => {
     const clean = Math.max(0, Number.isFinite(minor) ? Math.round(minor) : 0);
     setPlan((p) => ({ ...p, totalBudgetLimitMinor: clean }));
@@ -504,7 +497,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
   };
 
   const setAdvancedCurrencyMode: Store["setAdvancedCurrencyMode"] = (
-    enabled
+    enabled,
   ) => {
     userPrefs.setAdvancedCurrencyMode(!!enabled);
   };
@@ -542,7 +535,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         return next;
       });
     },
-    []
+    [],
   );
 
   const refreshPlan: Store["refreshPlan"] = useCallback(async () => {
@@ -553,7 +546,12 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
     try {
       const resp = await plansApi.getActive(token);
-      applyServerPlan(resp.plan);
+      const planDto = unwrapPlan(resp);
+      if (!planDto) {
+        console.warn("[planStore] getActive returned empty plan payload");
+        return false;
+      }
+      applyServerPlan(planDto);
       return true;
     } catch (err: any) {
       // If server reports no plan yet, create a default active plan.
@@ -567,7 +565,14 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
             language: "en",
             totalBudgetLimitMinor: 0,
           });
-          applyServerPlan(created.plan);
+          const planDto = unwrapPlan(created);
+          if (!planDto) {
+            console.warn(
+              "[planStore] create default plan returned empty payload",
+            );
+            return false;
+          }
+          applyServerPlan(planDto);
           return true;
         } catch (e) {
           console.warn("[planStore] Failed to create default plan", e);
@@ -614,9 +619,20 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // When logging in (token becomes available), refresh the active plan.
-    void refreshPlan();
-  }, [token, clearRolloverTimer, makeInitialPlan, refreshPlan, setErrorSafe]);
+    // When logging in (token becomes available), do a minimal init:
+    // - fetch active plan once
+    // - mark initialized to unblock UI
+    // NOTE: We avoid calling `initialize()` here because it is declared later in the file.
+    void (async () => {
+      setIsLoading(true);
+      try {
+        await refreshPlan();
+      } finally {
+        setIsLoading(false);
+        setIsInitialized(true);
+      }
+    })();
+  }, [token, clearRolloverTimer, makeInitialPlan, setErrorSafe, refreshPlan]);
 
   const postRollover = useCallback(async () => {
     if (!token) {
@@ -713,7 +729,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       plan.periodEndUTC,
       postRollover,
       refreshPlan,
-    ]
+    ],
   );
 
   useEffect(() => {
@@ -790,7 +806,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     async (nextCurrency: "USD" | "KRW") => {
       if (!token) {
         console.warn(
-          "[planStore] Missing auth token. Cannot switch plan currency."
+          "[planStore] Missing auth token. Cannot switch plan currency.",
         );
         return false;
       }
@@ -805,7 +821,9 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
             currency: nextCurrency,
           };
           const resp = await plansApi.switchCurrency(token, activePlanId, dto);
-          applyServerPlan(resp.plan);
+          const planDto = unwrapPlan(resp);
+          if (!planDto) return false;
+          applyServerPlan(planDto);
           return true;
         }
 
@@ -818,7 +836,9 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
           language: plan.language ?? "en",
           totalBudgetLimitMinor: plan.totalBudgetLimitMinor ?? 0,
         });
-        applyServerPlan(serverPlan.plan);
+        const planDto = unwrapPlan(serverPlan);
+        if (!planDto) return false;
+        applyServerPlan(planDto);
 
         return true;
       } catch (err) {
@@ -826,7 +846,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
     },
-    [plan, activePlanId, applyServerPlan, token]
+    [plan, activePlanId, applyServerPlan, token],
   );
 
   const switchPeriodType: Store["switchPeriodType"] = useCallback(
@@ -836,7 +856,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
       if (!token) {
         console.warn(
-          "[planStore] Missing auth token. Cannot switch period type."
+          "[planStore] Missing auth token. Cannot switch period type.",
         );
         return false;
       }
@@ -853,7 +873,9 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
       try {
         const serverPlan = await plansApi.update(token, body);
-        applyServerPlan(serverPlan.plan);
+        const planDto = unwrapPlan(serverPlan);
+        if (!planDto) return false;
+        applyServerPlan(planDto);
 
         return true;
       } catch (err) {
@@ -861,7 +883,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
     },
-    [plan, applyServerPlan, token]
+    [plan, applyServerPlan, token],
   );
 
   const refreshPeriodIfNeeded: Store["refreshPeriodIfNeeded"] =
@@ -938,18 +960,18 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
   const upsertBudgetGoalLimit: Store["upsertBudgetGoalLimit"] = (
     category,
-    limitMinor
+    limitMinor,
   ) => {
     const cat = normalizeCategoryKey(category);
     const cleanLimit = Math.max(
       0,
-      Number.isFinite(limitMinor) ? Math.round(limitMinor) : 0
+      Number.isFinite(limitMinor) ? Math.round(limitMinor) : 0,
     );
 
     setPlan((p) => {
       // Compare using normalized keys to avoid casing mismatches
       const idx = p.budgetGoals.findIndex(
-        (g) => normalizeCategoryKey(g.category) === cat
+        (g) => normalizeCategoryKey(g.category) === cat,
       );
 
       let nextGoals = p.budgetGoals;
@@ -970,7 +992,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
       const total = nextGoals.reduce(
         (sum, g) => sum + (g.limitMinor > 0 ? g.limitMinor : 0),
-        0
+        0,
       );
 
       const nextPlan = {
@@ -1005,7 +1027,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
     console.log(
       "[planStore] PATCH budget goals payload:",
-      JSON.stringify(payload)
+      JSON.stringify(payload),
     );
 
     try {
@@ -1013,12 +1035,11 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         const resp = await plansApi.patchBudgetGoals(
           token,
           activePlanId,
-          payload
+          payload,
         );
-        if (resp?.plan) {
-          applyServerPlan(resp.plan);
-          // Keep Dashboard in sync with goal changes (bootstrap uses serverToken)
-          await refreshDashboardAfterPlanGoalSave();
+        const planDto = unwrapPlan(resp);
+        if (planDto) {
+          applyServerPlan(planDto);
         }
         return true;
       }
@@ -1034,28 +1055,22 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         setActive: true,
         useCurrentPeriod: true,
       } as any);
-      applyServerPlan(resp.plan);
-      // Keep Dashboard in sync with goal changes (bootstrap uses serverToken)
-      await refreshDashboardAfterPlanGoalSave();
+      const planDto = unwrapPlan(resp);
+      if (planDto) {
+        applyServerPlan(planDto);
+      }
       return true;
     } catch (e) {
       console.warn("[planStore] saveBudgetGoals error", e);
       return false;
     }
-  }, [
-    token,
-    plan.budgetGoals,
-    plan.periodType,
-    activePlanId,
-    applyServerPlan,
-    refreshDashboardAfterPlanGoalSave,
-  ]);
+  }, [token, plan.budgetGoals, plan.periodType, activePlanId, applyServerPlan]);
 
   const saveBudgetGoal: Store["saveBudgetGoal"] = useCallback(
     async (category, limitMinor) => {
       if (!token) {
         console.warn(
-          "[planStore] Missing auth token. Cannot save budget goal."
+          "[planStore] Missing auth token. Cannot save budget goal.",
         );
         return false;
       }
@@ -1073,15 +1088,14 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
       console.log(
         "[planStore] POST budget goal payload:",
-        JSON.stringify(payload)
+        JSON.stringify(payload),
       );
 
       try {
         const resp = await plansApi.upsertBudgetGoal(token, planId, payload);
-        if (resp?.plan) {
-          applyServerPlan(resp.plan);
-          // Keep Dashboard in sync with goal changes (including deletes via limit=0)
-          await refreshDashboardAfterPlanGoalSave();
+        const planDto = unwrapPlan(resp);
+        if (planDto) {
+          applyServerPlan(planDto);
         }
         return true;
       } catch (e) {
@@ -1089,19 +1103,13 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
     },
-    [
-      token,
-      activePlanId,
-      applyServerPlan,
-      saveBudgetGoals,
-      refreshDashboardAfterPlanGoalSave,
-    ]
+    [token, activePlanId, applyServerPlan, saveBudgetGoals],
   );
 
   const saveSavingsGoals: Store["saveSavingsGoals"] = useCallback(async () => {
     if (!token) {
       console.warn(
-        "[planStore] Missing auth token. Cannot save savings goals."
+        "[planStore] Missing auth token. Cannot save savings goals.",
       );
       return false;
     }
@@ -1120,7 +1128,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
     console.log(
       "[planStore] PATCH savings goals payload:",
-      JSON.stringify(payload)
+      JSON.stringify(payload),
     );
 
     try {
@@ -1128,12 +1136,11 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         const resp = await plansApi.patchSavingsGoals(
           token,
           activePlanId,
-          payload
+          payload,
         );
-        if (resp?.plan) {
-          applyServerPlan(resp.plan);
-          // Keep Dashboard in sync with goal changes (create/rename/target edits)
-          await refreshDashboardAfterPlanGoalSave();
+        const planDto = unwrapPlan(resp);
+        if (planDto) {
+          applyServerPlan(planDto);
         }
         return true;
       }
@@ -1148,36 +1155,31 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         setActive: true,
         useCurrentPeriod: true,
       } as any);
-      applyServerPlan(resp.plan);
-      // Keep Dashboard in sync with goal changes
-      await refreshDashboardAfterPlanGoalSave();
+      const planDto = unwrapPlan(resp);
+      if (planDto) {
+        applyServerPlan(planDto);
+      }
       return true;
     } catch (e) {
       console.warn("[planStore] saveSavingsGoals error", e);
       return false;
     }
-  }, [
-    token,
-    plan,
-    activePlanId,
-    applyServerPlan,
-    refreshDashboardAfterPlanGoalSave,
-  ]);
+  }, [token, plan, activePlanId, applyServerPlan]);
 
   const upsertSavingsGoalTarget: Store["upsertSavingsGoalTarget"] = (
     id,
-    targetMinor
+    targetMinor,
   ) => {
     const goalId = String(id ?? "").trim();
     if (!goalId) return;
     const clean = Math.max(
       0,
-      Number.isFinite(targetMinor) ? Math.round(targetMinor) : 0
+      Number.isFinite(targetMinor) ? Math.round(targetMinor) : 0,
     );
 
     setPlan((p) => {
       const idx = (p.savingsGoals ?? []).findIndex(
-        (g) => String(g.id ?? "") === goalId
+        (g) => String(g.id ?? "") === goalId,
       );
       if (idx < 0) return p;
 
@@ -1194,7 +1196,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     const n = (name || "").trim();
     const t = Math.max(
       0,
-      Number.isFinite(targetMinor) ? Math.round(targetMinor) : 0
+      Number.isFinite(targetMinor) ? Math.round(targetMinor) : 0,
     );
     if (!n) return;
 
@@ -1220,7 +1222,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
     setPlan((p) => {
       const idx = (p.savingsGoals ?? []).findIndex(
-        (g) => String(g.id ?? "") === goalId
+        (g) => String(g.id ?? "") === goalId,
       );
       if (idx < 0) return p;
 
@@ -1261,7 +1263,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         setIsInitialized(true);
       }
     },
-    [applyServerPlan]
+    [applyServerPlan],
   );
 
   const store = useMemo<Store>(
@@ -1326,7 +1328,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       isInitialized,
       isLoading,
       initialize,
-    ]
+    ],
   );
 
   return React.createElement(PlanContext.Provider, { value: store }, children);

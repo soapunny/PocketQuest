@@ -21,14 +21,14 @@ import {
   TransactionsSummary,
   TxType,
   TransactionDTO,
-} from "../../../../../../packages/shared/src/transactions/types";
-import { Currency } from "../../../../../../packages/shared/src/money/types";
+} from "@pq/shared/transactions/types";
+import { Currency } from "@pq/shared/money/types";
 
 import {
   EXPENSE_CATEGORY_KEYS,
   INCOME_CATEGORY_KEYS,
   canonicalCategoryKeyForServer,
-} from "../../../../../../packages/shared/src/transactions/categories";
+} from "@pq/shared/transactions/categories";
 
 const SAVING_CATEGORY_KEY = "savings" as const;
 
@@ -40,7 +40,7 @@ const incomeCategoryKeySchema = z.enum(INCOME_CATEGORY_KEYS);
 // category/savingsGoal validation beyond this shared shape.
 
 async function resolveUserPlanIdForGoals(
-  userId: string
+  userId: string,
 ): Promise<string | null> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -138,22 +138,51 @@ function getDevUserId(request: NextRequest, body?: unknown): string | null {
   return null;
 }
 
+// Helper to resolve internal userId (authenticated or dev) and dev hint
+async function resolveInternalUserId(
+  request: NextRequest,
+  body?: unknown,
+): Promise<{ userId: string | null; devHint: string | null }> {
+  const authed = await getAuthUser(request);
+
+  const devUserId = !authed ? getDevUserId(request, body) : null;
+
+  if (authed?.supabaseUserId) {
+    const internal = await prisma.user.findUnique({
+      where: { supabaseUserId: authed.supabaseUserId },
+      select: { id: true },
+    });
+
+    if (internal?.id) {
+      return { userId: internal.id, devHint: null };
+    }
+
+    return { userId: null, devHint: null };
+  }
+
+  if (devUserId) {
+    return {
+      userId: devUserId,
+      devHint: "DEV: pass x-dev-user-id header or ?userId=... (or body.userId)",
+    };
+  }
+
+  return { userId: null, devHint: null };
+}
+
 // GET /api/transactions - Get all transactions for user
 export async function GET(request: NextRequest) {
-  const user = getAuthUser(request);
-  const devUserId = !user ? getDevUserId(request) : null;
-  const userId = user?.userId ?? devUserId;
+  const { userId, devHint } = await resolveInternalUserId(request);
 
   if (!userId) {
     return NextResponse.json(
       {
         error: "Unauthorized",
-        hint:
-          process.env.NODE_ENV !== "production"
-            ? "DEV: pass x-dev-user-id header or ?userId=..."
-            : undefined,
+        ...(process.env.NODE_ENV !== "production" && devHint
+          ? { hint: devHint }
+          : {}),
       },
-      { status: 401 }
+      { status: 401 },
     );
   }
 
@@ -165,7 +194,7 @@ export async function GET(request: NextRequest) {
     if (!parsedRange.success) {
       return NextResponse.json(
         { error: "Invalid range", details: parsedRange.error.message },
-        { status: 400 }
+        { status: 400 },
       );
     }
     const range = parsedRange.data;
@@ -237,7 +266,7 @@ export async function GET(request: NextRequest) {
 
     // Add occurredAtLocalISO to reduce client parsing burden.
     const transactionsDTO = transactions.map((t) =>
-      toTransactionDTO(t, timeZone)
+      toTransactionDTO(t, timeZone),
     );
 
     let summary: TransactionsSummary | undefined;
@@ -298,31 +327,29 @@ export async function GET(request: NextRequest) {
     console.error("Get transactions error:", error);
     return NextResponse.json(
       { error: "Internal server error" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
 
 // POST /api/transactions - Create new transaction
 export async function POST(request: NextRequest) {
-  const user = getAuthUser(request);
+  // const user = getAuthUser(request); // removed per instructions
 
   try {
     const body: unknown = await request.json();
 
-    const devUserId = !user ? getDevUserId(request, body) : null;
-    const userId = user?.userId ?? devUserId;
+    const { userId, devHint } = await resolveInternalUserId(request, body);
 
     if (!userId) {
       return NextResponse.json(
         {
           error: "Unauthorized",
-          hint:
-            process.env.NODE_ENV !== "production"
-              ? "DEV: pass x-dev-user-id header or include userId in body"
-              : undefined,
+          ...(process.env.NODE_ENV !== "production" && devHint
+            ? { hint: devHint }
+            : {}),
         },
-        { status: 401 }
+        { status: 401 },
       );
     }
 
@@ -344,7 +371,7 @@ export async function POST(request: NextRequest) {
     ) {
       return NextResponse.json(
         { error: "Invalid transaction type" },
-        { status: 400 }
+        { status: 400 },
       );
     }
     // normalize inputs
@@ -370,7 +397,7 @@ export async function POST(request: NextRequest) {
       if (!savingsGoalId) {
         return NextResponse.json(
           { error: "savingsGoalId is required for SAVING" },
-          { status: 400 }
+          { status: 400 },
         );
       }
 
@@ -380,13 +407,13 @@ export async function POST(request: NextRequest) {
         if (err?.code === "PLAN_NOT_FOUND") {
           return NextResponse.json(
             { error: "Plan not found" },
-            { status: 404 }
+            { status: 404 },
           );
         }
         if (err?.code === "SAVINGS_GOAL_FORBIDDEN") {
           return NextResponse.json(
             { error: "savingsGoalId does not belong to you" },
-            { status: 403 }
+            { status: 403 },
           );
         }
         throw err;
@@ -406,7 +433,7 @@ export async function POST(request: NextRequest) {
               error: "Invalid expense category",
               allowed: EXPENSE_CATEGORY_KEYS,
             },
-            { status: 400 }
+            { status: 400 },
           );
         }
         category = ok.data;
@@ -417,7 +444,7 @@ export async function POST(request: NextRequest) {
         if (!ok.success) {
           return NextResponse.json(
             { error: "Invalid income category", allowed: INCOME_CATEGORY_KEYS },
-            { status: 400 }
+            { status: 400 },
           );
         }
         category = ok.data;
@@ -461,13 +488,13 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(
       { transaction: toTransactionDTO(created, timeZone) },
-      { status: 201 }
+      { status: 201 },
     );
   } catch (error) {
     if (error instanceof ZodError) {
       return NextResponse.json(
         { error: "Invalid request data", details: error.errors },
-        { status: 400 }
+        { status: 400 },
       );
     }
 

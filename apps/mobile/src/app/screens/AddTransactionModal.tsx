@@ -19,9 +19,10 @@ import ScreenLayout from "../components/layout/ScreenLayout";
 import ScreenHeader from "../components/layout/ScreenHeader";
 import ScreenCard from "../components/layout/ScreenCard";
 
-import type { TxType } from "../../../../../packages/shared/src/transactions/types";
-import type { Currency } from "../../../../../packages/shared/src/money/types";
+import type { TxType } from "@pq/shared/transactions/types";
+import type { Currency } from "@pq/shared/money/types";
 
+import { useAuthStore } from "../store/authStore";
 import { useTransactions } from "../store/transactionsStore";
 import { usePlan } from "../store/planStore";
 import { useDashboardStore } from "../store/dashboardStore";
@@ -31,12 +32,14 @@ import {
   EXPENSE_CATEGORY_KEYS,
   INCOME_CATEGORY_KEYS,
   canonicalCategoryKeyForServer,
-} from "../../../../../packages/shared/src/transactions/categories";
+} from "@pq/shared/transactions/categories";
 
 export default function AddTransactionModal() {
   const navigation = useNavigation();
   const txStore = useTransactions();
   const { refreshDashboard } = useDashboardStore();
+  const auth = useAuthStore();
+  const supabaseAccessToken = auth.supabaseAccessToken ?? "";
 
   const planStore = usePlan() as any;
   const { homeCurrency, displayCurrency, language } = planStore;
@@ -78,17 +81,17 @@ export default function AddTransactionModal() {
     // Prefer a sensible default instead of "uncategorized"
     const preferred = "groceries";
     const list = EXPENSE_CATEGORY_KEYS as readonly string[];
-    return list.includes(preferred) ? preferred : list[0] ?? "other";
+    return list.includes(preferred) ? preferred : (list[0] ?? "other");
   }, []);
 
   const defaultIncomeCategory = useMemo(() => {
     const preferred = "salary";
     const list = INCOME_CATEGORY_KEYS as readonly string[];
-    return list.includes(preferred) ? preferred : list[0] ?? "other";
+    return list.includes(preferred) ? preferred : (list[0] ?? "other");
   }, []);
 
   const [categoryKey, setCategoryKey] = useState<string>(
-    defaultExpenseCategory
+    defaultExpenseCategory,
   );
   const [selectedSavingsGoalId, setSelectedSavingsGoalId] =
     useState<string>("");
@@ -181,8 +184,8 @@ export default function AddTransactionModal() {
           tr("No savings goal", "저축 목표 없음"),
           tr(
             "Select a Savings Goal first (Unassigned is not available when adding a new Saving transaction).",
-            "저축 거래를 추가하려면 저축 목표를 선택해야 해요(거래 추가에서는 '미지정'을 선택할 수 없어요)."
-          )
+            "저축 거래를 추가하려면 저축 목표를 선택해야 해요(거래 추가에서는 '미지정'을 선택할 수 없어요).",
+          ),
         );
         return;
       }
@@ -191,7 +194,7 @@ export default function AddTransactionModal() {
     // 항상 양수(또는 0 이상)로 minor 단위를 저장하고,
     // EXPENSE/INCOME/SAVING 구분은 type으로 처리합니다.
     const absMinor = Math.round(
-      (amountValue ?? 0) * (currency === "USD" ? 100 : 1)
+      (amountValue ?? 0) * (currency === "USD" ? 100 : 1),
     );
     const amountMinor = absMinor;
 
@@ -220,7 +223,7 @@ export default function AddTransactionModal() {
       if (type === "EXPENSE") {
         if (
           !(EXPENSE_CATEGORY_KEYS as readonly string[]).includes(
-            categoryForServer
+            categoryForServer,
           )
         ) {
           categoryForServer = defaultExpenseCategory;
@@ -228,7 +231,7 @@ export default function AddTransactionModal() {
       } else if (type === "INCOME") {
         if (
           !(INCOME_CATEGORY_KEYS as readonly string[]).includes(
-            categoryForServer
+            categoryForServer,
           )
         ) {
           categoryForServer = defaultIncomeCategory;
@@ -249,20 +252,22 @@ export default function AddTransactionModal() {
         note: noteTrimmed || undefined,
       });
       // Ensure Dashboard reflects the new transaction immediately.
-      await refreshDashboard();
+      if (supabaseAccessToken) {
+        await refreshDashboard(supabaseAccessToken);
+      }
 
       navigation.goBack();
     } catch (error) {
       console.error(
         "[AddTransactionModal] failed to create transaction",
-        error
+        error,
       );
       Alert.alert(
         tr("Save failed", "저장 실패"),
         tr(
           "Could not save this transaction. Please try again.",
-          "거래를 저장하지 못했어요. 다시 시도해 주세요."
-        )
+          "거래를 저장하지 못했어요. 다시 시도해 주세요.",
+        ),
       );
     } finally {
       setIsSaving(false);
@@ -277,7 +282,7 @@ export default function AddTransactionModal() {
           title={tr("Add Transaction", "거래 추가")}
           subtitle={tr(
             "Quick entry • Currency comes from Settings",
-            "빠른 입력 • 통화는 설정에서 가져와요"
+            "빠른 입력 • 통화는 설정에서 가져와요",
           )}
           compact
         />
@@ -327,8 +332,8 @@ export default function AddTransactionModal() {
                   {t === "EXPENSE"
                     ? tr("Expense", "지출")
                     : t === "INCOME"
-                    ? tr("Income", "수입")
-                    : tr("Saving", "저축")}
+                      ? tr("Income", "수입")
+                      : tr("Saving", "저축")}
                 </Text>
               </Pressable>
             ))}
@@ -355,7 +360,7 @@ export default function AddTransactionModal() {
           <Text style={[CardSpacing.fieldHelp, styles.helper]}>
             {tr(
               "Enter an amount (numbers only). Currency is set from Settings.",
-              "금액을 입력하세요(숫자만). 통화는 설정에서 정해져요."
+              "금액을 입력하세요(숫자만). 통화는 설정에서 정해져요.",
             )}
           </Text>
         </View>
@@ -369,7 +374,7 @@ export default function AddTransactionModal() {
             <Text style={[CardSpacing.fieldHelp, styles.helper]}>
               {tr(
                 `Used for totals in ${homeCurrency}. Enter: 1 USD = ___ KRW`,
-                `기준 합계 통화(${homeCurrency})로 계산할 때 사용돼요. 입력: 1 USD = ___ KRW`
+                `기준 합계 통화(${homeCurrency})로 계산할 때 사용돼요. 입력: 1 USD = ___ KRW`,
               )}
             </Text>
             <TextInput
@@ -389,7 +394,7 @@ export default function AddTransactionModal() {
               <Text style={styles.errorText}>
                 {tr(
                   "Please enter a valid exchange rate.",
-                  "올바른 환율을 입력해 주세요."
+                  "올바른 환율을 입력해 주세요.",
                 )}
               </Text>
             )}
@@ -402,8 +407,8 @@ export default function AddTransactionModal() {
             {type === "SAVING"
               ? tr("Savings Goal", "저축 목표")
               : type === "INCOME"
-              ? tr("Income Category", "수입 카테고리")
-              : tr("Category", "카테고리")}
+                ? tr("Income Category", "수입 카테고리")
+                : tr("Category", "카테고리")}
           </Text>
           <View style={styles.chipRow}>
             {categoryOptions.map((c) => {
@@ -428,8 +433,8 @@ export default function AddTransactionModal() {
                 >
                   <Text style={chipTextStyle(active)}>
                     {type === "SAVING"
-                      ? savingsGoalOptions.find((g) => g.id === c)?.name ??
-                        tr("Unassigned", "미지정")
+                      ? (savingsGoalOptions.find((g) => g.id === c)?.name ??
+                        tr("Unassigned", "미지정"))
                       : categoryLabelText(c, language)}
                   </Text>
                 </Pressable>
