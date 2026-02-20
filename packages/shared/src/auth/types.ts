@@ -11,7 +11,7 @@ export interface AuthSyncResponseDTO {
     id: string; // internal user id (Prisma user id)
     supabaseUserId: string; // SSOT key (추천)
     email: string;
-    name: string;
+    name: string | null;
     profileImageUri: string | null;
   };
 }

@@ -3,7 +3,8 @@
 import { z } from "zod";
 
 import type { Currency } from "../money/types";
-import { CURRENCY_VALUES, currencySchema } from "../money/types";
+import { currencySchema } from "../money/types";
+import { EXPENSE_CATEGORY_KEYS, INCOME_CATEGORY_KEYS } from "./categories";
 
 // 2.1 Common enum/union (const arrays + types)
 export const RANGE_VALUES = [
@@ -12,7 +13,12 @@ export const RANGE_VALUES = [
   "THIS_YEAR",
   "ALL",
 ] as const;
-export type Range = (typeof RANGE_VALUES)[number];
+// 2.4 Zod schemas (basic shapes only, no server-only category enforcement)
+export const rangeSchema = z.enum(
+  RANGE_VALUES as unknown as [string, ...string[]],
+);
+
+export type Range = z.infer<typeof rangeSchema>;
 
 export const TX_TYPE_VALUES = ["EXPENSE", "INCOME", "SAVING"] as const;
 export type TxType = (typeof TX_TYPE_VALUES)[number];
@@ -119,12 +125,10 @@ export type UpdateTransactionDTO = Partial<CreateTransactionDTO>;
 export type CreateTransactionResponseDTO = { transaction: TransactionDTO };
 export type DeleteTransactionResponseDTO = { success: boolean };
 
-// 2.4 Zod schemas (basic shapes only, no server-only category enforcement)
-export const rangeSchema = z.enum(
-  RANGE_VALUES as unknown as [string, ...string[]]
-);
+type TxTypeEnumTuple = [TxType, ...TxType[]];
+
 export const txTypeSchema = z.enum(
-  TX_TYPE_VALUES as unknown as [string, ...string[]]
+  TX_TYPE_VALUES as unknown as TxTypeEnumTuple,
 );
 
 export const transactionCreateSchema = z.object({
@@ -150,6 +154,18 @@ export const transactionUpdateSchema = z.object({
   note: z.string().optional().nullable(),
   amountCents: z.number().optional(),
 });
+
+// Zod enums from shared SSOT
+// z.enum expects a non-empty tuple type, so we cast for TS stability.
+type ZodEnumTuple = [string, ...string[]];
+
+export const expenseCategoryKeySchema = z.enum(
+  EXPENSE_CATEGORY_KEYS as unknown as ZodEnumTuple,
+);
+
+export const incomeCategoryKeySchema = z.enum(
+  INCOME_CATEGORY_KEYS as unknown as ZodEnumTuple,
+);
 
 export type CreateTransactionInput = z.infer<typeof transactionCreateSchema>;
 export type UpdateTransactionInput = z.infer<typeof transactionUpdateSchema>;

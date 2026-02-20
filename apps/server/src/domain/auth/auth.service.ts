@@ -8,6 +8,7 @@ import {
 } from "./auth.mapper";
 import * as authRepo from "./auth.repository";
 import { ensureActivePlan } from "@/domain/plan/plan.service";
+import { HttpError } from "@/lib/http/httpError";
 
 /**
  * Supabase Auth is the source of truth (Option 1).
@@ -19,8 +20,8 @@ function getSupabaseClient() {
   const url = process.env.SUPABASE_URL;
   const anonKey = process.env.SUPABASE_ANON_KEY;
 
-  if (!url) throw new Error("SUPABASE_URL is required");
-  if (!anonKey) throw new Error("SUPABASE_ANON_KEY is required");
+  if (!url) throw new HttpError(500, "SUPABASE_URL is required");
+  if (!anonKey) throw new HttpError(500, "SUPABASE_ANON_KEY is required");
 
   return createClient(url, anonKey, {
     //Supabase REST API 호출을 위한 SDK Client 생성
@@ -33,23 +34,43 @@ function getSupabaseClient() {
 }
 
 function toClientProviderFromSupabase(provider: unknown): "google" | "kakao" {
-  const p = String(provider ?? "").toLowerCase();
+  const p = String(provider ?? "")
+    .toLowerCase()
+    .trim();
+
+  if (p === "google") return "google";
   if (p === "kakao") return "kakao";
-  return "google";
+
+  // Do not silently default to google: that can corrupt user records.
+  throw new HttpError(400, "Unsupported auth provider", {
+    provider: p || null,
+  });
 }
 
 function deriveIdentityFromSupabaseUser(user: any) {
   // supabase.user를 받아서(PocketQuest.User X)
   const supabaseUserId = String(user?.id ?? "").trim(); // Supabase.user.id -> PocketQuest.User.supabaseUserId
-  if (!supabaseUserId) throw new Error("Supabase user missing id");
+  if (!supabaseUserId) throw new HttpError(400, "Supabase user missing id");
 
   const identities = Array.isArray(user?.identities) ? user.identities : [];
-  const primaryIdentity = identities[0] ?? null;
 
-  const provider = toClientProviderFromSupabase(primaryIdentity?.provider); // google | kakao
+  // Prefer a known provider identity if multiple exist.
+  // If we still can't determine, fail fast (do not guess).
+  const known =
+    identities.find(
+      (i: any) => String(i?.provider ?? "").toLowerCase() === "google",
+    ) ??
+    identities.find(
+      (i: any) => String(i?.provider ?? "").toLowerCase() === "kakao",
+    ) ??
+    null;
+
+  const primaryIdentity = known;
+
+  const provider = toClientProviderFromSupabase(primaryIdentity?.provider);
 
   const email = String(user?.email ?? "").trim();
-  if (!email) throw new Error("Supabase user missing email");
+  if (!email) throw new HttpError(400, "Supabase user missing email");
 
   const meta = (user?.user_metadata ?? {}) as Record<string, unknown>;
   const name =
@@ -78,7 +99,8 @@ function deriveIdentityFromSupabaseUser(user: any) {
   // If Supabase doesn't provide external id, fallback to supabaseUserId (safe)
   const providerId = (externalProviderId || supabaseUserId).trim();
 
-  if (!providerId) throw new Error("Supabase identity missing providerId");
+  if (!providerId)
+    throw new HttpError(400, "Supabase identity missing providerId");
 
   return { supabaseUserId, provider, providerId, email, name, profileImageUri };
 }
@@ -90,7 +112,7 @@ export async function signInWithSupabaseAccessToken(accessToken: string) {
   const { data, error } = await supabase.auth.getUser(accessToken); // Supabase SDK 활용해서 토큰 검증
   if (error || !data?.user) {
     console.error("Supabase getUser error:", error);
-    throw new Error("Unauthorized"); //Access token is invalid or expired
+    throw new HttpError(401, "Unauthorized"); //Access token is invalid or expired
   }
 
   // 2) Derive identity ONLY from verified Supabase user
@@ -111,7 +133,16 @@ export async function signInWithSupabaseAccessToken(accessToken: string) {
       // 이미 동일 email로 가입된 계정이 있지만
       // supabaseUserId가 다르면 다른 provider로 생성된 계정일 가능성
       // → 자동 병합 금지 (다른 앱들과 동일 정책)
-      throw new Error("Account already exists with different login method");
+      throw new HttpError(
+        409,
+        "Account already exists with different login method",
+        {
+          conflict: "EMAIL_ALREADY_USED",
+          email,
+          // optionally expose only provider info if you want UI messaging:
+          // existingProvider: existingUser.provider,
+        },
+      );
     }
 
     // 완전히 신규 사용자만 생성

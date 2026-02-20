@@ -49,6 +49,11 @@ export default function LoginScreen() {
         options: {
           redirectTo,
           skipBrowserRedirect: true,
+
+          // Always force account re-selection
+          queryParams: {
+            prompt: "select_account",
+          },
         },
       });
 
@@ -94,19 +99,6 @@ export default function LoginScreen() {
         // - Send Supabase access_token to our backend via Authorization header
         // - Backend verifies the token with Supabase and syncs internal user
 
-        const { data: sessionRes, error: sessionErr } =
-          await supabase.auth.getSession();
-        if (sessionErr) {
-          console.error("getSession error:", sessionErr);
-          return;
-        }
-
-        const accessToken = sessionRes?.session?.access_token;
-        if (!accessToken) {
-          console.error("Missing Supabase access token after setSession");
-          return;
-        }
-
         try {
           // Call backend to sync/create internal user based on verified Supabase identity.
           // No JSON body needed.
@@ -114,7 +106,7 @@ export default function LoginScreen() {
             method: "POST",
             headers: {
               Accept: "application/json",
-              Authorization: `Bearer ${accessToken}`,
+              Authorization: `Bearer ${access_token}`,
             },
           });
 

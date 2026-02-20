@@ -4,6 +4,8 @@ import { z } from "zod";
 export const CURRENCY_VALUES = ["USD", "KRW"] as const;
 export type Currency = (typeof CURRENCY_VALUES)[number];
 
+type CurrencyEnumTuple = [Currency, ...Currency[]];
+
 export const currencySchema = z.enum(
-  CURRENCY_VALUES as unknown as [string, ...string[]]
+  CURRENCY_VALUES as unknown as CurrencyEnumTuple,
 );

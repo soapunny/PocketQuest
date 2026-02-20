@@ -10,6 +10,8 @@ import {
   transactionUpdateSchema,
   TransactionDTO,
   TxType,
+  incomeCategoryKeySchema,
+  expenseCategoryKeySchema,
 } from "@pq/shared/transactions/types";
 import {
   EXPENSE_CATEGORY_KEYS,
@@ -20,49 +22,16 @@ import {
 const SAVING_CATEGORY_KEY = "savings" as const;
 
 // Zod enums from shared SSOT
-const expenseCategoryKeySchema = z.enum(EXPENSE_CATEGORY_KEYS);
-const incomeCategoryKeySchema = z.enum(INCOME_CATEGORY_KEYS);
 import { DEFAULT_TIME_ZONE } from "@/lib/plan/defaults";
 import { toZonedTime } from "date-fns-tz";
 import { format } from "date-fns";
+import {
+  toTransactionDTO,
+  TransactionWithSavingsGoalNameRow,
+} from "@/domain/transaction/transaction.mapper";
 
 // Use shared transactionUpdateSchema for basic update shape; server enforces extra rules.
 const updateTransactionSchema = transactionUpdateSchema;
-
-type TransactionRow = {
-  id: string;
-  userId: string;
-  type: TxType;
-  amountMinor: number;
-  currency: Currency;
-  fxUsdKrw: number | null;
-  category: string;
-  savingsGoalId: string | null;
-  occurredAt: Date;
-  note: string | null;
-  savingsGoal?: { name: string } | null;
-};
-
-function toTransactionDTO(t: TransactionRow, timeZone: string): TransactionDTO {
-  const zoned = toZonedTime(t.occurredAt, timeZone);
-  const occurredAtLocalISO = format(zoned, "yyyy-MM-dd'T'HH:mm:ss");
-  const savingsGoalName = t.savingsGoal?.name ?? null;
-
-  return {
-    id: t.id,
-    userId: t.userId,
-    type: t.type,
-    amountMinor: t.amountMinor,
-    currency: t.currency,
-    fxUsdKrw: t.fxUsdKrw ?? null,
-    category: t.category,
-    savingsGoalId: t.savingsGoalId ?? null,
-    occurredAt: t.occurredAt.toISOString(),
-    occurredAtLocalISO,
-    note: t.note ?? null,
-    savingsGoalName,
-  };
-}
 
 function getDevUserId(request: NextRequest, body?: unknown): string | null {
   if (process.env.NODE_ENV === "production") return null;
@@ -199,7 +168,7 @@ export async function GET(
         note: true,
         savingsGoal: { select: { name: true } },
       },
-    })) as TransactionRow | null;
+    })) as TransactionWithSavingsGoalNameRow | null;
 
     if (!transaction) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -270,7 +239,7 @@ export async function PATCH(
         occurredAt: true,
         note: true,
       },
-    })) as TransactionRow | null;
+    })) as TransactionWithSavingsGoalNameRow | null;
 
     if (!existing) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -398,7 +367,7 @@ export async function PATCH(
         note: true,
         savingsGoal: { select: { name: true } },
       },
-    })) as TransactionRow;
+    })) as TransactionWithSavingsGoalNameRow;
 
     return NextResponse.json({
       transaction: toTransactionDTO(transaction, timeZone),
