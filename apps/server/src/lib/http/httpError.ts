@@ -1,5 +1,7 @@
 // apps/server/src/lib/http/httpError.ts
 
+import { Prisma } from "@prisma/client";
+
 export type ErrorPayload = Record<string, unknown>;
 
 export class HttpError extends Error {

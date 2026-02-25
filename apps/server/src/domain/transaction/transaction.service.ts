@@ -16,6 +16,7 @@ import {
   type TransactionsListResponseDTO,
   type CreateTransactionDTO,
   type CreateTransactionResponseDTO,
+  type UpdateTransactionDTO,
   type TxType,
   expenseCategoryKeySchema,
   incomeCategoryKeySchema,
@@ -41,9 +42,78 @@ import {
   listTransactions,
   aggregateTransactionsByType,
   createTransaction,
+  findTransactionByIdForUser,
+  updateTransactionById,
+  deleteTransactionById,
 } from "@/domain/transaction/transaction.repository";
 
 const SAVING_CATEGORY_KEY = "savings" as const;
+
+async function normalizeAndValidateCategory(params: {
+  userId: string;
+  type: TxType;
+  categoryRaw: unknown;
+  savingsGoalIdRaw: unknown;
+}): Promise<{ category: string; savingsGoalId: string | null }> {
+  const { userId, type } = params;
+
+  // Canonicalize category to server-accepted keys (aliases/casing)
+  let category = canonicalCategoryKeyForServer(
+    String(params.categoryRaw ?? "").trim(),
+    type,
+  );
+
+  // Defense-in-depth: INCOME must never be "uncategorized" (legacy key).
+  if (type === "INCOME" && category === "uncategorized") {
+    category = "other";
+  }
+
+  const savingsGoalId =
+    typeof params.savingsGoalIdRaw === "string"
+      ? params.savingsGoalIdRaw.trim()
+      : "";
+
+  // SAVING rules
+  if (type === "SAVING") {
+    if (!savingsGoalId) {
+      throw new HttpError(400, "savingsGoalId is required for SAVING");
+    }
+
+    await assertSavingsGoalOwnership({ userId, savingsGoalId });
+    return { category: SAVING_CATEGORY_KEY, savingsGoalId };
+  }
+
+  // non-saving: ignore any provided savingsGoalId and validate canonical category key
+  if (type === "EXPENSE") {
+    const ok = expenseCategoryKeySchema.safeParse(category);
+    if (!ok.success) {
+      throw new HttpError(400, "Invalid expense category", {
+        allowed: EXPENSE_CATEGORY_KEYS,
+      });
+    }
+    category = ok.data;
+  }
+
+  if (type === "INCOME") {
+    const ok = incomeCategoryKeySchema.safeParse(category);
+    if (!ok.success) {
+      throw new HttpError(400, "Invalid income category", {
+        allowed: INCOME_CATEGORY_KEYS,
+      });
+    }
+    category = ok.data;
+  }
+
+  return { category, savingsGoalId: null };
+}
+
+function parseOccurredAt(occurredAtISO: string): Date {
+  const d = new Date(occurredAtISO);
+  if (Number.isNaN(d.getTime())) {
+    throw new HttpError(400, "Invalid occurredAtISO");
+  }
+  return d;
+}
 
 function computeOccurredAtFilter(
   range: Range,
@@ -186,59 +256,17 @@ export async function createTransactionForUser(params: {
 
   const timeZone = (await getUserTimeZone(userId)) || DEFAULT_TIME_ZONE;
 
-  // normalize inputs
-  const categoryRaw = String(data.category ?? "").trim();
-  let savingsGoalId =
-    typeof data.savingsGoalId === "string"
-      ? data.savingsGoalId.trim()
-      : undefined;
-  if (savingsGoalId === "") savingsGoalId = undefined;
+  const occurredAt = parseOccurredAt(data.occurredAtISO);
 
-  // Canonicalize category to server-accepted keys (aliases/casing)
-  const txType: TxType = data.type;
-  let category = canonicalCategoryKeyForServer(categoryRaw, txType);
+  const norm = await normalizeAndValidateCategory({
+    userId,
+    type: data.type,
+    categoryRaw: data.category,
+    savingsGoalIdRaw: data.savingsGoalId,
+  });
 
-  // Defense-in-depth: INCOME must never be "uncategorized" (legacy key).
-  if (txType === "INCOME" && category === "uncategorized") {
-    category = "other";
-  }
-
-  // SAVING rules
-  if (data.type === "SAVING") {
-    if (!savingsGoalId) {
-      throw new HttpError(400, "savingsGoalId is required for SAVING");
-    }
-
-    await assertSavingsGoalOwnership({ userId, savingsGoalId });
-
-    // Override category regardless of client input (canonical saving key)
-    category = SAVING_CATEGORY_KEY;
-  } else {
-    // non-saving: ignore any provided savingsGoalId and validate canonical category key
-    savingsGoalId = undefined;
-
-    if (data.type === "EXPENSE") {
-      const ok = expenseCategoryKeySchema.safeParse(category);
-      if (!ok.success) {
-        throw new HttpError(400, "Invalid expense category", {
-          allowed: EXPENSE_CATEGORY_KEYS,
-        });
-      }
-      category = ok.data;
-    }
-
-    if (data.type === "INCOME") {
-      const ok = incomeCategoryKeySchema.safeParse(category);
-      if (!ok.success) {
-        throw new HttpError(400, "Invalid income category", {
-          allowed: INCOME_CATEGORY_KEYS,
-        });
-      }
-      category = ok.data;
-    }
-  }
-
-  const occurredAt = new Date(data.occurredAtISO);
+  const category = norm.category;
+  const savingsGoalId = norm.savingsGoalId;
 
   // IMPORTANT: Prisma expects enums for currency/type in create input.
   // We keep this typed as Prisma.TransactionUncheckedCreateInput for repo compatibility.
@@ -251,7 +279,7 @@ export async function createTransactionForUser(params: {
     currency: (data.currency ?? "USD") as any,
     fxUsdKrw: data.fxUsdKrw ?? null,
     category,
-    savingsGoalId: data.type === "SAVING" ? (savingsGoalId as string) : null,
+    savingsGoalId,
     occurredAt,
     note: data.note ?? null,
   };
@@ -261,4 +289,97 @@ export async function createTransactionForUser(params: {
   })) as TransactionWithSavingsGoalNameRow;
 
   return { transaction: toTransactionDTO(created, timeZone) };
+}
+
+export async function getTransactionByIdForUser(params: {
+  userId: string;
+  id: string;
+}): Promise<{ transaction: ReturnType<typeof toTransactionDTO> }> {
+  const timeZone = (await getUserTimeZone(params.userId)) || DEFAULT_TIME_ZONE;
+
+  const tx = await findTransactionByIdForUser({
+    userId: params.userId,
+    id: params.id,
+  });
+
+  if (!tx) throw new HttpError(404, "Not found");
+
+  return { transaction: toTransactionDTO(tx, timeZone) };
+}
+
+export async function updateTransactionForUser(params: {
+  userId: string;
+  id: string;
+  data: UpdateTransactionDTO;
+}): Promise<{ transaction: ReturnType<typeof toTransactionDTO> }> {
+  const timeZone = (await getUserTimeZone(params.userId)) || DEFAULT_TIME_ZONE;
+
+  const existing = await findTransactionByIdForUser({
+    userId: params.userId,
+    id: params.id,
+  });
+  if (!existing) throw new HttpError(404, "Not found");
+
+  // ---- next state (PATCH merge) ----
+  const nextType = params.data.type ?? existing.type;
+  const nextAmountMinor = params.data.amountMinor ?? existing.amountMinor;
+  const nextCurrency = params.data.currency ?? existing.currency;
+  const nextFxUsdKrw =
+    params.data.fxUsdKrw !== undefined
+      ? params.data.fxUsdKrw
+      : existing.fxUsdKrw;
+  const nextNote =
+    params.data.note !== undefined ? params.data.note : existing.note;
+  const nextOccurredAt = params.data.occurredAtISO
+    ? parseOccurredAt(params.data.occurredAtISO)
+    : existing.occurredAt;
+  const nextCategoryRaw = params.data.category ?? existing.category;
+  const nextSavingsGoalIdRaw =
+    params.data.savingsGoalId !== undefined
+      ? params.data.savingsGoalId
+      : existing.savingsGoalId;
+
+  const norm = await normalizeAndValidateCategory({
+    userId: params.userId,
+    type: nextType as TxType,
+    categoryRaw: nextCategoryRaw,
+    savingsGoalIdRaw: nextSavingsGoalIdRaw,
+  });
+
+  const category = norm.category;
+  const savingsGoalId = norm.savingsGoalId;
+
+  // ---- prisma update input ----
+  const updateData: Prisma.TransactionUncheckedUpdateInput = {
+    type: nextType as any,
+    amountMinor: nextAmountMinor,
+    currency: nextCurrency as any,
+    fxUsdKrw: nextFxUsdKrw ?? null,
+    category,
+    savingsGoalId,
+    occurredAt: nextOccurredAt,
+    note: nextNote ?? null,
+  };
+
+  const updated = await updateTransactionById({
+    id: params.id,
+    data: updateData,
+  });
+
+  return { transaction: toTransactionDTO(updated, timeZone) };
+}
+
+export async function deleteTransactionForUser(params: {
+  userId: string;
+  id: string;
+}): Promise<{ success: true }> {
+  const existing = await findTransactionByIdForUser({
+    userId: params.userId,
+    id: params.id,
+  });
+  if (!existing) throw new HttpError(404, "Not found");
+
+  await deleteTransactionById({ id: params.id });
+
+  return { success: true };
 }
