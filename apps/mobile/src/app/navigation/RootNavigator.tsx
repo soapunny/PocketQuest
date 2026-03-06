@@ -32,6 +32,8 @@ export type RootStackParamList = {
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function RootNavigator() {
+  console.log("API_BASE_URL:", process.env.EXPO_PUBLIC_API_BASE_URL);
+
   const { isAuthenticated, isLoading } = useAuthStore();
 
   // Auth restore gate

@@ -5,6 +5,10 @@ import { format } from "date-fns";
 
 import type { TxType, TransactionDTO } from "@pq/shared/transactions/types";
 import type { Currency } from "@pq/shared/money/types";
+import type {
+  TxType as PrismaTxType,
+  CurrencyCode as PrismaCurrencyCode,
+} from "@prisma/client";
 
 export type TransactionWithSavingsGoalNameRow = {
   id: string;
@@ -43,4 +47,17 @@ export function toTransactionDTO(
     note: t.note ?? null,
     savingsGoalName,
   };
+}
+
+export function toPrismaTxType(type: TxType): PrismaTxType {
+  if (type === "EXPENSE") return "EXPENSE";
+  if (type === "INCOME") return "INCOME";
+  return "SAVING";
+}
+
+export function toPrismaCurrencyCode(
+  currency: "USD" | "KRW",
+): PrismaCurrencyCode {
+  if (currency === "USD") return "USD";
+  return "KRW";
 }

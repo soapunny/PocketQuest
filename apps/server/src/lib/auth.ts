@@ -3,6 +3,7 @@
 import { NextRequest } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { prisma } from "./prisma";
+import { jsonUnauthorized } from "./http/httpError";
 
 function getSupabaseClient() {
   const url = process.env.SUPABASE_URL;
@@ -109,4 +110,11 @@ export async function resolveInternalUserId(
   }
 
   return { userId: null, devHint: null };
+}
+
+export async function requireUserId(request: NextRequest, body?: unknown) {
+  const { userId, devHint } = await resolveInternalUserId(request, body);
+  if (!userId)
+    return { ok: false as const, response: jsonUnauthorized(devHint) };
+  return { ok: true as const, userId };
 }

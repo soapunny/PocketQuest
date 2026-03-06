@@ -29,6 +29,8 @@ import {
 } from "@pq/shared/transactions/categories";
 
 import {
+  toPrismaCurrencyCode,
+  toPrismaTxType,
   toTransactionDTO,
   type TransactionWithSavingsGoalNameRow,
 } from "@/domain/transaction/transaction.mapper";
@@ -187,9 +189,9 @@ export async function getTransactionsForUser(params: {
   const { occurredAtFilter, periodStartUTC, periodEndUTC } =
     computeOccurredAtFilter(range, timeZone);
 
-  const transactions = await listTransactions({ userId, occurredAtFilter });
+  const transactionRows = await listTransactions({ userId, occurredAtFilter });
 
-  const transactionsDTO = transactions.map((t) =>
+  const transactionDTOs = transactionRows.map((t) =>
     toTransactionDTO(t, timeZone),
   );
 
@@ -236,14 +238,14 @@ export async function getTransactionsForUser(params: {
   }
 
   return {
-    transactions: transactionsDTO,
+    transactions: transactionDTOs,
     filter: {
       range,
       timeZone,
       periodStartUTC: periodStartUTC ? periodStartUTC.toISOString() : null,
       periodEndUTC: periodEndUTC ? periodEndUTC.toISOString() : null,
     },
-    count: transactionsDTO.length,
+    count: transactionDTOs.length,
     summary,
   };
 }
@@ -272,11 +274,9 @@ export async function createTransactionForUser(params: {
   // We keep this typed as Prisma.TransactionUncheckedCreateInput for repo compatibility.
   const createData: Prisma.TransactionUncheckedCreateInput = {
     userId,
-    // Prisma enum fields: keep as-is; TS compatibility depends on your Prisma enum names.
-    // If TS complains here, add a small mapper (toPrismaTxType/toPrismaCurrency) instead of `as any`.
-    type: data.type as any,
+    type: toPrismaTxType(data.type),
     amountMinor: data.amountMinor,
-    currency: (data.currency ?? "USD") as any,
+    currency: toPrismaCurrencyCode(data.currency ?? "USD"),
     fxUsdKrw: data.fxUsdKrw ?? null,
     category,
     savingsGoalId,
@@ -320,7 +320,7 @@ export async function updateTransactionForUser(params: {
   });
   if (!existing) throw new HttpError(404, "Not found");
 
-  // ---- next state (PATCH merge) ----
+  // ---- 변경사항이 있으면 덮어쓰기, 없으면 기존 값 유지 ----
   const nextType = params.data.type ?? existing.type;
   const nextAmountMinor = params.data.amountMinor ?? existing.amountMinor;
   const nextCurrency = params.data.currency ?? existing.currency;
@@ -351,9 +351,9 @@ export async function updateTransactionForUser(params: {
 
   // ---- prisma update input ----
   const updateData: Prisma.TransactionUncheckedUpdateInput = {
-    type: nextType as any,
+    type: toPrismaTxType(nextType as TxType),
     amountMinor: nextAmountMinor,
-    currency: nextCurrency as any,
+    currency: toPrismaCurrencyCode(nextCurrency as "USD" | "KRW"),
     fxUsdKrw: nextFxUsdKrw ?? null,
     category,
     savingsGoalId,

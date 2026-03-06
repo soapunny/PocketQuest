@@ -1,7 +1,7 @@
 // apps/server/src/app/api/transactions/[id]/route.ts
 
 import { NextRequest, NextResponse } from "next/server";
-import { resolveInternalUserId } from "@/lib/auth";
+import { requireUserId } from "@/lib/auth";
 import { transactionUpdateSchema } from "@pq/shared/transactions/types";
 
 import {
@@ -9,36 +9,14 @@ import {
   updateTransactionForUser,
   deleteTransactionForUser,
 } from "@/domain/transaction/transaction.service";
-import { HttpError } from "@/lib/http/httpError";
+import {
+  HttpError,
+  jsonHttpError,
+  jsonInternalError,
+} from "@/lib/http/httpError";
 
 // Use shared transactionUpdateSchema for basic update shape; server enforces extra rules.
 const updateTransactionSchema = transactionUpdateSchema;
-
-function jsonUnauthorized(devHint: string | null) {
-  return NextResponse.json(
-    {
-      error: "Unauthorized",
-      ...(process.env.NODE_ENV !== "production" && devHint
-        ? { hint: devHint }
-        : {}),
-    },
-    { status: 401 },
-  );
-}
-
-function jsonHttpError(error: HttpError) {
-  return NextResponse.json(
-    { error: error.message, ...(error.payload ?? {}) },
-    { status: error.status },
-  );
-}
-
-async function requireUserId(request: NextRequest, body?: unknown) {
-  const { userId, devHint } = await resolveInternalUserId(request, body);
-  if (!userId)
-    return { ok: false as const, response: jsonUnauthorized(devHint) };
-  return { ok: true as const, userId };
-}
 
 // GET /api/transactions/[id] - Get single transaction
 export async function GET(
@@ -55,14 +33,11 @@ export async function GET(
     });
     return NextResponse.json(result);
   } catch (error) {
-    // ✅ service에서 던진 HttpError(status/payload)를 그대로 내려보내기
-    if (error instanceof HttpError) return jsonHttpError(error);
+    // service에서 던진 HttpError(status/payload)를 그대로 내려보내기
+    const httpError = jsonHttpError(error);
+    if (httpError) return httpError;
 
-    console.error("Get transaction error:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
+    return jsonInternalError(error, "Get transaction error:");
   }
 }
 
@@ -93,13 +68,10 @@ export async function PATCH(
     });
     return NextResponse.json(result);
   } catch (error) {
-    if (error instanceof HttpError) return jsonHttpError(error);
+    const httpError = jsonHttpError(error);
+    if (httpError) return httpError;
 
-    console.error("Update transaction error:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
+    return jsonInternalError(error, "Update transaction error:");
   }
 }
 
@@ -118,11 +90,9 @@ export async function DELETE(
     });
     return NextResponse.json(result);
   } catch (error) {
-    if (error instanceof HttpError) return jsonHttpError(error);
-    console.error("Delete transaction error:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
+    const httpError = jsonHttpError(error);
+    if (httpError) return httpError;
+
+    return jsonInternalError(error, "Delete transaction error:");
   }
 }
