@@ -103,22 +103,22 @@ model Transaction {
   amountMinor Int //amount in minor units(cents / won)
   currency    CurrencyCode //currency code(USD, KRW)
 
-  // Optional FX snapshot: 1 USD = fxUsdKrw KRW at the time of the transaction.
+  // Optional FX snapshot: 1 USD = fxUsdKrw KRW at the time of the transaction.(환율 정보)
   fxUsdKrw Float?
 
   category   String //category(groceries, gift, Emergency Fund, etc.)
-  occurredAt DateTime @db.Timestamptz(6) //occurred at(date and time)
+  occurredAt DateTime @db.Timestamptz(6) //occurred at(date and time), 거래 발생 시간
 
   note String? //note(optional)
 
-  createdAt DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)// db 저장 시간
+  updatedAt DateTime @updatedAt @db.Timestamptz(6)// db 수정 시간
 
-  @@index([userId, occurredAt]) //index for querying transactions by user id and occurred at
-  @@index([userId, type]) //index for querying transactions by user id and type
-  @@index([userId, category]) //index for querying transactions by user id and category
-  @@index([savingsGoalId])
-  @@index([userId, savingsGoalId, occurredAt])
+  @@index([userId, occurredAt]) //index for querying transactions by user id and occurred at, 특정 사용자의 거래를 날짜순으로 찾는 필터
+  @@index([userId, type]) //index for querying transactions by user id and type, 특정 사용자의 거래를 타입별로 찾는 필터
+  @@index([userId, category]) //index for querying transactions by user id and category, 특정 사용자의 거래를 카테고리별로 찾는 필터
+  @@index([savingsGoalId]) //index for querying transactions by savings goal id, 특정 저축 목표의 거래를 찾는 필터
+  @@index([userId, savingsGoalId, occurredAt]) //index for querying transactions by user id, savings goal id and occurred at, 특정 사용자의 저축 목표의 거래를 날짜순으로 찾는 필터
 }
 
 // Plan represents a budget/savings setup for a specific period.
