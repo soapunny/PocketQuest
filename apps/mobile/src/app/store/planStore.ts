@@ -820,7 +820,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
             periodType: currentType,
             currency: nextCurrency,
           };
-          const resp = await plansApi.switchCurrency(token, activePlanId, dto);
+          const resp = await plansApi.switchCurrency(token, dto);
           const planDto = unwrapPlan(resp);
           if (!planDto) return false;
           applyServerPlan(planDto);

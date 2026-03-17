@@ -170,16 +170,15 @@ export const plansApi = {
   },
 
   // ---------------------------------------------------------------------
-  // Switch currency (SSOT)
-  // POST /api/plans/[id]/actions/switch-currency
+  // Switch currency (SSOT) — operates on user's active plan
+  // POST /api/plans/actions/switch-currency
   // ---------------------------------------------------------------------
   switchCurrency: async (
     token: string,
-    planId: string,
     data: SwitchCurrencyRequestDTO,
   ): Promise<{ plan: ServerPlanDTO }> => {
     const res = await request<any>(
-      `/api/plans/${planId}/actions/switch-currency`,
+      `/api/plans/actions/switch-currency`,
       {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
