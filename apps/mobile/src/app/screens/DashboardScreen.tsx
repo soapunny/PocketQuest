@@ -7,6 +7,7 @@ import ScreenLayout from "../components/layout/ScreenLayout";
 import ScreenHeader from "../components/layout/ScreenHeader";
 import ScreenCard from "../components/layout/ScreenCard";
 import { CardSpacing } from "../components/Typography";
+import { Colors, FontSize, FontWeight, Radius, Spacing, Opacity } from "../theme";
 
 import type { Currency } from "@pq/shared/money";
 
@@ -95,75 +96,35 @@ export default function DashboardScreen() {
   ): StatusDescriptor => {
     switch (key) {
       case "HEALTHY":
-        return {
-          text: tr("Good", "좋음"),
-          color: styles.statusGood.color,
-          arrow: "👍",
-        };
+        return { text: tr("Good", "좋음"), color: Colors.statusGood, arrow: "👍" };
       case "OK":
-        return {
-          text: tr("Okay", "보통"),
-          color: styles.statusOk.color,
-          arrow: "👌",
-        };
+        return { text: tr("Okay", "보통"), color: Colors.statusOk, arrow: "👌" };
       case "CAUTION":
-        return {
-          text: tr("Caution", "주의"),
-          color: styles.statusCaution.color,
-          arrow: "❗",
-        };
+        return { text: tr("Caution", "주의"), color: Colors.statusCaution, arrow: "❗" };
       case "RISK":
-        return {
-          text: tr("Risk", "위험"),
-          color: styles.statusRisk.color,
-          arrow: "⚠️",
-        };
+        return { text: tr("Risk", "위험"), color: Colors.statusRisk, arrow: "⚠️" };
     }
   };
 
   const budgetHealthDescriptor = (key: BudgetHealthKey): StatusDescriptor => {
     switch (key) {
       case "GOOD":
-        return {
-          text: tr("Good", "좋음"),
-          color: styles.statusGood.color,
-          arrow: "👍",
-        };
+        return { text: tr("Good", "좋음"), color: Colors.statusGood, arrow: "👍" };
       case "CAUTION":
-        return {
-          text: tr("Caution", "주의"),
-          color: styles.statusCaution.color,
-          arrow: "❗",
-        };
+        return { text: tr("Caution", "주의"), color: Colors.statusCaution, arrow: "❗" };
       case "OVER":
-        return {
-          text: tr("Over", "초과"),
-          color: styles.statusRisk.color,
-          arrow: "🚨",
-        };
+        return { text: tr("Over", "초과"), color: Colors.statusRisk, arrow: "🚨" };
     }
   };
 
   const savingsHealthDescriptor = (key: SavingsHealthKey): StatusDescriptor => {
     switch (key) {
       case "PUSH":
-        return {
-          text: tr("Keep going", "분발"),
-          color: styles.savingsPush.color,
-          arrow: "👏",
-        };
+        return { text: tr("Keep going", "분발"), color: Colors.savingsPush, arrow: "👏" };
       case "GOOD":
-        return {
-          text: tr("Good", "굿"),
-          color: styles.savingsGood.color,
-          arrow: "👍",
-        };
+        return { text: tr("Good", "굿"), color: Colors.savingsGood, arrow: "👍" };
       case "BEST":
-        return {
-          text: tr("Great", "최고"),
-          color: styles.savingsBest.color,
-          arrow: "🎉",
-        };
+        return { text: tr("Great", "최고"), color: Colors.savingsBest, arrow: "🎉" };
     }
   };
 
@@ -431,7 +392,7 @@ export default function DashboardScreen() {
       remainingMinor: 0,
       ratio: 1,
       pct: 100,
-      status: { label: "—", color: styles.statusMuted.color },
+      status: { label: "—", color: Colors.statusMuted },
     });
   }
 
@@ -530,7 +491,7 @@ export default function DashboardScreen() {
                 <Text
                   style={[
                     styles.metricSub,
-                    { color: styles.statusMuted.color },
+                    { color: Colors.statusMuted },
                   ]}
                 >
                   —
@@ -848,13 +809,8 @@ export default function DashboardScreen() {
 }
 
 const styles = StyleSheet.create({
-  // Grid wrappers
-  grid1: {
-    gap: 12,
-  },
-  grid2: {
-    gap: 12,
-  },
+  grid1: { gap: Spacing.xl },
+  grid2: { gap: Spacing.xl },
 
   sectionRow: {
     flexDirection: "row",
@@ -862,25 +818,20 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   detailsBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: "rgba(0,0,0,0.04)",
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.pill,
+    backgroundColor: Colors.overlay04,
   },
   detailsBtnText: {
-    fontSize: 12,
-    fontWeight: "800",
-    color: "#111",
-    opacity: 0.75,
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.extrabold,
+    color: Colors.ink,
+    opacity: Opacity.subtle,
   },
-  detailsBtnDisabled: {
-    opacity: 0.4,
-  },
-  detailsBtnTextDisabled: {
-    opacity: 0.7,
-  },
+  detailsBtnDisabled: { opacity: 0.4 },
+  detailsBtnTextDisabled: { opacity: Opacity.muted },
 
-  // Card layout
   metricCard: {
     width: "100%",
     minHeight: 104,
@@ -890,163 +841,125 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 10,
-    marginBottom: 8,
+    gap: Spacing.lg,
+    marginBottom: Spacing.md,
   },
   progressTrack: {
     height: 4,
-    borderRadius: 999,
-    backgroundColor: "rgba(0,0,0,0.06)",
+    borderRadius: Radius.pill,
+    backgroundColor: Colors.overlay06,
     overflow: "hidden",
-    marginBottom: 8,
+    marginBottom: Spacing.md,
   },
   progressFill: {
     height: "100%",
-    borderRadius: 999,
+    borderRadius: Radius.pill,
   },
   metricTitle: {
-    fontSize: 13,
-    opacity: 0.75,
-    fontWeight: "600",
+    fontSize: FontSize.base,
+    opacity: Opacity.subtle,
+    fontWeight: FontWeight.semibold,
   },
   metricValue: {
-    fontSize: 20,
-    fontWeight: "800",
+    fontSize: FontSize["3xl"],
+    fontWeight: FontWeight.extrabold,
     letterSpacing: 0.2,
     marginTop: 2,
   },
   metricSub: {
-    marginTop: 6,
-    fontSize: 12,
-    opacity: 0.7,
-    fontWeight: "500",
+    marginTop: Spacing.sm,
+    fontSize: FontSize.sm,
+    opacity: Opacity.muted,
+    fontWeight: FontWeight.medium,
   },
   metricSubRow: {
-    marginTop: 6,
+    marginTop: Spacing.sm,
     flexDirection: "row",
     flexWrap: "wrap",
     alignItems: "center",
   },
 
-  // Status
   statusChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-    backgroundColor: "rgba(0,0,0,0.04)",
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.xs,
+    borderRadius: Radius.pill,
+    backgroundColor: Colors.overlay04,
   },
   statusChipText: {
-    fontSize: 12,
-    fontWeight: "800",
-  },
-
-  // Semantic colors (match existing calm app tone)
-  statusGood: {
-    color: "#16A34A", // green
-  },
-  statusOk: {
-    color: "#2563EB", // blue
-  },
-  statusCaution: {
-    color: "#F59E0B", // amber
-  },
-  statusRisk: {
-    color: "#DC2626", // red
-  },
-  statusMuted: {
-    color: "#6B7280", // gray
-  },
-
-  // Savings-specific colors (slightly different vibe from Budget/Cashflow)
-  savingsPush: {
-    color: "#D97706", // warm orange
-  },
-  savingsGood: {
-    color: "#059669", // teal/green
-  },
-  savingsBest: {
-    color: "#7C3AED", // purple
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.extrabold,
   },
 
   sectionDivider: {
     height: 1,
-    backgroundColor: "rgba(0,0,0,0.06)",
-    marginBottom: 10,
+    backgroundColor: Colors.overlay06,
+    marginBottom: Spacing.lg,
   },
 
-  savingsByGoalList: {
-    gap: 10,
-  },
+  savingsByGoalList: { gap: Spacing.lg },
   savingsByGoalRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 10,
+    gap: Spacing.lg,
   },
   savingsByGoalName: {
     flex: 1,
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#111",
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.semibold,
+    color: Colors.ink,
     opacity: 0.72,
   },
   savingsByGoalAmount: {
-    fontSize: 12,
-    fontWeight: "900",
-    color: "#111",
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.black,
+    color: Colors.ink,
     opacity: 0.85,
   },
   savingsByGoalEmpty: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#6B7280",
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.semibold,
+    color: Colors.statusMuted,
     opacity: 0.8,
   },
   unassignedLabel: {
-    opacity: 0.7,
-    color: "#6B7280",
-    fontWeight: "600",
-  },
-  // Nested details container
-  detailsBox: {
-    paddingLeft: 10,
-    paddingRight: 6,
-    paddingTop: 10,
-    paddingBottom: 10,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "rgba(0,0,0,0.08)",
-    backgroundColor: "rgba(0,0,0,0.02)",
-  },
-  detailsBoxTitle: {
-    fontSize: 12,
-    fontWeight: "900",
-    color: "#111",
-    opacity: 0.75,
-    marginBottom: 10,
+    opacity: Opacity.muted,
+    color: Colors.statusMuted,
+    fontWeight: FontWeight.semibold,
   },
 
-  // Detail card variant tweaks
-  metricCardDetail: {
-    minHeight: 92,
+  detailsBox: {
+    paddingLeft: Spacing.lg,
+    paddingRight: Spacing.sm,
+    paddingTop: Spacing.lg,
+    paddingBottom: Spacing.lg,
+    borderRadius: Radius.lg,
+    borderWidth: 1,
+    borderColor: Colors.overlay08,
+    backgroundColor: Colors.overlay02,
   },
+  detailsBoxTitle: {
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.black,
+    color: Colors.ink,
+    opacity: Opacity.subtle,
+    marginBottom: Spacing.lg,
+  },
+
+  metricCardDetail: { minHeight: 92 },
   metricTitleDetail: {
-    fontSize: 12,
+    fontSize: FontSize.sm,
     opacity: 0.68,
   },
   progressTrackDetail: {
     height: 3,
-    marginBottom: 6,
+    marginBottom: Spacing.sm,
   },
-  metricValueDetail: {
-    fontSize: 18,
-  },
+  metricValueDetail: { fontSize: FontSize["2xl"] },
   metricSubDetail: {
-    marginTop: 4,
-    fontSize: 11,
+    marginTop: Spacing.xs,
+    fontSize: FontSize.xs,
     opacity: 0.62,
   },
-  metricSubRowDetail: {
-    marginTop: 4,
-  },
+  metricSubRowDetail: { marginTop: Spacing.xs },
 });

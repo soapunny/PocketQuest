@@ -9,6 +9,7 @@ import ScreenHeader from "../components/layout/ScreenHeader";
 import ScreenLayout from "../components/layout/ScreenLayout";
 import ScreenCard from "../components/layout/ScreenCard";
 import { CardSpacing } from "../components/Typography";
+import { Colors, FontSize, FontWeight, Radius, Spacing } from "../theme";
 
 import { useAuthStore } from "../store/authStore";
 import { usePlan } from "../store/planStore";
@@ -183,7 +184,7 @@ const styles = StyleSheet.create({
   profileHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 16,
+    gap: Spacing["3xl"],
   },
   profileImageContainer: {
     width: 80,
@@ -199,30 +200,30 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: "#ddd",
+    backgroundColor: Colors.gray200,
     alignItems: "center",
     justifyContent: "center",
   },
   profileImagePlaceholderText: {
-    fontSize: 32,
-    fontWeight: "700",
-    color: "#666",
+    fontSize: FontSize.avatar,
+    fontWeight: FontWeight.bold,
+    color: Colors.gray600,
   },
   profileInfo: {
     flex: 1,
   },
   profileEmail: {
-    marginTop: 4,
-    color: "#666",
-    fontSize: 14,
+    marginTop: Spacing.xs,
+    color: Colors.gray600,
+    fontSize: FontSize.md,
   },
   statValue: {
-    marginTop: 8,
-    fontSize: 24,
-    fontWeight: "900",
-    color: "#111",
+    marginTop: Spacing.md,
+    fontSize: FontSize.stat,
+    fontWeight: FontWeight.black,
+    color: Colors.ink,
   },
   statCard: {
-    marginBottom: 12,
+    marginBottom: Spacing.xl,
   },
 });

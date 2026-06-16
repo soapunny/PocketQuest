@@ -15,6 +15,7 @@ import {
 
 // UI components and layout
 import { CardSpacing } from "../components/Typography";
+import { Colors, FontSize, FontWeight, Radius, Spacing, Opacity } from "../theme";
 import ScreenHeader from "../components/layout/ScreenHeader";
 import ScreenCard from "../components/layout/ScreenCard";
 import ScreenLayout from "../components/layout/ScreenLayout";
@@ -90,8 +91,8 @@ function TransactionEditModal(props: {
         onPress={onBackdropPress}
         style={{
           flex: 1,
-          backgroundColor: "rgba(0,0,0,0.35)",
-          padding: 16,
+          backgroundColor: Colors.overlay35,
+          padding: Spacing["3xl"],
           justifyContent: "center",
         }}
       >
@@ -618,48 +619,16 @@ export default function TransactionsScreen() {
                     justifyContent: "space-between",
                   }}
                 >
-                  <View
-                    style={{
-                      alignSelf: "flex-start",
-                      paddingHorizontal: 10,
-                      paddingVertical: 4,
-                      borderRadius: 999,
-                      backgroundColor: pill.pillBg,
-                      flexDirection: "row",
-                      alignItems: "center",
-                      gap: 8,
-                    }}
-                  >
-                    <Text
-                      style={{
-                        color: pill.pillText,
-                        fontWeight: "900",
-                        fontSize: 12,
-                        letterSpacing: 0.3,
-                      }}
-                    >
+                  <View style={[styles.txTypePill, { backgroundColor: pill.pillBg }]}>
+                    <Text style={[styles.txTypePillText, { color: pill.pillText }]}>
                       {pill.label}
                     </Text>
-
-                    <Text
-                      style={{
-                        color: pill.pillText,
-                        fontWeight: "900",
-                        fontSize: 12,
-                      }}
-                    >
+                    <Text style={[styles.txTypePillText, { color: pill.pillText }]}>
                       {cur}
                     </Text>
                   </View>
 
-                  <View
-                    style={{
-                      width: 10,
-                      height: 10,
-                      borderRadius: 999,
-                      backgroundColor: pill.accent,
-                    }}
-                  />
+                  <View style={[styles.txDot, { backgroundColor: pill.accent }]} />
                 </View>
 
                 <Text style={[CardSpacing.cardTitle, styles.txCategory]}>
@@ -769,22 +738,13 @@ export default function TransactionsScreen() {
 
         {/* Currency (read-only) */}
         <Text style={CardSpacing.fieldLabel}>{tr("Currency", "통화")}</Text>
-        <View style={{ flexDirection: "row", gap: 8, marginBottom: 12 }}>
-          <View
-            style={{
-              paddingVertical: 8,
-              paddingHorizontal: 10,
-              borderRadius: 999,
-              borderWidth: 1,
-              borderColor: "#ddd",
-              backgroundColor: "#fafafa",
-            }}
-          >
-            <Text style={{ color: "#111", fontWeight: "800" }}>
+        <View style={styles.modalCurrencyRow}>
+          <View style={styles.modalCurrencyBadge}>
+            <Text style={styles.modalCurrencyBadgeText}>
               {editingCurrency}
             </Text>
           </View>
-          <Text style={{ alignSelf: "center", color: "#666" }}>
+          <Text style={styles.modalCurrencyHint}>
             {tr(
               "(currency is set when created)",
               "(통화는 생성 시점에 결정돼요)",
@@ -814,7 +774,7 @@ export default function TransactionsScreen() {
         </Text>
         <View style={styles.categoryWrap}>
           {categoryOptions.length === 0 ? (
-            <Text style={{ color: "#777" }}>
+            <Text style={{ color: Colors.gray500 }}>
               {tr(
                 "No savings goals yet. Create one in Plan > Savings.",
                 "저축 목표가 아직 없어요. Plan > Savings에서 만들어 주세요.",
@@ -872,67 +832,30 @@ export default function TransactionsScreen() {
           style={styles.modalInput}
         />
 
-        <View
-          style={{
-            flexDirection: "row",
-            gap: 10,
-            justifyContent: "space-between",
-          }}
-        >
+        <View style={styles.modalActionsRow}>
           <Pressable
             onPress={onDelete}
-            style={{
-              flex: 1,
-              backgroundColor: "#fff5f5",
-              borderRadius: 12,
-              paddingVertical: 12,
-              alignItems: "center",
-              borderWidth: 1,
-              borderColor: "#f0caca",
-              opacity: isLoading ? 0.45 : 1,
-            }}
+            style={[styles.modalDeleteBtn, { opacity: isLoading ? Opacity.faint : 1 }]}
             disabled={isLoading}
           >
-            <Text style={{ fontWeight: "900", color: "#c00" }}>
-              {tr("Delete", "삭제")}
-            </Text>
+            <Text style={styles.modalDeleteBtnText}>{tr("Delete", "삭제")}</Text>
           </Pressable>
 
           <Pressable
             onPress={onSave}
-            style={{
-              flex: 1,
-              backgroundColor: "#111",
-              borderRadius: 12,
-              paddingVertical: 12,
-              alignItems: "center",
-              opacity: canSave ? 1 : 0.45,
-            }}
+            style={[styles.modalSaveBtn, { opacity: canSave ? 1 : Opacity.faint }]}
             disabled={!canSave}
           >
-            <Text style={{ fontWeight: "900", color: "white" }}>
-              {tr("Save", "저장")}
-            </Text>
+            <Text style={styles.modalSaveBtnText}>{tr("Save", "저장")}</Text>
           </Pressable>
         </View>
 
         <Pressable
           onPress={requestCloseEdit}
-          style={{
-            marginTop: 10,
-            width: "100%",
-            backgroundColor: "white",
-            borderRadius: 12,
-            paddingVertical: 12,
-            alignItems: "center",
-            borderWidth: 1,
-            borderColor: "#ddd",
-          }}
+          style={styles.modalCancelBtn}
           disabled={isLoading}
         >
-          <Text style={{ fontWeight: "900", color: "#111" }}>
-            {tr("Cancel", "취소")}
-          </Text>
+          <Text style={styles.modalCancelBtnText}>{tr("Cancel", "취소")}</Text>
         </Pressable>
       </TransactionEditModal>
     </View>
@@ -941,113 +864,168 @@ export default function TransactionsScreen() {
 
 const styles = StyleSheet.create({
   resultPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: "#111",
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm,
+    borderRadius: Radius.pill,
+    backgroundColor: Colors.ink,
     marginTop: 2,
   },
   resultPillText: {
-    color: "white",
-    fontWeight: "900",
-    fontSize: 12,
+    color: Colors.white,
+    fontWeight: FontWeight.black,
+    fontSize: FontSize.sm,
   },
+
   chipRow: {
     flexDirection: "row",
-    gap: 8,
+    gap: Spacing.md,
     flexWrap: "wrap",
-    marginBottom: 8,
+    marginBottom: Spacing.md,
   },
   chip: {
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderRadius: 999,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    borderRadius: Radius.pill,
     borderWidth: 1,
   },
-  chipActive: {
-    borderColor: "#111",
-    backgroundColor: "#111",
-  },
-  chipInactive: {
-    borderColor: "#ddd",
-    backgroundColor: "white",
-  },
-  chipText: {
-    fontWeight: "800",
-  },
-  chipTextActive: {
-    color: "white",
-  },
-  chipTextInactive: {
-    color: "#111",
-  },
-  filtersCard: {
-    marginBottom: 14,
-  },
+  chipActive: { borderColor: Colors.ink, backgroundColor: Colors.ink },
+  chipInactive: { borderColor: Colors.gray200, backgroundColor: Colors.white },
+  chipText: { fontWeight: FontWeight.extrabold },
+  chipTextActive: { color: Colors.white },
+  chipTextInactive: { color: Colors.ink },
+
+  filtersCard: { marginBottom: Spacing["2xl"] },
   searchInput: {
     borderWidth: 1,
-    borderColor: "#ddd",
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: "white",
+    borderColor: Colors.gray200,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.lg,
+    backgroundColor: Colors.white,
   },
   emptyText: {
-    color: "#666",
-    marginTop: 6,
-    marginBottom: 10,
+    color: Colors.gray600,
+    marginTop: Spacing.sm,
+    marginBottom: Spacing.lg,
     textAlign: "center",
   },
-  txCategory: {
-    marginTop: 8,
+
+  // Transaction card
+  txTypePill: {
+    alignSelf: "flex-start",
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.xs,
+    borderRadius: Radius.pill,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.md,
   },
+  txTypePillText: {
+    fontWeight: FontWeight.black,
+    fontSize: FontSize.sm,
+    letterSpacing: 0.3,
+  },
+  txDot: {
+    width: 10,
+    height: 10,
+    borderRadius: Radius.pill,
+  },
+  txCategory: { marginTop: Spacing.md },
   txAmount: {
-    marginTop: 6,
-    fontSize: 20,
-    fontWeight: "900",
+    marginTop: Spacing.sm,
+    fontSize: FontSize["3xl"],
+    fontWeight: FontWeight.black,
   },
   metaText: {
-    marginTop: 6,
-    color: "#777",
-    fontSize: 12,
+    marginTop: Spacing.sm,
+    color: Colors.gray500,
+    fontSize: FontSize.sm,
   },
   typeHintText: {
-    marginTop: 6,
-    fontSize: 12,
-    color: "#D97706", // amber-600
+    marginTop: Spacing.sm,
+    fontSize: FontSize.sm,
+    color: Colors.savingsPush,
     opacity: 0.95,
-    marginBottom: 6,
-    fontWeight: "700",
+    marginBottom: Spacing.sm,
+    fontWeight: FontWeight.bold,
   },
   noteText: {
-    marginTop: 8,
-    color: "#555",
+    marginTop: Spacing.md,
+    color: Colors.gray700,
   },
-  modalCard: {
-    maxHeight: "85%",
-    width: "100%",
-  },
-  modalTitle: {
-    marginBottom: 12,
-  },
+
+  // Edit modal
+  modalCard: { maxHeight: "85%", width: "100%" },
+  modalTitle: { marginBottom: Spacing.xl },
   modalChipRow: {
     flexDirection: "row",
-    gap: 8,
-    marginBottom: 12,
+    gap: Spacing.md,
+    marginBottom: Spacing.xl,
   },
   categoryWrap: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 12,
+    gap: Spacing.md,
+    marginBottom: Spacing.xl,
   },
   modalInput: {
     borderWidth: 1,
-    borderColor: "#ddd",
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginBottom: 12,
-    backgroundColor: "white",
+    borderColor: Colors.gray200,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.lg,
+    marginBottom: Spacing.xl,
+    backgroundColor: Colors.white,
   },
+  modalCurrencyRow: {
+    flexDirection: "row",
+    gap: Spacing.md,
+    marginBottom: Spacing.xl,
+  },
+  modalCurrencyBadge: {
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    borderRadius: Radius.pill,
+    borderWidth: 1,
+    borderColor: Colors.gray200,
+    backgroundColor: Colors.gray50,
+  },
+  modalCurrencyBadgeText: { color: Colors.ink, fontWeight: FontWeight.extrabold },
+  modalCurrencyHint: { alignSelf: "center", color: Colors.gray600 },
+
+  // Modal action buttons
+  modalActionsRow: {
+    flexDirection: "row",
+    gap: Spacing.lg,
+    justifyContent: "space-between",
+  },
+  modalDeleteBtn: {
+    flex: 1,
+    backgroundColor: Colors.errorBg,
+    borderRadius: Radius.md,
+    paddingVertical: Spacing.xl,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: Colors.errorBorder,
+  },
+  modalDeleteBtnText: { fontWeight: FontWeight.black, color: Colors.errorDark },
+  modalSaveBtn: {
+    flex: 1,
+    backgroundColor: Colors.ink,
+    borderRadius: Radius.md,
+    paddingVertical: Spacing.xl,
+    alignItems: "center",
+  },
+  modalSaveBtnText: { fontWeight: FontWeight.black, color: Colors.white },
+  modalCancelBtn: {
+    marginTop: Spacing.lg,
+    width: "100%",
+    backgroundColor: Colors.white,
+    borderRadius: Radius.md,
+    paddingVertical: Spacing.xl,
+    alignItems: "center",
+    borderWidth: 1,
+    borderColor: Colors.gray200,
+  },
+  modalCancelBtnText: { fontWeight: FontWeight.black, color: Colors.ink },
 });

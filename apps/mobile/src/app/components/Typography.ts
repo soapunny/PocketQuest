@@ -1,15 +1,16 @@
 import { type TextStyle, type ViewStyle } from "react-native";
+import { Colors, FontSize, FontWeight, Radius, Spacing } from "../theme";
 
 export const ScreenTitle: TextStyle = {
-  fontSize: 28,
-  fontWeight: "900",
-  color: "#111",
+  fontSize: FontSize["4xl"],
+  fontWeight: FontWeight.black,
+  color: Colors.ink,
 };
 
 export const ScreenSubtitle: TextStyle = {
-  marginTop: 4,
-  fontSize: 13,
-  color: "#666",
+  marginTop: Spacing.xs,
+  fontSize: FontSize.base,
+  color: Colors.gray600,
 };
 
 //
@@ -41,90 +42,88 @@ type CardSpacingStyles = {
 };
 
 export const CardSpacing: CardSpacingStyles = {
-  // Section header should be clearly visible but not compete with ScreenTitle.
   section: {
-    marginTop: 18,
-    marginBottom: 10,
-    fontSize: 18,
-    fontWeight: "800",
-    color: "#111",
+    marginTop: Spacing["4xl"],
+    marginBottom: Spacing.lg,
+    fontSize: FontSize["2xl"],
+    fontWeight: FontWeight.extrabold,
+    color: Colors.ink,
     letterSpacing: 0.2,
   },
   sectionTitle: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: "#111",
-    marginBottom: 8,
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.extrabold,
+    color: Colors.ink,
+    marginBottom: Spacing.md,
   },
   cardTitle: {
-    fontSize: 15,
-    fontWeight: "900",
-    color: "#111",
+    fontSize: FontSize.lg,
+    fontWeight: FontWeight.black,
+    color: Colors.ink,
   },
   description: {
-    marginTop: 6,
-    fontSize: 12,
+    marginTop: Spacing.sm,
+    fontSize: FontSize.sm,
     lineHeight: 16,
-    color: "#666",
+    color: Colors.gray600,
   },
   fieldLabel: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: "#111",
-    marginBottom: 8,
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.extrabold,
+    color: Colors.ink,
+    marginBottom: Spacing.md,
   },
   fieldHelp: {
-    marginTop: 6,
-    fontSize: 12,
+    marginTop: Spacing.sm,
+    fontSize: FontSize.sm,
     lineHeight: 16,
-    color: "#666",
+    color: Colors.gray600,
   },
 
   card: {
-    backgroundColor: "white",
-    borderRadius: 14,
-    padding: 14,
+    backgroundColor: Colors.white,
+    borderRadius: Radius.lg,
+    padding: Spacing["2xl"],
     borderWidth: 1,
-    borderColor: "#eee",
-    width: "100%", // 명시적으로 전체 너비를 차지하도록 설정
-    alignSelf: "stretch", // 부모 View의 padding을 고려하여 너비 조정
+    borderColor: Colors.gray100,
+    width: "100%",
+    alignSelf: "stretch",
   },
 
-  sectionGap: { marginTop: 16 },
-  fieldGap: { marginTop: 14 },
+  sectionGap: { marginTop: Spacing["3xl"] },
+  fieldGap: { marginTop: Spacing["2xl"] },
 
-  // Aliases
+  // Aliases (keep for backwards compatibility — do not remove)
   sectionHeader: {
-    marginTop: 18,
-    marginBottom: 10,
-    fontSize: 18,
-    fontWeight: "800",
-    color: "#111",
+    marginTop: Spacing["4xl"],
+    marginBottom: Spacing.lg,
+    fontSize: FontSize["2xl"],
+    fontWeight: FontWeight.extrabold,
+    color: Colors.ink,
     letterSpacing: 0.2,
   },
-  // Use this when you need a smaller one-line subtitle under a section header.
   sectionSubtitle: {
     marginTop: 2,
-    fontSize: 12,
+    fontSize: FontSize.sm,
     lineHeight: 16,
-    color: "#666",
+    color: Colors.gray600,
   },
   descriptionText: {
-    marginTop: 6,
-    fontSize: 12,
+    marginTop: Spacing.sm,
+    fontSize: FontSize.sm,
     lineHeight: 16,
-    color: "#666",
+    color: Colors.gray600,
   },
   fieldHeader: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: "#111",
-    marginBottom: 8,
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.extrabold,
+    color: Colors.ink,
+    marginBottom: Spacing.md,
   },
   fieldHint: {
-    marginTop: 6,
-    fontSize: 12,
+    marginTop: Spacing.sm,
+    fontSize: FontSize.sm,
     lineHeight: 16,
-    color: "#666",
+    color: Colors.gray600,
   },
 };

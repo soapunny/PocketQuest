@@ -15,6 +15,7 @@ import CurrencyInput from "react-native-currency-input";
 
 // UI components and layout
 import { CardSpacing } from "../components/Typography";
+import { Colors, FontSize, FontWeight, Radius, Spacing, Opacity } from "../theme";
 import ScreenLayout from "../components/layout/ScreenLayout";
 import ScreenHeader from "../components/layout/ScreenHeader";
 import ScreenCard from "../components/layout/ScreenCard";
@@ -387,7 +388,7 @@ export default function AddTransactionModal() {
               placeholder={tr("e.g., 1350", "예: 1350")}
               style={[
                 styles.input,
-                { borderColor: fxValid ? "#ddd" : "#b42318" },
+                { borderColor: fxValid ? Colors.gray200 : Colors.error },
               ]}
             />
             {!fxValid && (
@@ -487,133 +488,87 @@ export default function AddTransactionModal() {
 }
 
 const styles = StyleSheet.create({
-  card: {
-    marginBottom: 10,
-  },
-  fieldGroup: {
-    marginBottom: 12,
-  },
-  fieldGroupLast: {
-    marginBottom: 0,
-  },
-  helper: {
-    marginTop: 4,
-  },
-  actionsSection: {
-    marginTop: 8,
-    paddingBottom: 6,
-  },
-  typeRow: {
-    flexDirection: "row",
-    gap: 8,
-  },
+  card: { marginBottom: Spacing.lg },
+  fieldGroup: { marginBottom: Spacing.xl },
+  fieldGroupLast: { marginBottom: 0 },
+  helper: { marginTop: Spacing.xs },
+  actionsSection: { marginTop: Spacing.md, paddingBottom: Spacing.sm },
+
+  typeRow: { flexDirection: "row", gap: Spacing.md },
   typeChip: {
     flex: 1,
-    paddingVertical: 10,
-    borderRadius: 12,
+    paddingVertical: Spacing.lg,
+    borderRadius: Radius.md,
     alignItems: "center",
   },
-  typeChipActive: {
-    backgroundColor: "black",
-  },
-  typeChipInactive: {
-    backgroundColor: "#eee",
-  },
-  typeChipText: {
-    fontWeight: "700",
-  },
-  typeChipTextActive: {
-    color: "white",
-  },
-  typeChipTextInactive: {
-    color: "black",
-  },
+  typeChipActive: { backgroundColor: Colors.ink },
+  typeChipInactive: { backgroundColor: Colors.gray100 },
+  typeChipText: { fontWeight: FontWeight.bold },
+  typeChipTextActive: { color: Colors.white },
+  typeChipTextInactive: { color: Colors.ink },
+
   amountInput: {
     borderWidth: 1,
-    borderColor: "#ddd",
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    fontSize: 16,
-    backgroundColor: "white",
+    borderColor: Colors.gray200,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.xl,
+    fontSize: FontSize.xl,
+    backgroundColor: Colors.white,
   },
   input: {
     borderWidth: 1,
-    borderColor: "#ddd",
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    fontSize: 14,
-    backgroundColor: "white",
+    borderColor: Colors.gray200,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.xl,
+    fontSize: FontSize.md,
+    backgroundColor: Colors.white,
   },
   errorText: {
-    color: "#b42318",
-    marginTop: 8,
-    fontSize: 12,
-    fontWeight: "700",
+    color: Colors.error,
+    marginTop: Spacing.md,
+    fontSize: FontSize.sm,
+    fontWeight: FontWeight.bold,
   },
+
   chipRow: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 8,
-    marginTop: 6,
+    gap: Spacing.md,
+    marginTop: Spacing.sm,
   },
   chip: {
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderRadius: 999,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    borderRadius: Radius.pill,
     borderWidth: 1,
   },
-  chipActive: {
-    borderColor: "#111",
-    backgroundColor: "#111",
-  },
-  chipInactive: {
-    borderColor: "#ddd",
-    backgroundColor: "white",
-  },
-  chipDisabled: {
-    opacity: 0.35,
-  },
-  chipText: {
-    fontWeight: "800",
-  },
-  chipTextActive: {
-    color: "white",
-  },
-  chipTextInactive: {
-    color: "#111",
-  },
-  actionsRow: {
-    flexDirection: "row",
-    gap: 12,
-    marginTop: 8,
-  },
+  chipActive: { borderColor: Colors.ink, backgroundColor: Colors.ink },
+  chipInactive: { borderColor: Colors.gray200, backgroundColor: Colors.white },
+  chipDisabled: { opacity: Opacity.disabled },
+  chipText: { fontWeight: FontWeight.extrabold },
+  chipTextActive: { color: Colors.white },
+  chipTextInactive: { color: Colors.ink },
+
+  actionsRow: { flexDirection: "row", gap: Spacing.xl, marginTop: Spacing.md },
   secondaryButton: {
     flex: 1,
     height: 48,
-    borderRadius: 12,
+    borderRadius: Radius.md,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#eee",
+    backgroundColor: Colors.gray100,
   },
-  secondaryButtonText: {
-    fontWeight: "700",
-    color: "#111",
-  },
+  secondaryButtonText: { fontWeight: FontWeight.bold, color: Colors.ink },
   primaryButton: {
     flex: 1,
     height: 48,
-    borderRadius: 12,
+    borderRadius: Radius.md,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "black",
+    backgroundColor: Colors.ink,
   },
-  primaryButtonDisabled: {
-    backgroundColor: "#999",
-  },
-  primaryButtonText: {
-    color: "white",
-    fontWeight: "800",
-  },
+  primaryButtonDisabled: { backgroundColor: Colors.gray400 },
+  primaryButtonText: { color: Colors.white, fontWeight: FontWeight.extrabold },
 });
