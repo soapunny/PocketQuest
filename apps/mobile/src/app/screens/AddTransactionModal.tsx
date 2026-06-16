@@ -44,13 +44,8 @@ export default function AddTransactionModal() {
   const auth = useAuthStore();
   const supabaseAccessToken = auth.supabaseAccessToken ?? "";
 
-  const planStore = usePlan() as any;
-  const { homeCurrency, displayCurrency, language } = planStore;
-
-  // Savings goals can live on either `planStore.plan.savingsGoals` (hydrated plan)
-  // or `planStore.savingsGoals` (legacy/local). Mirror TransactionsScreen.
-  const savingsGoals: Array<{ id: string; name: string }> =
-    planStore?.plan?.savingsGoals ?? planStore?.savingsGoals ?? [];
+  const { homeCurrency, displayCurrency, language, plan: planData } = usePlan();
+  const savingsGoals: Array<{ id: string; name: string }> = planData.savingsGoals ?? [];
 
   const tr = makeTr(language);
 

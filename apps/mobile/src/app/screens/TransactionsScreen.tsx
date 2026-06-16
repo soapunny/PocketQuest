@@ -91,11 +91,8 @@ export default function TransactionsScreen() {
     }, [periodFilter, loadTransactions]),
   );
 
-  const planStore = usePlan() as any;
-  const homeCurrency: Currency = planStore?.homeCurrency ?? "USD";
-  const language: string | null | undefined = planStore?.language;
-  const savingsGoals: Array<{ id: string; name: string }> =
-    planStore?.plan?.savingsGoals ?? planStore?.savingsGoals ?? [];
+  const { homeCurrency, language, plan: planData } = usePlan();
+  const savingsGoals: Array<{ id: string; name: string }> = planData.savingsGoals ?? [];
   const [savingsGoalId, setSavingsGoalId] = useState<string>("");
 
   const savingsGoalOptions = useMemo(
@@ -172,7 +169,7 @@ export default function TransactionsScreen() {
       if (!q) return true;
 
       const goalName =
-        tx.type === "SAVING" ? String((tx as any)?.savingsGoalName ?? "") : "";
+        tx.type === "SAVING" ? String(tx.savingsGoalName ?? "") : "";
       const hay = `${tx.type} ${tx.category} ${goalName} ${
         tx.note ?? ""
       }`.toLowerCase();
@@ -193,7 +190,7 @@ export default function TransactionsScreen() {
     // For SAVING transactions, the selector is savingsGoalId (category is always "savings").
     const rawForSelector =
       nextType === "SAVING"
-        ? String((tx as any)?.savingsGoalId ?? "")
+        ? String(tx.savingsGoalId ?? "")
         : String(tx.category ?? EXPENSE_CATEGORY_KEYS[0]);
 
     const nextCategory = ensureCategoryValid(nextType, rawForSelector);
@@ -218,7 +215,7 @@ export default function TransactionsScreen() {
     const baseCategory =
       nextType === "SAVING" ? "savings" : String(tx.category ?? "");
     const baseSavingsGoalId =
-      nextType === "SAVING" ? String((tx as any)?.savingsGoalId ?? "") : "";
+      nextType === "SAVING" ? String(tx.savingsGoalId ?? "") : "";
     const baseNoteTrim = String(tx.note ?? "").trim();
 
     setEditingBaseline({
@@ -364,9 +361,7 @@ export default function TransactionsScreen() {
       amountMinor: nextAmountMinor,
       // Use null to explicitly clear the note on the server
       note: noteTrimmed ? noteTrimmed : null,
-      ...(type === "SAVING"
-        ? ({ savingsGoalId: savingsGoalId || null } as any)
-        : ({ savingsGoalId: null } as any)),
+      savingsGoalId: type === "SAVING" ? (savingsGoalId || null) : null,
     };
 
     try {
@@ -386,7 +381,6 @@ export default function TransactionsScreen() {
           "저장에 실패했어요. 다시 시도해 주세요.",
         ),
       );
-    } finally {
     }
   }
 
@@ -409,7 +403,6 @@ export default function TransactionsScreen() {
           "삭제에 실패했어요. 다시 시도해 주세요.",
         ),
       );
-    } finally {
     }
   }
 
