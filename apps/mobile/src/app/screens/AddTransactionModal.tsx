@@ -9,7 +9,9 @@ import {
   Pressable,
   Platform,
   StyleSheet,
+  Modal,
 } from "react-native";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { useNavigation } from "@react-navigation/native";
 import CurrencyInput from "react-native-currency-input";
 
@@ -64,6 +66,15 @@ export default function AddTransactionModal() {
 
   const [type, setType] = useState<TxType>("EXPENSE");
   const [amountValue, setAmountValue] = useState<number | null>(null);
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
+
+  const dateLocale = language === "ko" ? "ko-KR" : "en-US";
+  const formattedDate = selectedDate.toLocaleDateString(dateLocale, {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
 
   const defaultExpenseCategory = useMemo(() => {
     // Prefer a sensible default instead of "uncategorized"
@@ -229,6 +240,9 @@ export default function AddTransactionModal() {
         categoryForServer = "savings";
       }
 
+      const occurredAt = new Date(selectedDate);
+      occurredAt.setHours(12, 0, 0, 0);
+
       await txStore.createTransaction({
         type,
         amountMinor,
@@ -236,7 +250,7 @@ export default function AddTransactionModal() {
         fxUsdKrw: fxNeeded ? fxUsdKrw : undefined,
         category: categoryForServer,
         savingsGoalId: type === "SAVING" ? savingsGoalIdFinal : undefined,
-        occurredAtISO: new Date().toISOString(),
+        occurredAtISO: occurredAt.toISOString(),
         note: noteTrimmed || undefined,
       });
       // Ensure Dashboard reflects the new transaction immediately.
@@ -432,7 +446,7 @@ export default function AddTransactionModal() {
         </View>
 
         {/* Note */}
-        <View style={styles.fieldGroupLast}>
+        <View style={styles.fieldGroup}>
           <Text style={CardSpacing.fieldLabel}>
             {tr("Note (optional)", "메모(선택)")}
           </Text>
@@ -443,7 +457,58 @@ export default function AddTransactionModal() {
             style={styles.input}
           />
         </View>
+
+        {/* Date */}
+        <View style={styles.fieldGroupLast}>
+          <Text style={CardSpacing.fieldLabel}>{tr("Date", "날짜")}</Text>
+          <Pressable
+            onPress={() => setShowDatePicker((v) => !v)}
+            style={styles.dateButton}
+          >
+            <Text style={styles.dateButtonText}>{formattedDate}</Text>
+          </Pressable>
+          {showDatePicker && Platform.OS === "android" && (
+            <DateTimePicker
+              value={selectedDate}
+              mode="date"
+              display="default"
+              maximumDate={new Date()}
+              onChange={(event, date) => {
+                setShowDatePicker(false);
+                if (event.type === "set" && date) setSelectedDate(date);
+              }}
+            />
+          )}
+        </View>
       </ScreenCard>
+
+      {/* iOS date picker sheet */}
+      {showDatePicker && Platform.OS === "ios" && (
+        <Modal transparent animationType="slide">
+          <View style={styles.datePickerOverlay}>
+            <View style={styles.datePickerSheet}>
+              <View style={styles.datePickerSheetHeader}>
+                <Pressable onPress={() => setShowDatePicker(false)}>
+                  <Text style={styles.datePickerDoneText}>
+                    {tr("Done", "완료")}
+                  </Text>
+                </Pressable>
+              </View>
+              <DateTimePicker
+                value={selectedDate}
+                mode="date"
+                display="spinner"
+                maximumDate={new Date()}
+                locale={dateLocale}
+                style={styles.datePickerIOS}
+                onChange={(_, date) => {
+                  if (date) setSelectedDate(date);
+                }}
+              />
+            </View>
+          </View>
+        </Modal>
+      )}
 
       {/* Actions */}
       <View style={styles.actionsSection}>
@@ -524,6 +589,46 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: Spacing.md,
     marginTop: Spacing.sm,
+  },
+
+  dateButton: {
+    borderWidth: 1,
+    borderColor: Colors.gray200,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.xl,
+    backgroundColor: Colors.white,
+  },
+  dateButtonText: {
+    fontSize: FontSize.md,
+    color: Colors.ink,
+  },
+  datePickerOverlay: {
+    flex: 1,
+    justifyContent: "flex-end",
+    backgroundColor: "rgba(0, 0, 0, 0.3)",
+  },
+  datePickerSheet: {
+    backgroundColor: Colors.white,
+    borderTopLeftRadius: Radius.lg,
+    borderTopRightRadius: Radius.lg,
+    paddingBottom: Spacing["2xl"],
+  },
+  datePickerSheetHeader: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.lg,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.gray100,
+  },
+  datePickerDoneText: {
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.bold,
+    color: Colors.ink,
+  },
+  datePickerIOS: {
+    width: "100%",
   },
 
   actionsRow: { flexDirection: "row", gap: Spacing.xl, marginTop: Spacing.md },
