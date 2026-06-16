@@ -7,6 +7,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 
 import ScreenHeader from "../components/layout/ScreenHeader";
 import ScreenLayout from "../components/layout/ScreenLayout";
+import { SegmentControl } from "../components/SegmentControl";
 
 import type { Currency } from "@pq/shared/money/types";
 
@@ -138,30 +139,11 @@ export default function SettingsScreen() {
             : "Choose the language used in the app."}
         </Text>
 
-        <View style={styles.segment}>
-          {LANGUAGE_OPTIONS.map((opt) => {
-            const selected = opt.value === lang;
-            return (
-              <Pressable
-                key={opt.value}
-                onPress={() => setLanguage(opt.value)}
-                style={[
-                  styles.segmentBtn,
-                  selected && styles.segmentBtnSelected,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.segmentText,
-                    selected && styles.segmentTextSelected,
-                  ]}
-                >
-                  {opt.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        <SegmentControl
+          options={LANGUAGE_OPTIONS}
+          value={lang}
+          onChange={setLanguage}
+        />
 
         <Text style={styles.help}>
           {isKo
@@ -180,36 +162,14 @@ export default function SettingsScreen() {
             : "Choose how goals and progress are grouped."}
         </Text>
 
-        <View style={styles.segment}>
-          {OPTIONS.map((opt) => {
-            const selected = opt.value === current;
-            return (
-              <Pressable
-                key={opt.value}
-                onPress={async () => {
-                  const ok = await switchPeriodType(opt.value);
-                  if (!ok) {
-                    // fallback: update local state so UI still responds in dev
-                    setPeriodType(opt.value);
-                  }
-                }}
-                style={[
-                  styles.segmentBtn,
-                  selected && styles.segmentBtnSelected,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.segmentText,
-                    selected && styles.segmentTextSelected,
-                  ]}
-                >
-                  {opt.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        <SegmentControl
+          options={OPTIONS}
+          value={current}
+          onChange={async (val) => {
+            const ok = await switchPeriodType(val);
+            if (!ok) setPeriodType(val);
+          }}
+        />
 
         <Text style={styles.selectedLine}>
           {isKo ? "현재:" : "Current:"}{" "}
@@ -241,33 +201,14 @@ export default function SettingsScreen() {
             : "Keep it simple with one currency, or enable advanced mode to separate base totals from display/entry currency."}
         </Text>
 
-        <View style={styles.segment}>
-          {[
+        <SegmentControl
+          options={[
             { label: isKo ? "끔" : "Off", value: false },
             { label: isKo ? "켬" : "On", value: true },
-          ].map((opt) => {
-            const selected = opt.value === isAdvanced;
-            return (
-              <Pressable
-                key={String(opt.label)}
-                onPress={() => setAdvancedCurrencyMode(opt.value)}
-                style={[
-                  styles.segmentBtn,
-                  selected && styles.segmentBtnSelected,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.segmentText,
-                    selected && styles.segmentTextSelected,
-                  ]}
-                >
-                  {opt.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+          ]}
+          value={isAdvanced}
+          onChange={setAdvancedCurrencyMode}
+        />
 
         {isAdvanced ? (
           <>
@@ -279,30 +220,11 @@ export default function SettingsScreen() {
                 ? "총합/진행률 계산 기준 통화입니다. 기존 거래는 원래 통화를 유지하며, 다른 통화 거래는 저장된 환율 스냅샷(FX)을 사용합니다(가능한 경우)."
                 : "Used as the base for totals and progress. Existing transactions keep their original currency. If a transaction is in a different currency, it uses the saved FX snapshot (if available)."}
             </Text>
-            <View style={styles.segment}>
-              {CURRENCY_OPTIONS.map((opt) => {
-                const selected = opt.value === homeCurrency;
-                return (
-                  <Pressable
-                    key={opt.value}
-                    onPress={() => setHomeCurrency(opt.value)}
-                    style={[
-                      styles.segmentBtn,
-                      selected && styles.segmentBtnSelected,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.segmentText,
-                        selected && styles.segmentTextSelected,
-                      ]}
-                    >
-                      {opt.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            <SegmentControl
+              options={CURRENCY_OPTIONS}
+              value={homeCurrency}
+              onChange={setHomeCurrency}
+            />
 
             <Text style={[styles.help, { marginTop: 6, fontWeight: "900" }]}>
               {isKo ? "표시 통화(Display)" : "Display currency"}
@@ -312,30 +234,11 @@ export default function SettingsScreen() {
                 ? "화면에 표시되는 통화입니다. 새 거래는 이 통화로 추가됩니다."
                 : "How amounts are shown in the UI. New transactions are added in this currency."}
             </Text>
-            <View style={styles.segment}>
-              {CURRENCY_OPTIONS.map((opt) => {
-                const selected = opt.value === displayCurrency;
-                return (
-                  <Pressable
-                    key={opt.value}
-                    onPress={() => setDisplayCurrency(opt.value)}
-                    style={[
-                      styles.segmentBtn,
-                      selected && styles.segmentBtnSelected,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.segmentText,
-                        selected && styles.segmentTextSelected,
-                      ]}
-                    >
-                      {opt.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            <SegmentControl
+              options={CURRENCY_OPTIONS}
+              value={displayCurrency}
+              onChange={setDisplayCurrency}
+            />
 
             <View style={styles.infoBox}>
               <Text style={styles.infoTitle}>{isKo ? "팁" : "Tip"}</Text>
@@ -370,44 +273,20 @@ export default function SettingsScreen() {
                 : "Used for totals, goals, and new transactions."}
             </Text>
 
-            <View style={styles.segment}>
-              {CURRENCY_OPTIONS.map((opt) => {
-                const selected = opt.value === combinedCurrency;
-                return (
-                  <Pressable
-                    key={opt.value}
-                    onPress={async () => {
-                      // 1) UI는 즉시 바꾸기 (선택 표시 + 단위 바로 바뀜)
-                      setHomeCurrency(opt.value);
-                      setDisplayCurrency(opt.value);
-
-                      // 2) 서버에 저장 (DB currency 업데이트)
-                      const ok = await switchPlanCurrency(opt.value);
-
-                      if (!ok) {
-                        // 실패해도 일단 UI는 유지 (원하면 여기서 revert도 가능)
-                        console.warn(
-                          "[SettingsScreen] switchPlanCurrency failed; kept local currency",
-                        );
-                      }
-                    }}
-                    style={[
-                      styles.segmentBtn,
-                      selected && styles.segmentBtnSelected,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.segmentText,
-                        selected && styles.segmentTextSelected,
-                      ]}
-                    >
-                      {opt.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
+            <SegmentControl
+              options={CURRENCY_OPTIONS}
+              value={combinedCurrency}
+              onChange={async (val) => {
+                setHomeCurrency(val);
+                setDisplayCurrency(val);
+                const ok = await switchPlanCurrency(val);
+                if (!ok) {
+                  console.warn(
+                    "[SettingsScreen] switchPlanCurrency failed; kept local currency",
+                  );
+                }
+              }}
+            />
 
             <View style={styles.infoBox}>
               <Text style={styles.infoTitle}>{isKo ? "안내" : "Note"}</Text>
@@ -431,66 +310,40 @@ export default function SettingsScreen() {
             : "When enabled, remaining balance carries over into the next period. (Mode: Rolling)"}
         </Text>
 
-        <View style={styles.segment}>
-          {[
+        <SegmentControl
+          options={[
             { label: isKo ? "끔" : "Off", value: false },
             { label: isKo ? "켬" : "On", value: true },
-          ].map((opt) => {
-            const selected = opt.value === !!cashflowCarryoverEnabled;
-
-            return (
-              <Pressable
-                key={String(opt.label)}
-                onPress={async () => {
-                  const token = String(serverToken ?? "").trim();
-                  if (!token) {
-                    Alert.alert(
-                      isKo ? "로그인이 필요합니다" : "Login required",
-                      isKo ? "서버 토큰이 없습니다." : "Missing server token.",
-                    );
-                    return;
-                  }
-
-                  const prevEnabled = !!cashflowCarryoverEnabled;
-                  const nextEnabled = !!opt.value;
-
-                  // optimistic
-                  setCashflowCarryoverEnabled(nextEnabled);
-                  setCashflowCarryoverMode("ROLLING");
-
-                  try {
-                    await userApi.updateMe(token, {
-                      cashflowCarryoverEnabled: nextEnabled,
-                      cashflowCarryoverMode: "ROLLING",
-                    });
-                  } catch (e) {
-                    // rollback
-                    setCashflowCarryoverEnabled(prevEnabled);
-                    Alert.alert(
-                      isKo ? "저장 실패" : "Save failed",
-                      isKo
-                        ? "설정을 저장할 수 없습니다. 다시 시도해 주세요."
-                        : "Could not save settings. Please try again.",
-                    );
-                  }
-                }}
-                style={[
-                  styles.segmentBtn,
-                  selected && styles.segmentBtnSelected,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.segmentText,
-                    selected && styles.segmentTextSelected,
-                  ]}
-                >
-                  {opt.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+          ]}
+          value={!!cashflowCarryoverEnabled}
+          onChange={async (nextEnabled) => {
+            const token = String(serverToken ?? "").trim();
+            if (!token) {
+              Alert.alert(
+                isKo ? "로그인이 필요합니다" : "Login required",
+                isKo ? "서버 토큰이 없습니다." : "Missing server token.",
+              );
+              return;
+            }
+            const prevEnabled = !!cashflowCarryoverEnabled;
+            setCashflowCarryoverEnabled(nextEnabled);
+            setCashflowCarryoverMode("ROLLING");
+            try {
+              await userApi.updateMe(token, {
+                cashflowCarryoverEnabled: nextEnabled,
+                cashflowCarryoverMode: "ROLLING",
+              });
+            } catch (e) {
+              setCashflowCarryoverEnabled(prevEnabled);
+              Alert.alert(
+                isKo ? "저장 실패" : "Save failed",
+                isKo
+                  ? "설정을 저장할 수 없습니다. 다시 시도해 주세요."
+                  : "Could not save settings. Please try again.",
+              );
+            }
+          }}
+        />
 
         {cashflowCarryoverMode ? (
           <Text style={styles.help}>
@@ -563,32 +416,6 @@ const styles = StyleSheet.create({
   help: {
     color: "#666",
     lineHeight: 18,
-  },
-  segment: {
-    flexDirection: "row",
-    borderWidth: 1,
-    borderColor: "#eee",
-    borderRadius: 14,
-    overflow: "hidden",
-    marginTop: 12,
-    marginBottom: 10,
-  },
-  segmentBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "white",
-  },
-  segmentBtnSelected: {
-    backgroundColor: "black",
-  },
-  segmentText: {
-    fontWeight: "900",
-    color: "#111",
-  },
-  segmentTextSelected: {
-    color: "white",
   },
   selectedLine: {
     marginTop: 2,
