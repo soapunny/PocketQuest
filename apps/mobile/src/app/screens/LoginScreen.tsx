@@ -9,6 +9,7 @@ import * as AuthSession from "expo-auth-session";
 import ScreenLayout from "../components/layout/ScreenLayout";
 import ScreenHeader from "../components/layout/ScreenHeader";
 import { supabase } from "../lib/supabase";
+import { Colors, FontSize, FontWeight, Radius, Spacing } from "../theme";
 
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../config/env";
 
@@ -34,15 +35,6 @@ export default function LoginScreen() {
       const redirectTo = AuthSession.makeRedirectUri({
         path: "oauth",
       });
-
-      console.log("redirectTo:", redirectTo);
-
-      console.log(
-        "SUPABASE_URL:",
-        SUPABASE_URL,
-        "SUPABASE_ANON_KEY:",
-        SUPABASE_ANON_KEY,
-      );
 
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider,
@@ -70,8 +62,6 @@ export default function LoginScreen() {
 
       // Use an auth session so the redirect is captured (prevents falling back to Site URL/localhost).
       const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectTo);
-      console.log("oauth result:", result);
-      console.log("authUrl:", authUrl);
 
       if (result.type === "success" && result.url) {
         // Tokens are returned in the URL fragment (#access_token=...)
@@ -110,12 +100,7 @@ export default function LoginScreen() {
             },
           });
 
-          // If you still need to persist something locally, store Supabase session only.
-          // (Server JWT is no longer used)
-          console.log(
-            "[auth] Supabase token sent to backend for verification/sync",
-          );
-        } catch (e) {
+          } catch (e) {
           console.error("/api/auth/sign-in failed:", e);
           return;
         }
@@ -166,24 +151,24 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   card: {
-    marginHorizontal: 16,
-    padding: 16,
-    borderRadius: 12,
+    marginHorizontal: Spacing["3xl"],
+    padding: Spacing["3xl"],
+    borderRadius: Radius.md,
     borderWidth: 1,
-    borderColor: "#e5e5e5",
-    gap: 12,
+    borderColor: Colors.gray200,
+    gap: Spacing.xl,
   },
-  title: { fontSize: 18, fontWeight: "700" },
-  subTitle: { fontSize: 13, opacity: 0.7, marginBottom: 8 },
+  title: { fontSize: FontSize["2xl"], fontWeight: FontWeight.bold },
+  subTitle: { fontSize: FontSize.base, opacity: 0.7, marginBottom: Spacing.md },
   button: {
     height: 54,
-    borderRadius: 12,
+    borderRadius: Radius.md,
     alignItems: "center",
     justifyContent: "center",
   },
   google: { backgroundColor: "#4285F4" },
   kakao: { backgroundColor: "#FEE500" },
-  buttonText: { color: "#fff", fontWeight: "700" },
-  kakaoText: { color: "#000" },
+  buttonText: { color: Colors.white, fontWeight: FontWeight.bold },
+  kakaoText: { color: Colors.ink },
   disabled: { opacity: 0.6 },
 });

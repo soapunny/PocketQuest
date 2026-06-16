@@ -7,6 +7,7 @@ import {
   ViewStyle,
   TextStyle,
 } from "react-native";
+import { Colors, FontSize, FontWeight, Opacity } from "../theme";
 
 export type LoadingButtonProps = {
   onPress: () => void;
@@ -19,12 +20,6 @@ export type LoadingButtonProps = {
   disabledStyle?: ViewStyle | ViewStyle[];
 };
 
-/**
- * LoadingButton
- * - 로딩 상태를 표시하는 버튼 컴포넌트
- * - 로딩 중 자동으로 비활성화되어 중복 클릭 방지
- * - 로딩 중 ActivityIndicator 표시
- */
 export default function LoadingButton({
   onPress,
   isLoading = false,
@@ -32,7 +27,7 @@ export default function LoadingButton({
   title,
   style,
   textStyle,
-  loadingColor = "white",
+  loadingColor = Colors.white,
   disabledStyle,
 }: LoadingButtonProps) {
   const isDisabled = isLoading || disabled;
@@ -64,11 +59,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   buttonText: {
-    fontSize: 18,
-    fontWeight: "600",
+    fontSize: FontSize["2xl"],
+    fontWeight: FontWeight.semibold,
   },
   buttonDisabled: {
-    opacity: 0.6,
+    opacity: Opacity.disabled,
   },
 });
 

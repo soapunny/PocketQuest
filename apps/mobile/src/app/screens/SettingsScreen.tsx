@@ -8,6 +8,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import ScreenHeader from "../components/layout/ScreenHeader";
 import ScreenLayout from "../components/layout/ScreenLayout";
 import { SegmentControl } from "../components/SegmentControl";
+import { Colors, FontSize, FontWeight, Radius, Spacing } from "../theme";
 
 import type { Currency } from "@pq/shared/money/types";
 
@@ -400,58 +401,58 @@ export default function SettingsScreen() {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: "white",
-    borderRadius: 16,
-    padding: 14,
+    backgroundColor: Colors.white,
+    borderRadius: Radius.lg,
+    padding: Spacing["2xl"],
     borderWidth: 1,
-    borderColor: "#eee",
-    marginBottom: 12,
+    borderColor: Colors.gray100,
+    marginBottom: Spacing.xl,
   },
   cardTitle: {
-    fontSize: 16,
-    fontWeight: "900",
-    color: "#111",
-    marginBottom: 6,
+    fontSize: FontSize.xl,
+    fontWeight: FontWeight.black,
+    color: Colors.ink,
+    marginBottom: Spacing.sm,
   },
   help: {
-    color: "#666",
+    color: Colors.gray600,
     lineHeight: 18,
   },
   selectedLine: {
     marginTop: 2,
-    color: "#111",
+    color: Colors.ink,
   },
   infoBox: {
-    marginTop: 10,
-    padding: 12,
-    borderRadius: 14,
+    marginTop: Spacing.lg,
+    padding: Spacing.xl,
+    borderRadius: Radius.lg,
     borderWidth: 1,
-    borderColor: "#eee",
-    backgroundColor: "#fafafa",
+    borderColor: Colors.gray100,
+    backgroundColor: Colors.gray50,
   },
   infoTitle: {
-    fontWeight: "900",
-    color: "#111",
-    marginBottom: 4,
+    fontWeight: FontWeight.black,
+    color: Colors.ink,
+    marginBottom: Spacing.xs,
   },
   logoutCard: {
-    borderColor: "#fee4e2",
+    borderColor: Colors.errorBorder,
   },
   logoutTitle: {
-    color: "#b42318",
+    color: Colors.error,
   },
   logoutBtn: {
-    marginTop: 12,
+    marginTop: Spacing.xl,
     height: 48,
-    borderRadius: 14,
+    borderRadius: Radius.lg,
     borderWidth: 1,
-    borderColor: "#b42318",
+    borderColor: Colors.error,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "white",
+    backgroundColor: Colors.white,
   },
   logoutBtnText: {
-    fontWeight: "900",
-    color: "#b42318",
+    fontWeight: FontWeight.black,
+    color: Colors.error,
   },
 });
