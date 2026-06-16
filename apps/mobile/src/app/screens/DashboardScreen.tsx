@@ -7,6 +7,8 @@ import ScreenLayout from "../components/layout/ScreenLayout";
 import ScreenHeader from "../components/layout/ScreenHeader";
 import ScreenCard from "../components/layout/ScreenCard";
 import { CardSpacing } from "../components/Typography";
+import { MetricCard } from "../components/MetricCard";
+import { LoadingCard } from "../components/LoadingCard";
 import { Colors, FontSize, FontWeight, Radius, Spacing, Opacity } from "../theme";
 
 import type { Currency } from "@pq/shared/money";
@@ -90,7 +92,6 @@ export default function DashboardScreen() {
   const [isCashflowDetailsOpen, setIsCashflowDetailsOpen] = useState(false);
 
   type StatusDescriptor = { text: string; color: string; arrow: string };
-
   const cashflowHealthDescriptor = (
     key: CashflowHealthKey
   ): StatusDescriptor => {
@@ -128,91 +129,6 @@ export default function DashboardScreen() {
     }
   };
 
-  const StatusChip = ({ label, color }: { label: string; color: string }) => {
-    return (
-      <View style={styles.statusChip}>
-        <Text style={[styles.statusChipText, { color }]}>{label}</Text>
-      </View>
-    );
-  };
-
-  const MetricCard = ({
-    title,
-    value,
-    sub,
-    status,
-    progress,
-    variant,
-  }: {
-    title: string;
-    value: string;
-    sub?: React.ReactNode;
-    status?: { label: string; color: string };
-    progress?: { ratio: number; color: string };
-    variant?: "default" | "detail";
-  }) => {
-    const isDetail = variant === "detail";
-    const cardStyle = StyleSheet.flatten([
-      styles.metricCard,
-      isDetail ? styles.metricCardDetail : null,
-    ]);
-    return (
-      <ScreenCard style={cardStyle}>
-        <View style={styles.metricTopRow}>
-          <Text
-            style={[styles.metricTitle, isDetail && styles.metricTitleDetail]}
-          >
-            {title}
-          </Text>
-          {status ? (
-            <StatusChip label={status.label} color={status.color} />
-          ) : null}
-        </View>
-        {progress ? (
-          <View
-            style={[
-              styles.progressTrack,
-              isDetail && styles.progressTrackDetail,
-            ]}
-          >
-            <View
-              style={[
-                styles.progressFill,
-                {
-                  width: `${Math.round(clamp01(progress.ratio) * 100)}%`,
-                  backgroundColor: progress.color,
-                },
-              ]}
-            />
-          </View>
-        ) : null}
-        <Text
-          style={[styles.metricValue, isDetail && styles.metricValueDetail]}
-        >
-          {value}
-        </Text>
-        {sub ? (
-          typeof sub === "string" ? (
-            <Text
-              style={[styles.metricSub, isDetail && styles.metricSubDetail]}
-            >
-              {sub}
-            </Text>
-          ) : (
-            <View
-              style={[
-                styles.metricSubRow,
-                isDetail && styles.metricSubRowDetail,
-              ]}
-            >
-              {sub}
-            </View>
-          )
-        ) : null}
-      </ScreenCard>
-    );
-  };
-
   const periodLabel = useMemo(() => {
     const periodType = getPlanPeriodType(plan);
     const key = getPeriodLabelKey(periodType);
@@ -229,11 +145,7 @@ export default function DashboardScreen() {
           />
         }
       >
-        <ScreenCard>
-          <Text style={CardSpacing.description}>
-            {tr("Preparing dashboard…", "대시보드를 준비 중이에요…")}
-          </Text>
-        </ScreenCard>
+        <LoadingCard label={tr("Preparing dashboard…", "대시보드를 준비 중이에요…")} />
       </ScreenLayout>
     );
   }
@@ -832,11 +744,21 @@ const styles = StyleSheet.create({
   detailsBtnDisabled: { opacity: 0.4 },
   detailsBtnTextDisabled: { opacity: Opacity.muted },
 
+  // Sub-text used inside MetricCard's sub prop
+  metricSub: {
+    marginTop: Spacing.sm,
+    fontSize: FontSize.sm,
+    opacity: Opacity.muted,
+    fontWeight: FontWeight.medium,
+  },
+
+  // Savings-by-goal detail card (custom layout, not using MetricCard)
   metricCard: {
     width: "100%",
     minHeight: 104,
     justifyContent: "space-between",
   },
+  metricCardDetail: { minHeight: 92 },
   metricTopRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -844,58 +766,20 @@ const styles = StyleSheet.create({
     gap: Spacing.lg,
     marginBottom: Spacing.md,
   },
-  progressTrack: {
-    height: 4,
-    borderRadius: Radius.pill,
-    backgroundColor: Colors.overlay06,
-    overflow: "hidden",
-    marginBottom: Spacing.md,
-  },
-  progressFill: {
-    height: "100%",
-    borderRadius: Radius.pill,
-  },
   metricTitle: {
     fontSize: FontSize.base,
     opacity: Opacity.subtle,
     fontWeight: FontWeight.semibold,
   },
-  metricValue: {
-    fontSize: FontSize["3xl"],
-    fontWeight: FontWeight.extrabold,
-    letterSpacing: 0.2,
-    marginTop: 2,
-  },
-  metricSub: {
-    marginTop: Spacing.sm,
+  metricTitleDetail: {
     fontSize: FontSize.sm,
-    opacity: Opacity.muted,
-    fontWeight: FontWeight.medium,
+    opacity: 0.68,
   },
-  metricSubRow: {
-    marginTop: Spacing.sm,
-    flexDirection: "row",
-    flexWrap: "wrap",
-    alignItems: "center",
-  },
-
-  statusChip: {
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.xs,
-    borderRadius: Radius.pill,
-    backgroundColor: Colors.overlay04,
-  },
-  statusChipText: {
-    fontSize: FontSize.sm,
-    fontWeight: FontWeight.extrabold,
-  },
-
   sectionDivider: {
     height: 1,
     backgroundColor: Colors.overlay06,
     marginBottom: Spacing.lg,
   },
-
   savingsByGoalList: { gap: Spacing.lg },
   savingsByGoalRow: {
     flexDirection: "row",
@@ -945,21 +829,4 @@ const styles = StyleSheet.create({
     opacity: Opacity.subtle,
     marginBottom: Spacing.lg,
   },
-
-  metricCardDetail: { minHeight: 92 },
-  metricTitleDetail: {
-    fontSize: FontSize.sm,
-    opacity: 0.68,
-  },
-  progressTrackDetail: {
-    height: 3,
-    marginBottom: Spacing.sm,
-  },
-  metricValueDetail: { fontSize: FontSize["2xl"] },
-  metricSubDetail: {
-    marginTop: Spacing.xs,
-    fontSize: FontSize.xs,
-    opacity: 0.62,
-  },
-  metricSubRowDetail: { marginTop: Spacing.xs },
 });

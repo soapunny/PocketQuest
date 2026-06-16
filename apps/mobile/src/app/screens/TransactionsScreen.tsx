@@ -1,11 +1,9 @@
 // apps/mobile/src/app/screens/TransactionsScreen.tsx
 
-import { useCallback, useEffect, useMemo, useState, ReactNode } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useFocusEffect } from "@react-navigation/native";
 import {
   Alert,
-  Keyboard,
-  Modal,
   Pressable,
   StyleSheet,
   Text,
@@ -19,6 +17,9 @@ import { Colors, FontSize, FontWeight, Radius, Spacing, Opacity } from "../theme
 import ScreenHeader from "../components/layout/ScreenHeader";
 import ScreenCard from "../components/layout/ScreenCard";
 import ScreenLayout from "../components/layout/ScreenLayout";
+import { TransactionCard } from "../components/TransactionCard";
+import { TransactionEditModal } from "../components/TransactionEditModal";
+import { LoadingCard } from "../components/LoadingCard";
 
 import type {
   TxType,
@@ -30,7 +31,6 @@ import type { Currency } from "@pq/shared/money/types";
 
 import { useAuthStore } from "../store/authStore";
 import { useTransactions } from "../store/transactionsStore";
-// bootstrap handled in transactions store
 import { usePlan } from "../store/planStore";
 import { useDashboardStore } from "../store/dashboardStore";
 
@@ -41,73 +41,9 @@ import {
 } from "@pq/shared/transactions/categories";
 import {
   formatAmountTextFromMinor,
-  parseInputToMinor,
-  formatMoney,
   absMinor,
 } from "../domain/money";
 import { deriveTransactionDirty } from "../domain/forms";
-import { typeUI } from "../domain/transactions";
-
-function TransactionEditModal(props: {
-  visible: boolean;
-  onRequestClose: () => void;
-  title: string;
-  children: ReactNode;
-}) {
-  const { visible, onRequestClose, title, children } = props;
-
-  const [keyboardVisible, setKeyboardVisible] = useState(false);
-
-  useEffect(() => {
-    const showSub = Keyboard.addListener("keyboardDidShow", () => {
-      setKeyboardVisible(true);
-    });
-    const hideSub = Keyboard.addListener("keyboardDidHide", () => {
-      setKeyboardVisible(false);
-    });
-
-    return () => {
-      showSub.remove();
-      hideSub.remove();
-    };
-  }, []);
-
-  const onBackdropPress = () => {
-    if (keyboardVisible) {
-      Keyboard.dismiss();
-      return;
-    }
-    onRequestClose();
-  };
-
-  return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={onRequestClose}
-    >
-      <Pressable
-        onPress={onBackdropPress}
-        style={{
-          flex: 1,
-          backgroundColor: Colors.overlay35,
-          padding: Spacing["3xl"],
-          justifyContent: "center",
-        }}
-      >
-        <Pressable onPress={() => Keyboard.dismiss()} style={styles.modalCard}>
-          <ScreenCard>
-            <Text style={[CardSpacing.cardTitle, styles.modalTitle]}>
-              {title}
-            </Text>
-            {children}
-          </ScreenCard>
-        </Pressable>
-      </Pressable>
-    </Modal>
-  );
-}
 
 export default function TransactionsScreen() {
   const txStore = useTransactions();
@@ -591,90 +527,27 @@ export default function TransactionsScreen() {
         }
         data={filteredTransactions}
         keyExtractor={(item: Transaction) => item.id}
-        renderItem={({ item }) => {
-          const tx = item;
-          const cur = tx.currency;
-          const amtMinor = absMinor(tx.amountMinor ?? 0);
-          const txType = (tx.type as TxType) ?? "EXPENSE";
-          const pill = typeUI(txType);
-          const showFxNote = cur !== homeCurrency;
-
-          // Display-wise, treat EXPENSE as negative, INCOME/SAVING as positive,
-          // but keep the stored amountMinor non-negative in the DB.
-          const displayMinor = txType === "EXPENSE" ? -amtMinor : amtMinor;
-
-          const dateISO =
-            tx.occurredAtLocalISO ?? tx.occurredAtISO ?? tx.occurredAt;
-
-          return (
-            <Pressable
-              onPress={() => openEdit(item.id)}
-              style={({ pressed }) => [{ opacity: pressed ? 0.85 : 1 }]}
-            >
-              <ScreenCard style={{ borderColor: pill.border }}>
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                  }}
-                >
-                  <View style={[styles.txTypePill, { backgroundColor: pill.pillBg }]}>
-                    <Text style={[styles.txTypePillText, { color: pill.pillText }]}>
-                      {pill.label}
-                    </Text>
-                    <Text style={[styles.txTypePillText, { color: pill.pillText }]}>
-                      {cur}
-                    </Text>
-                  </View>
-
-                  <View style={[styles.txDot, { backgroundColor: pill.accent }]} />
-                </View>
-
-                <Text style={[CardSpacing.cardTitle, styles.txCategory]}>
-                  {txType === "SAVING"
-                    ? savingsGoalLabel((tx as any)?.savingsGoalId)
-                    : categoryLabelText(tx.category, language)}
-                </Text>
-                <Text style={[styles.txAmount, { color: pill.pillText }]}>
-                  {formatMoney(displayMinor, cur)}
-                </Text>
-
-                {showFxNote ? (
-                  <Text style={styles.metaText}>
-                    {tr(
-                      `Base totals use ${homeCurrency}. This transaction is in ${cur}.`,
-                      `기준 합계 통화는 ${homeCurrency}이고, 이 거래는 ${cur}로 기록되어 있어요.`,
-                    )}
-                  </Text>
-                ) : null}
-
-                {!!dateISO && (
-                  <Text style={styles.metaText}>
-                    {new Date(dateISO).toLocaleString()}
-                  </Text>
-                )}
-
-                {!!tx.note && (
-                  <Text style={styles.noteText}>
-                    {tr("Note", "메모")}: {tx.note}
-                  </Text>
-                )}
-
-                <Text style={styles.metaText}>
-                  {tr("Tap to edit", "눌러서 수정")}
-                </Text>
-              </ScreenCard>
-            </Pressable>
-          );
-        }}
+        renderItem={({ item }) => (
+          <TransactionCard
+            tx={item}
+            homeCurrency={homeCurrency}
+            language={language}
+            savingsGoals={savingsGoals}
+            tr={tr}
+            onPress={() => openEdit(item.id)}
+          />
+        )}
         ListEmptyComponent={
-          <Text style={styles.emptyText}>
-            {tr(
-              "No matching transactions. Try changing filters or search.",
-              "조건에 맞는 거래가 없어요. 필터나 검색어를 바꿔보세요.",
-            )}
-          </Text>
+          isLoading ? (
+            <LoadingCard label={tr("Loading transactions…", "거래 내역을 불러오는 중…")} />
+          ) : (
+            <Text style={styles.emptyText}>
+              {tr(
+                "No matching transactions. Try changing filters or search.",
+                "조건에 맞는 거래가 없어요. 필터나 검색어를 바꿔보세요.",
+              )}
+            </Text>
+          )
         }
         showsVerticalScrollIndicator={false}
       />
@@ -910,37 +783,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
 
-  // Transaction card
-  txTypePill: {
-    alignSelf: "flex-start",
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.xs,
-    borderRadius: Radius.pill,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.md,
-  },
-  txTypePillText: {
-    fontWeight: FontWeight.black,
-    fontSize: FontSize.sm,
-    letterSpacing: 0.3,
-  },
-  txDot: {
-    width: 10,
-    height: 10,
-    borderRadius: Radius.pill,
-  },
-  txCategory: { marginTop: Spacing.md },
-  txAmount: {
-    marginTop: Spacing.sm,
-    fontSize: FontSize["3xl"],
-    fontWeight: FontWeight.black,
-  },
-  metaText: {
-    marginTop: Spacing.sm,
-    color: Colors.gray500,
-    fontSize: FontSize.sm,
-  },
+  // Edit modal form
   typeHintText: {
     marginTop: Spacing.sm,
     fontSize: FontSize.sm,
@@ -949,14 +792,6 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
     fontWeight: FontWeight.bold,
   },
-  noteText: {
-    marginTop: Spacing.md,
-    color: Colors.gray700,
-  },
-
-  // Edit modal
-  modalCard: { maxHeight: "85%", width: "100%" },
-  modalTitle: { marginBottom: Spacing.xl },
   modalChipRow: {
     flexDirection: "row",
     gap: Spacing.md,

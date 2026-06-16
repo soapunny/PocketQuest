@@ -17,6 +17,7 @@ import { useUserPrefsStore } from "../store/userPrefsStore";
 import { useDashboardStore } from "../store/dashboardStore";
 
 import { useBootStrap } from "../hooks/useBootStrap";
+import { Colors, FontSize, FontWeight, Radius, Spacing } from "../theme";
 
 export default function BootstrapScreen() {
   const navigation = useNavigation<any>();
@@ -59,7 +60,7 @@ export default function BootstrapScreen() {
 
   return (
     <View style={styles.container}>
-      <ActivityIndicator size="large" color="#4285F4" />
+      <ActivityIndicator size="large" color={Colors.ink} />
       <Text style={styles.title}>Loading…</Text>
 
       {gateError ? (
@@ -90,30 +91,30 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#f7f7f7",
-    padding: 16,
-    gap: 12,
+    backgroundColor: Colors.offWhite,
+    padding: Spacing["3xl"],
+    gap: Spacing.xl,
   },
   title: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: "#111",
+    fontSize: FontSize.xl,
+    fontWeight: FontWeight.extrabold,
+    color: Colors.ink,
   },
   errorText: {
-    marginTop: 8,
-    color: "#b42318",
-    fontWeight: "700",
+    marginTop: Spacing.md,
+    color: Colors.error,
+    fontWeight: FontWeight.bold,
     textAlign: "center",
   },
   button: {
-    marginTop: 10,
-    backgroundColor: "black",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    marginTop: Spacing.lg,
+    backgroundColor: Colors.ink,
+    borderRadius: Radius.md,
+    paddingHorizontal: Spacing["3xl"],
+    paddingVertical: Spacing.xl,
   },
   buttonText: {
-    color: "white",
-    fontWeight: "800",
+    color: Colors.white,
+    fontWeight: FontWeight.extrabold,
   },
 });
