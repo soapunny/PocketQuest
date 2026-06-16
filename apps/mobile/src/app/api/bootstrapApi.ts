@@ -13,9 +13,6 @@ export async function fetchBootstrap(
     );
   }
 
-  // Helpful debug (does not print the token)
-  console.log("[bootstrapApi] GET /api/bootstrap (auth: yes)");
-
   return await request<BootstrapResponseDTO>("/api/bootstrap", {
     method: "GET",
     headers: {

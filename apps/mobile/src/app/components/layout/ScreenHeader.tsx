@@ -1,5 +1,6 @@
 import React from "react";
 import { View, Text, StyleSheet } from "react-native";
+import { Colors, FontWeight } from "../../theme";
 
 // NOTE:
 // - ScreenHeader is a presentational component used by all screens.
@@ -22,20 +23,20 @@ export type ScreenHeaderProps = {
 const Typography = {
   screenTitle: {
     fontSize: 26,
-    fontWeight: "800" as const,
-    color: "#111",
+    fontWeight: FontWeight.extrabold,
+    color: Colors.ink,
     letterSpacing: -0.2,
   },
   screenSubtitle: {
     fontSize: 14,
-    fontWeight: "600" as const,
-    color: "#666",
+    fontWeight: FontWeight.semibold,
+    color: Colors.gray600,
     marginTop: 4,
   },
   description: {
     fontSize: 12,
-    fontWeight: "500" as const,
-    color: "#888",
+    fontWeight: FontWeight.medium,
+    color: Colors.gray500,
     marginTop: 6,
   },
 };

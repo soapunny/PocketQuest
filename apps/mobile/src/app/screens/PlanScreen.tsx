@@ -58,7 +58,7 @@ function toMinorNumber(v: unknown): number {
   }
   // Defensive: Prisma/Decimal-like objects sometimes have `.toString()`
   try {
-    const s = String((v as any)?.toString?.() ?? "");
+    const s = String((v as { toString?: () => string })?.toString?.() ?? "");
     const cleaned = s.replace(/[,\s]/g, "");
     const n = Number(cleaned);
     return Number.isFinite(n) ? n : 0;
@@ -140,7 +140,7 @@ export default function PlanScreen() {
 
   const savingsGoalOptions = useMemo(() => {
     return (plan.savingsGoals ?? [])
-      .map((g: any) => ({
+      .map((g) => ({
         id: String(g.id ?? ""),
         name: String(g.name ?? "").trim(),
       }))
@@ -175,7 +175,7 @@ export default function PlanScreen() {
   useEffect(() => {
     if (!pendingNewGoalName) return;
     const found = (plan.savingsGoals ?? []).find(
-      (g: any) =>
+      (g) =>
         String(g.name ?? "")
           .trim()
           .toLowerCase() === pendingNewGoalName.trim().toLowerCase(),
@@ -196,7 +196,7 @@ export default function PlanScreen() {
     if (lastSyncedSavingsNameGoalIdRef.current === id) return;
 
     const g = (plan.savingsGoals ?? []).find(
-      (x: any) => String(x.id ?? "") === id,
+      (x) => String(x.id ?? "") === id,
     );
     setSelectedSavingsName(String(g?.name ?? ""));
     lastSyncedSavingsNameGoalIdRef.current = id;
@@ -205,11 +205,10 @@ export default function PlanScreen() {
   useEffect(() => {
     if (isEditingBudgetLimit) return;
 
-    const g = (plan.budgetGoals ?? []).find((x: any) => {
-      const k = (x as any).categoryKey ?? (x as any).category ?? "";
-      return normKey(k) === normKey(selectedCategory);
+    const g = (plan.budgetGoals ?? []).find((x) => {
+      return normKey(x.category) === normKey(selectedCategory);
     });
-    const limitMinor = g ? toMinorNumber((g as any).limitMinor) : 0;
+    const limitMinor = g ? toMinorNumber(g.limitMinor) : 0;
     setSelectedLimit(
       Number.isFinite(limitMinor) && limitMinor > 0
         ? formatMoneyNoSymbol(limitMinor, baseCurrency)
@@ -221,9 +220,9 @@ export default function PlanScreen() {
     if (isEditingSavingsTarget) return;
 
     const g = (plan.savingsGoals ?? []).find(
-      (x: any) => String(x.id ?? "") === String(selectedSavingsGoalId),
+      (x) => String(x.id ?? "") === String(selectedSavingsGoalId),
     );
-    const targetMinor = g ? toMinorNumber((g as any).targetMinor) : 0;
+    const targetMinor = g ? toMinorNumber(g.targetMinor) : 0;
     setSelectedSavingsTarget(
       Number.isFinite(targetMinor) && targetMinor > 0
         ? formatMoneyNoSymbol(targetMinor, baseCurrency)
@@ -242,12 +241,11 @@ export default function PlanScreen() {
       setSavingBudgetGoal(true);
 
       // Guard: if nothing changed, do nothing
-      const currentGoal = (plan.budgetGoals ?? []).find((g: any) => {
-        const k = (g as any).categoryKey ?? (g as any).category ?? "";
-        return normKey(k) === normKey(selectedCategory);
+      const currentGoal = (plan.budgetGoals ?? []).find((g) => {
+        return normKey(g.category) === normKey(selectedCategory);
       });
       const currentLimitMinor = currentGoal
-        ? toMinorNumber((currentGoal as any).limitMinor)
+        ? toMinorNumber(currentGoal.limitMinor)
         : 0;
 
       const { dirty: budgetDirty, nextLimitMinor: v } = deriveBudgetDirty({
@@ -319,11 +317,11 @@ export default function PlanScreen() {
       }
 
       const current = (plan.savingsGoals ?? []).find(
-        (x: any) => String(x.id ?? "") === String(selectedSavingsGoalId),
+        (x) => String(x.id ?? "") === String(selectedSavingsGoalId),
       );
 
       const currentName = String(current?.name ?? "");
-      const currentTargetMinor = toMinorNumber((current as any)?.targetMinor);
+      const currentTargetMinor = toMinorNumber(current?.targetMinor);
 
       const { dirty: savingsDirty, nextTargetMinor: v } = deriveSavingsDirty({
         draftName: nameDraft,
@@ -370,7 +368,7 @@ export default function PlanScreen() {
     if (deletingSavingsGoal || savingSavingsGoal) return;
 
     const goal = (plan.savingsGoals ?? []).find(
-      (x: any) => String(x.id ?? "") === id,
+      (x) => String(x.id ?? "") === id,
     );
     const goalName =
       String(goal?.name ?? "").trim() || tr("this goal", "이 목표");
@@ -392,7 +390,6 @@ export default function PlanScreen() {
 
               // Optimistic local remove
               // (store will update snapshot)
-              // @ts-ignore removeSavingsGoal exists in planStore
               removeSavingsGoal(id);
 
               const ok = await saveSavingsGoals();
@@ -473,11 +470,10 @@ export default function PlanScreen() {
 
       <View style={[CardSpacing.card, styles.card]}>
         {(() => {
-          const goal = (plan.budgetGoals ?? []).find((g: any) => {
-            const k = (g as any).categoryKey ?? (g as any).category ?? "";
-            return normKey(k) === normKey(selectedCategory);
+          const goal = (plan.budgetGoals ?? []).find((g) => {
+            return normKey(g.category) === normKey(selectedCategory);
           });
-          const limit = toMinorNumber((goal as any)?.limitMinor);
+          const limit = toMinorNumber(goal?.limitMinor);
           const { dirty: isBudgetDirty } = deriveBudgetDirty({
             selectedLimitText: selectedLimit,
             currentLimitMinor: limit,
@@ -575,7 +571,7 @@ export default function PlanScreen() {
             }
 
             const name = nextNewGoalName(
-              existing.map((g: any) => String(g.name ?? "")),
+              existing.map((g) => String(g.name ?? "")),
               isKo,
             );
 
@@ -653,10 +649,10 @@ export default function PlanScreen() {
       <View style={[CardSpacing.card, styles.card]}>
         {(() => {
           const goal = (plan.savingsGoals ?? []).find(
-            (x: any) => String(x.id ?? "") === String(selectedSavingsGoalId),
+            (x) => String(x.id ?? "") === String(selectedSavingsGoalId),
           );
-          const target = toMinorNumber((goal as any)?.targetMinor);
-          const currentName = String((goal as any)?.name ?? "");
+          const target = toMinorNumber(goal?.targetMinor);
+          const currentName = String(goal?.name ?? "");
           const { dirty: isSavingsDirty } = deriveSavingsDirty({
             draftName: selectedSavingsName,
             currentName,

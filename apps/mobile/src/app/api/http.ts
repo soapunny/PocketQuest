@@ -25,24 +25,10 @@ export async function request<T>(
   if (!headers.has("Content-Type"))
     headers.set("Content-Type", "application/json");
 
-  const method = String(options.method ?? "GET").toUpperCase();
-  console.log("[http]", method, url);
-
   const response = await fetch(url, { ...options, headers });
-
-  console.log("[http] resp", { url, status: response.status, ok: response.ok });
-
-  if (response.ok && method === "GET" && url.endsWith("/api/plans")) {
-    const text = await response
-      .clone()
-      .text()
-      .catch(() => "");
-    console.log("[http] /api/plans body:", text);
-  }
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    console.log("[http] error", { url, status: response.status, body: text });
 
     const err: any = new Error(
       response.status === 401 ? "Unauthorized" : `HTTP ${response.status}`,

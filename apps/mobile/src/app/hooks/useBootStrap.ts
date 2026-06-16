@@ -30,23 +30,13 @@ export function useBootStrap() {
     try {
       // Bootstrap uses the Supabase access_token (SSOT) as our API auth token.
       const token = String(auth.supabaseAccessToken ?? "").trim();
-      console.log({
-        hasSession: !!auth.session,
-        hasSupabaseToken: !!auth.supabaseAccessToken,
-      });
       if (!token) {
         throw new Error(
           "Bootstrap failed: missing auth token (expected Supabase access token)",
         );
       }
 
-      console.log("[bootstrap] token length:", token.length);
       const payload = await fetchBootstrap(token);
-      console.log(
-        "[bootstrap] bootstrap ok, keys:",
-        Object.keys(payload ?? {}),
-      );
-      console.log("[bootstrap] txSummary?", !!(payload as any)?.txSummary);
 
       // 1) user prefs (source of truth)
       applyUserPrefsFromBootstrap(payload?.user);

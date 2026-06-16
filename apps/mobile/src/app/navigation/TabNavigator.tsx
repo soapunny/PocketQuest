@@ -5,6 +5,7 @@ import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { Pressable, Text, View } from "react-native";
 import { BottomTabBarButtonProps } from "@react-navigation/bottom-tabs";
 import { useNavigation } from "@react-navigation/native";
+import { FontWeight } from "../theme";
 
 import DashboardScreen from "../screens/DashboardScreen";
 import TransactionsScreen from "../screens/TransactionsScreen";
@@ -47,7 +48,7 @@ function AddButton(props: BottomTabBarButtonProps) {
           marginTop: -18,
         }}
       >
-        <Text style={{ color: "white", fontSize: 26, fontWeight: "700" }}>
+        <Text style={{ color: "white", fontSize: 26, fontWeight: FontWeight.bold }}>
           +
         </Text>
       </View>

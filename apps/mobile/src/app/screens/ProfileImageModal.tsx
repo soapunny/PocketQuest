@@ -17,6 +17,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 // UI components
 import LoadingButton from "../components/LoadingButton";
+import { Colors, FontWeight } from "../theme";
 
 import { useAuthStore } from "../store/authStore";
 import { usePlan } from "../store/planStore";
@@ -289,7 +290,7 @@ const styles = StyleSheet.create({
   },
   placeholderText: {
     fontSize: 80,
-    fontWeight: "700",
-    color: "#666",
+    fontWeight: FontWeight.bold,
+    color: Colors.gray600,
   },
 });
