@@ -61,8 +61,9 @@ export default function TransactionsScreen() {
     deleteTransaction,
   } = txStore;
 
-  // 🔥 여기서 periodFilter를 먼저 선언
+  // periodFilter는 useFocusEffect deps에 사용되므로 먼저 선언
   const [periodFilter, setPeriodFilter] = useState<Range>("ALL");
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // 서버에서 트랜잭션 목록을 가져와 화면 상태에 반영
   // useFocusEffect를 사용해서 화면이 다시 포커스될 때마다,
@@ -90,6 +91,17 @@ export default function TransactionsScreen() {
       };
     }, [periodFilter, loadTransactions]),
   );
+
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      await loadTransactions(periodFilter);
+    } catch {
+      // silent — list already shows current data
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [periodFilter, loadTransactions]);
 
   const { homeCurrency, language, plan: planData } = usePlan();
   const savingsGoals: Array<{ id: string; name: string }> = planData.savingsGoals ?? [];
@@ -281,7 +293,7 @@ export default function TransactionsScreen() {
         })
       : { dirty: false, nextAmountMinorAbs: 0 };
 
-  // ✅ Unassigned selection policy (edit modal)
+  // Unassigned selection policy (edit modal)
   // - If the original tx was SAVING and already unassigned (baseline goalId blank),
   //   allow keeping/selecting Unassigned.
   // - Otherwise (originally assigned or originally not SAVING), do NOT allow selecting Unassigned.
@@ -303,7 +315,7 @@ export default function TransactionsScreen() {
   }, [savingsGoalOptions]);
   const isValidAmount = nextEditAmountMinorAbs > 0;
 
-  // ✅ Saving goal validity:
+  // Saving goal validity:
   // - If canSelectUnassignedNow: empty is allowed (baseline already unassigned)
   // - Else: must pick a real goal id (non-empty)
   const isValidSavingGoal =
@@ -337,7 +349,7 @@ export default function TransactionsScreen() {
     // EXPENSE / INCOME / SAVING은 type으로 구분합니다.
     const nextAmountMinor = absMinor;
 
-    // ✅ Guard: prevent assigning to Unassigned unless baseline allows it.
+    // Guard: prevent assigning to Unassigned unless baseline allows it.
     if (type === "SAVING") {
       const nextGoal = String(savingsGoalId ?? "").trim();
       if (!nextGoal && !canSelectUnassignedNow) {
@@ -537,6 +549,8 @@ export default function TransactionsScreen() {
             />
           )
         }
+        refreshing={isRefreshing}
+        onRefresh={handleRefresh}
         showsVerticalScrollIndicator={false}
       />
 
@@ -647,7 +661,7 @@ export default function TransactionsScreen() {
 
               const isUnassignedOption =
                 type === "SAVING" && !String(c ?? "").trim();
-              const disabled = isUnassignedOption && !canSelectUnassignedNow; // ✅ 핵심: baseline이 unassigned였던 경우만 허용
+              const disabled = isUnassignedOption && !canSelectUnassignedNow; // baseline이 unassigned였던 경우만 허용
 
               return (
                 <Pressable

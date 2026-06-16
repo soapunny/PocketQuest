@@ -348,7 +348,7 @@ function mergeSavingsGoals(
     targetMinor?: number | null;
   }[],
 ): SavingsGoal[] {
-  // ✅ SSOT: id-first.
+  // SSOT: id-first.
   // - If server provides an id, we always use that id.
   // - If server does NOT provide an id (legacy), we fall back to name matching.
   // - This prevents rename from creating “new goals” or flipping ids.
@@ -1304,7 +1304,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       saveBudgetGoals,
       saveBudgetGoal,
       saveSavingsGoals,
-      refreshPlan, // ✅ deps 추가 (중요)
+      refreshPlan,
       setPeriodType,
       switchPeriodType,
       refreshPeriodIfNeeded,

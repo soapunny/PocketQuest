@@ -62,6 +62,8 @@ type ListProps<ItemT> = CommonProps & {
   }) => React.ReactElement | null;
   ListEmptyComponent?: React.ReactElement | null;
   showsVerticalScrollIndicator?: boolean;
+  refreshing?: boolean;
+  onRefresh?: () => void;
 };
 
 export type ScreenLayoutProps<ItemT = any> = ScrollProps | ListProps<ItemT>;
@@ -163,6 +165,8 @@ export default function ScreenLayout<ItemT = any>(
         renderItem={wrappedRenderItem!}
         ListEmptyComponent={props.ListEmptyComponent}
         ListHeaderComponent={listHeaderContent}
+        refreshing={props.refreshing ?? false}
+        onRefresh={props.onRefresh}
       />
     ) : (
       <ScrollView
