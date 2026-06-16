@@ -1025,11 +1025,6 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
       })),
     };
 
-    console.log(
-      "[planStore] PATCH budget goals payload:",
-      JSON.stringify(payload),
-    );
-
     try {
       if (activePlanId) {
         const resp = await plansApi.patchBudgetGoals(
@@ -1086,11 +1081,6 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         limitMinor: Math.max(0, Math.trunc(Number(limitMinor) || 0)),
       };
 
-      console.log(
-        "[planStore] POST budget goal payload:",
-        JSON.stringify(payload),
-      );
-
       try {
         const resp = await plansApi.upsertBudgetGoal(token, planId, payload);
         const planDto = unwrapPlan(resp);
@@ -1125,11 +1115,6 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
         targetMinor: Math.max(0, Math.trunc(Number(g.targetMinor) || 0)),
       })),
     } as any;
-
-    console.log(
-      "[planStore] PATCH savings goals payload:",
-      JSON.stringify(payload),
-    );
 
     try {
       if (activePlanId) {

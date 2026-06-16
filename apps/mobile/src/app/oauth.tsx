@@ -42,8 +42,6 @@ export default function OAuthCallbackScreen() {
         }
         handledCodeRef.current = code;
 
-        console.log("oauth code:", code);
-
         // Only pass auth code (PKCE verifier is read from storage)
         const { error } = await supabase.auth.exchangeCodeForSession(code);
         if (error) {
