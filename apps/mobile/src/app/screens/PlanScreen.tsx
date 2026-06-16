@@ -16,6 +16,7 @@ import { CardSpacing } from "../components/Typography";
 import { Colors, FontSize, FontWeight, Radius, Spacing, Opacity } from "../theme";
 import ScreenHeader from "../components/layout/ScreenHeader";
 import ScreenLayout from "../components/layout/ScreenLayout";
+import { EmptyCard } from "../components/EmptyCard";
 
 // types
 import type { Currency } from "@pq/shared/money/types";
@@ -682,17 +683,14 @@ export default function PlanScreen() {
                   />
                 </View>
               ) : (
-                <>
-                  <Text style={[CardSpacing.cardTitle, styles.cardTitle]}>
-                    {tr("No savings goals yet", "저축 목표가 아직 없어요")}
-                  </Text>
-                  <Text style={styles.cardBody}>
-                    {tr(
-                      "Tap + to create your first savings goal.",
-                      "+ 버튼을 눌러 첫 저축 목표를 만들어보세요.",
-                    )}
-                  </Text>
-                </>
+                <EmptyCard
+                  icon="🎯"
+                  title={tr("No savings goals yet", "저축 목표가 아직 없어요")}
+                  body={tr(
+                    "Tap + to create your first savings goal.",
+                    "+ 버튼을 눌러 첫 저축 목표를 만들어보세요.",
+                  )}
+                />
               )}
 
               {target > 0 ? (

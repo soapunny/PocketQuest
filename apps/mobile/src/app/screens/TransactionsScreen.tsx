@@ -20,6 +20,7 @@ import ScreenLayout from "../components/layout/ScreenLayout";
 import { TransactionCard } from "../components/TransactionCard";
 import { TransactionEditModal } from "../components/TransactionEditModal";
 import { LoadingCard } from "../components/LoadingCard";
+import { EmptyCard } from "../components/EmptyCard";
 
 import type {
   TxType,
@@ -541,12 +542,14 @@ export default function TransactionsScreen() {
           isLoading ? (
             <LoadingCard label={tr("Loading transactions…", "거래 내역을 불러오는 중…")} />
           ) : (
-            <Text style={styles.emptyText}>
-              {tr(
-                "No matching transactions. Try changing filters or search.",
-                "조건에 맞는 거래가 없어요. 필터나 검색어를 바꿔보세요.",
+            <EmptyCard
+              icon="🧾"
+              title={tr("No transactions found", "거래 내역이 없어요")}
+              body={tr(
+                "Try changing filters or search, or add a new transaction.",
+                "필터나 검색어를 바꿔보거나, 새 거래를 추가해 보세요.",
               )}
-            </Text>
+            />
           )
         }
         showsVerticalScrollIndicator={false}
@@ -647,12 +650,11 @@ export default function TransactionsScreen() {
         </Text>
         <View style={styles.categoryWrap}>
           {categoryOptions.length === 0 ? (
-            <Text style={{ color: Colors.gray500 }}>
-              {tr(
-                "No savings goals yet. Create one in Plan > Savings.",
-                "저축 목표가 아직 없어요. Plan > Savings에서 만들어 주세요.",
-              )}
-            </Text>
+            <EmptyCard
+              icon="🎯"
+              title={tr("No savings goals yet", "저축 목표가 아직 없어요")}
+              body={tr("Create one in Plan > Savings.", "Plan > Savings에서 만들어 주세요.")}
+            />
           ) : (
             categoryOptions.map((c) => {
               const selected = type === "SAVING" ? savingsGoalId : category;
@@ -776,13 +778,6 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.lg,
     backgroundColor: Colors.white,
   },
-  emptyText: {
-    color: Colors.gray600,
-    marginTop: Spacing.sm,
-    marginBottom: Spacing.lg,
-    textAlign: "center",
-  },
-
   // Edit modal form
   typeHintText: {
     marginTop: Spacing.sm,
