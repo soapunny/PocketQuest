@@ -39,6 +39,7 @@ export function TransactionCard({ tx, homeCurrency, language, savingsGoals, tr, 
   const showFxNote = cur !== homeCurrency;
   const displayMinor = txType === "EXPENSE" ? -amtMinor : amtMinor;
   const dateISO = (tx as any).occurredAtLocalISO ?? (tx as any).occurredAtISO ?? (tx as any).occurredAt;
+  const dateLocale = language === "ko" ? "ko-KR" : "en-US";
 
   return (
     <Pressable
@@ -74,7 +75,7 @@ export function TransactionCard({ tx, homeCurrency, language, savingsGoals, tr, 
         )}
 
         {!!dateISO && (
-          <Text style={styles.meta}>{new Date(dateISO).toLocaleString()}</Text>
+          <Text style={styles.meta}>{new Date(dateISO).toLocaleString(dateLocale)}</Text>
         )}
 
         {!!tx.note && (
@@ -83,7 +84,6 @@ export function TransactionCard({ tx, homeCurrency, language, savingsGoals, tr, 
           </Text>
         )}
 
-        <Text style={styles.meta}>{tr("Tap to edit", "눌러서 수정")}</Text>
       </ScreenCard>
     </Pressable>
   );

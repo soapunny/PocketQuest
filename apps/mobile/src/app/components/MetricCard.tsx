@@ -47,7 +47,14 @@ export function MetricCard({ title, value, sub, status, progress, variant }: Pro
         </View>
       ) : null}
 
-      <Text style={[styles.value, isDetail && styles.valueDetail]}>{value}</Text>
+      <Text
+        style={[styles.value, isDetail && styles.valueDetail]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.6}
+      >
+        {value}
+      </Text>
 
       {sub ? (
         typeof sub === "string" ? (

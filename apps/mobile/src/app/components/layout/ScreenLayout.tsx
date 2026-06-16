@@ -7,6 +7,7 @@ import {
   Platform,
   KeyboardAvoidingView,
 } from "react-native";
+import { Colors } from "../../theme";
 
 // ScreenLayout
 // - Standardizes background + horizontal padding + bottom spacing
@@ -65,7 +66,7 @@ type ListProps<ItemT> = CommonProps & {
 
 export type ScreenLayoutProps<ItemT = any> = ScrollProps | ListProps<ItemT>;
 
-const DEFAULT_BG = "#f7f7f7";
+const DEFAULT_BG = Colors.offWhite;
 const DEFAULT_PAD_X = 20;
 const DEFAULT_BOTTOM_PAD = 24;
 

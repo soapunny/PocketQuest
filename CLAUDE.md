@@ -60,7 +60,10 @@ Shared error utilities:
 ### Mobile design system
 - **Token SSOT**: `apps/mobile/src/app/theme.ts` exports `Colors`, `FontSize`, `FontWeight`, `Spacing`, `Radius`, `Opacity`. All screens and components must import from this file — never hardcode color strings, font sizes, or spacing numbers directly in StyleSheets.
 - **Styling approach**: React Native `StyleSheet.create()` with theme tokens. No Tailwind/CSS — this is not a web app.
-- **Typography utilities**: `apps/mobile/src/app/components/Typography.ts` exports reusable text style objects (`CardSpacing`, etc.) built on top of theme tokens.
+- **Typography utilities**: `apps/mobile/src/app/components/Typography.ts` exports reusable text style objects (`CardSpacing`, etc.) built on top of theme tokens. `CardSpacing.card` includes border, padding, and shadow — use it as the base for all cards.
+- **Shared chip styles**: `apps/mobile/src/app/components/chipStyles.ts` exports `chipStyle(active)`, `chipTextStyle(active)`, and `chipStyles` StyleSheet. Do not re-define pill chip styles per screen.
+- **i18n**: Use `makeTr(language)` from `apps/mobile/src/app/domain/i18n.ts`. Never write the two-line `isKo`/`tr` boilerplate directly in screens. Exception: keep `isKo` only when branching between two JSX trees that contain nested `<Text>` components (not replaceable with a plain string argument).
+- **Component extraction**: Never define components inside a render function — it re-creates them on every render and breaks React reconciliation. Extract to a separate file in `components/`.
 
 ### Mobile state and data flow
 - **Auth**: `AuthProvider` / `useAuthStore` (React Context) wraps Supabase session. Supabase `access_token` is passed as `Authorization: Bearer` to every API call.

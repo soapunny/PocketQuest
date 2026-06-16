@@ -15,10 +15,11 @@ import CurrencyInput from "react-native-currency-input";
 
 // UI components and layout
 import { CardSpacing } from "../components/Typography";
-import { Colors, FontSize, FontWeight, Radius, Spacing, Opacity } from "../theme";
+import { Colors, FontSize, FontWeight, Radius, Spacing } from "../theme";
 import ScreenLayout from "../components/layout/ScreenLayout";
 import ScreenHeader from "../components/layout/ScreenHeader";
 import ScreenCard from "../components/layout/ScreenCard";
+import { chipStyle, chipTextStyle, chipStyles } from "../components/chipStyles";
 
 import type { TxType } from "@pq/shared/transactions/types";
 import type { Currency } from "@pq/shared/money/types";
@@ -65,15 +66,6 @@ export default function AddTransactionModal() {
     return savingsGoalOptions.find((x) => String(x.id).trim() !== "")?.id ?? "";
   }, [savingsGoalOptions]);
 
-  const chipStyle = (active: boolean) => [
-    styles.chip,
-    active ? styles.chipActive : styles.chipInactive,
-  ];
-
-  const chipTextStyle = (active: boolean) => [
-    styles.chipText,
-    active ? styles.chipTextActive : styles.chipTextInactive,
-  ];
 
   const [type, setType] = useState<TxType>("EXPENSE");
   const [amountValue, setAmountValue] = useState<number | null>(null);
@@ -429,7 +421,7 @@ export default function AddTransactionModal() {
                   }}
                   style={[
                     ...chipStyle(active),
-                    disabled ? styles.chipDisabled : null,
+                    disabled ? chipStyles.chipDisabled : null,
                   ]}
                 >
                   <Text style={chipTextStyle(active)}>
@@ -538,18 +530,6 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
     marginTop: Spacing.sm,
   },
-  chip: {
-    paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.lg,
-    borderRadius: Radius.pill,
-    borderWidth: 1,
-  },
-  chipActive: { borderColor: Colors.ink, backgroundColor: Colors.ink },
-  chipInactive: { borderColor: Colors.gray200, backgroundColor: Colors.white },
-  chipDisabled: { opacity: Opacity.disabled },
-  chipText: { fontWeight: FontWeight.extrabold },
-  chipTextActive: { color: Colors.white },
-  chipTextInactive: { color: Colors.ink },
 
   actionsRow: { flexDirection: "row", gap: Spacing.xl, marginTop: Spacing.md },
   secondaryButton: {

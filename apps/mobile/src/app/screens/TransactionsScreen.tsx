@@ -21,6 +21,7 @@ import { TransactionCard } from "../components/TransactionCard";
 import { TransactionEditModal } from "../components/TransactionEditModal";
 import { LoadingCard } from "../components/LoadingCard";
 import { EmptyCard } from "../components/EmptyCard";
+import { chipStyle, chipTextStyle } from "../components/chipStyles";
 
 import type {
   TxType,
@@ -182,15 +183,6 @@ export default function TransactionsScreen() {
     return out;
   }, [transactions, filterType, searchText]);
 
-  const chipStyle = (active: boolean) => [
-    styles.chip,
-    active ? styles.chipActive : styles.chipInactive,
-  ];
-
-  const chipTextStyle = (active: boolean) => [
-    styles.chipText,
-    active ? styles.chipTextActive : styles.chipTextInactive,
-  ];
 
   function openEdit(id: string) {
     const tx = transactions.find((t) => t.id === id);
@@ -757,17 +749,6 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     marginBottom: Spacing.md,
   },
-  chip: {
-    paddingVertical: Spacing.md,
-    paddingHorizontal: Spacing.lg,
-    borderRadius: Radius.pill,
-    borderWidth: 1,
-  },
-  chipActive: { borderColor: Colors.ink, backgroundColor: Colors.ink },
-  chipInactive: { borderColor: Colors.gray200, backgroundColor: Colors.white },
-  chipText: { fontWeight: FontWeight.extrabold },
-  chipTextActive: { color: Colors.white },
-  chipTextInactive: { color: Colors.ink },
 
   filtersCard: { marginBottom: Spacing["2xl"] },
   searchInput: {

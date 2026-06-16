@@ -88,6 +88,13 @@ export const CardSpacing: CardSpacingStyles = {
     borderColor: Colors.gray100,
     width: "100%",
     alignSelf: "stretch",
+    // iOS
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    // Android
+    elevation: 2,
   },
 
   sectionGap: { marginTop: Spacing["3xl"] },
