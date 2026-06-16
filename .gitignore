@@ -92,3 +92,4 @@ docker-data/
 # AI rules
 # ================================
 .agents/
+CLAUDE.md
