@@ -29,6 +29,7 @@ import { usePlan } from "../store/planStore";
 import { useDashboardStore } from "../store/dashboardStore";
 
 import { categoryLabelText } from "../domain/categories";
+import { makeTr } from "../domain/i18n";
 import {
   EXPENSE_CATEGORY_KEYS,
   INCOME_CATEGORY_KEYS,
@@ -50,8 +51,7 @@ export default function AddTransactionModal() {
   const savingsGoals: Array<{ id: string; name: string }> =
     planStore?.plan?.savingsGoals ?? planStore?.savingsGoals ?? [];
 
-  const isKo = language === "ko";
-  const tr = (en: string, ko: string) => (isKo ? ko : en);
+  const tr = makeTr(language);
 
   const savingsGoalOptions = [
     { id: "", name: tr("Unassigned", "미지정") },

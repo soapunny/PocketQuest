@@ -45,6 +45,7 @@ import {
   absMinor,
 } from "../domain/money";
 import { deriveTransactionDirty } from "../domain/forms";
+import { makeTr } from "../domain/i18n";
 
 export default function TransactionsScreen() {
   const txStore = useTransactions();
@@ -101,8 +102,7 @@ export default function TransactionsScreen() {
     [savingsGoals],
   );
 
-  const isKo = language === "ko";
-  const tr = (en: string, ko: string) => (isKo ? ko : en);
+  const tr = makeTr(language);
 
   function savingsGoalLabel(id: string | null | undefined): string {
     const raw = String(id ?? "").trim();

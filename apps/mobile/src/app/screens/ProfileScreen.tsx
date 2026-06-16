@@ -9,7 +9,7 @@ import ScreenHeader from "../components/layout/ScreenHeader";
 import ScreenLayout from "../components/layout/ScreenLayout";
 import ScreenCard from "../components/layout/ScreenCard";
 import { CardSpacing } from "../components/Typography";
-import { Colors, FontSize, FontWeight, Radius, Spacing } from "../theme";
+import { Colors, FontSize, FontWeight, Spacing } from "../theme";
 
 import { useAuthStore } from "../store/authStore";
 import { usePlan } from "../store/planStore";
@@ -19,15 +19,15 @@ import {
   computeAllTimePlanProgressPercent,
   txToHomeAbsMinor,
 } from "../domain/plan/progress";
-import { formatMoney, convertMinor, absMinor } from "../domain/money";
+import { formatMoney } from "../domain/money";
+import { makeTr } from "../domain/i18n";
 
 export default function ProfileScreen() {
   const navigation = useNavigation<any>();
   const { session } = useAuthStore();
   const supaUser = session?.user ?? null;
   const { plan, language, homeCurrency } = usePlan();
-  const isKo = language === "ko";
-  const tr = (en: string, ko: string) => (isKo ? ko : en);
+  const tr = makeTr(language);
   const { transactions } = useTransactions();
 
   const [storedProfileImageUri, setStoredProfileImageUri] = useState<

@@ -1,7 +1,7 @@
 // apps/mobile/src/app/components/TransactionEditModal.tsx
 
 import { useEffect, useState, ReactNode } from "react";
-import { Keyboard, Modal, Pressable, StyleSheet, Text, View } from "react-native";
+import { Keyboard, Modal, Pressable, StyleSheet, Text } from "react-native";
 import ScreenCard from "./layout/ScreenCard";
 import { CardSpacing } from "./Typography";
 import { Colors, Spacing } from "../theme";

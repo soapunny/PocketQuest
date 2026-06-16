@@ -13,7 +13,14 @@ import {
 
 // UI components and layout
 import { CardSpacing } from "../components/Typography";
-import { Colors, FontSize, FontWeight, Radius, Spacing, Opacity } from "../theme";
+import {
+  Colors,
+  FontSize,
+  FontWeight,
+  Radius,
+  Spacing,
+  Opacity,
+} from "../theme";
 import ScreenHeader from "../components/layout/ScreenHeader";
 import ScreenLayout from "../components/layout/ScreenLayout";
 import { EmptyCard } from "../components/EmptyCard";
@@ -30,6 +37,7 @@ import {
   getPlaceholderForCurrency,
 } from "../domain/money";
 import { deriveBudgetDirty, deriveSavingsDirty } from "../domain/forms";
+import { makeTr } from "../domain/i18n";
 
 import { usePlan } from "../store/planStore";
 
@@ -77,14 +85,13 @@ export default function PlanScreen() {
     addSavingsGoal,
     renameSavingsGoal,
     refreshPlan,
-    saveBudgetGoals,
     saveBudgetGoal,
     saveSavingsGoals,
     removeSavingsGoal,
   } = usePlan();
   // Keep isKo/tr logic as-is for translation
   const isKo = plan.language === "ko";
-  const tr = (en: string, ko: string) => (isKo ? ko : en);
+  const tr = makeTr(plan.language);
   const baseCurrency: Currency = plan.currency;
 
   const [serverHydrating, setServerHydrating] = useState(true);
@@ -153,7 +160,6 @@ export default function PlanScreen() {
     null,
   );
   const [selectedSavingsName, setSelectedSavingsName] = useState("");
-  const [isEditingSavingsName, setIsEditingSavingsName] = useState(false);
 
   useEffect(() => {
     if (!savingsGoalOptions.length) return;
@@ -651,11 +657,7 @@ export default function PlanScreen() {
           );
           const target = toMinorNumber((goal as any)?.targetMinor);
           const currentName = String((goal as any)?.name ?? "");
-          const {
-            dirty: isSavingsDirty,
-            nameDirty: isSavingsNameDirty,
-            targetDirty: isSavingsTargetDirty,
-          } = deriveSavingsDirty({
+          const { dirty: isSavingsDirty } = deriveSavingsDirty({
             draftName: selectedSavingsName,
             currentName,
             draftTargetText: selectedSavingsTarget,
@@ -670,10 +672,7 @@ export default function PlanScreen() {
                   <TextInput
                     value={selectedSavingsName}
                     onChangeText={setSelectedSavingsName}
-                    onFocus={() => setIsEditingSavingsName(true)}
                     onBlur={() => {
-                      setIsEditingSavingsName(false);
-                      // Save가 커밋이므로 blur에서 store/plan을 변경하지 않는다.
                       const id = String(selectedSavingsGoalId ?? "").trim();
                       if (id) lastSyncedSavingsNameGoalIdRef.current = id;
                     }}
@@ -780,7 +779,11 @@ export default function PlanScreen() {
 
 const styles = StyleSheet.create({
   topActions: { marginBottom: Spacing.lg },
-  serverHint: { marginTop: Spacing.sm, color: Colors.gray600, fontWeight: FontWeight.semibold },
+  serverHint: {
+    marginTop: Spacing.sm,
+    color: Colors.gray600,
+    fontWeight: FontWeight.semibold,
+  },
   savingsHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -796,7 +799,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: Colors.white,
   },
-  addGoalBtnText: { fontSize: FontSize["2xl"], fontWeight: FontWeight.black, color: Colors.ink },
+  addGoalBtnText: {
+    fontSize: FontSize["2xl"],
+    fontWeight: FontWeight.black,
+    color: Colors.ink,
+  },
 
   chipsRow: {
     gap: Spacing.md,
@@ -841,7 +848,11 @@ const styles = StyleSheet.create({
     color: Colors.ink,
     marginBottom: Spacing.sm,
   },
-  cardMeta: { marginBottom: Spacing.lg, fontSize: FontSize.base, fontWeight: FontWeight.semibold },
+  cardMeta: {
+    marginBottom: Spacing.lg,
+    fontSize: FontSize.base,
+    fontWeight: FontWeight.semibold,
+  },
   cardBody: { color: Colors.gray600, marginBottom: Spacing.lg },
 
   row: { flexDirection: "row", gap: Spacing.lg, alignItems: "center" },

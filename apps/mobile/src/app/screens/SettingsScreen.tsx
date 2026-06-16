@@ -2,9 +2,6 @@
 
 import React, { useMemo, useState } from "react";
 import { View, Text, Pressable, StyleSheet, Alert } from "react-native";
-import { useNavigation } from "@react-navigation/native";
-import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-
 import ScreenHeader from "../components/layout/ScreenHeader";
 import ScreenLayout from "../components/layout/ScreenLayout";
 import { SegmentControl } from "../components/SegmentControl";
@@ -12,7 +9,6 @@ import { Colors, FontSize, FontWeight, Radius, Spacing } from "../theme";
 
 import type { Currency } from "@pq/shared/money/types";
 
-import type { RootStackParamList } from "../navigation/RootNavigator";
 import { useAuthStore } from "../store/authStore";
 import { useDashboardStore } from "../store/dashboardStore";
 import { useUserPrefsStore } from "../store/userPrefsStore";
@@ -46,9 +42,6 @@ const LANGUAGE_OPTIONS: Array<{ label: string; value: "en" | "ko" }> = [
 export default function SettingsScreen() {
   const { plan, setPeriodType, switchPeriodType, switchPlanCurrency } =
     usePlan();
-
-  const navigation =
-    useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 

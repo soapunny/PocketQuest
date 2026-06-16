@@ -3,9 +3,7 @@
 import { request } from "./http";
 import type {
   ServerPlanDTO,
-  PatchBudgetGoalsRequestDTO,
   UpsertBudgetGoalRequestDTO,
-  PatchSavingsGoalsRequestDTO,
   UpsertSavingsGoalRequestDTO,
 } from "../../../../../packages/shared/src/plans/types";
 

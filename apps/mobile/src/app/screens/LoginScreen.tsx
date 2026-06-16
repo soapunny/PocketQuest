@@ -11,17 +11,14 @@ import ScreenHeader from "../components/layout/ScreenHeader";
 import { supabase } from "../lib/supabase";
 import { Colors, FontSize, FontWeight, Radius, Spacing } from "../theme";
 
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from "../config/env";
-
 import { request } from "../api/http";
-import { useAuthStore } from "../store/authStore";
 import { OAuthProvider } from "@pq/shared/auth";
 
 WebBrowser.maybeCompleteAuthSession();
 
 export default function LoginScreen() {
   const [loading, setLoading] = useState<OAuthProvider | null>(null);
-  const auth = useAuthStore();
+
 
   const handleOAuth = async (provider: OAuthProvider) => {
     if (loading) return;

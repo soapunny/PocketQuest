@@ -18,17 +18,13 @@ import { useUserPrefsStore } from "../store/userPrefsStore";
 import { usePlanStore } from "../store/planStore";
 
 import { formatMoney } from "../domain/money";
+import { makeTr } from "../domain/i18n";
 import {
   getPeriodLabelKey,
   periodLabelText,
   getPlanPeriodType,
 } from "../domain/plan/period";
 import { categoryLabelText } from "../domain/categories/categoryLabels";
-
-function clamp01(n: number) {
-  if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.min(1, n));
-}
 
 function pctFromRatio(ratio: number, cap: number = 999) {
   if (!Number.isFinite(ratio)) return 0;
@@ -84,8 +80,7 @@ export default function DashboardScreen() {
   const { language, currency } = useUserPrefsStore();
   const { plan } = usePlanStore();
 
-  const isKo = language === "ko";
-  const tr = (en: string, ko: string) => (isKo ? ko : en);
+  const tr = makeTr(language);
 
   const [isBudgetDetailsOpen, setIsBudgetDetailsOpen] = useState(false);
   const [isSavingsDetailsOpen, setIsSavingsDetailsOpen] = useState(false);
@@ -275,8 +270,6 @@ export default function DashboardScreen() {
       const savedMinor = Math.trunc(Number(r.savedMinor) || 0);
       const remainingMinor = targetMinor - savedMinor;
       const ratio = targetMinor > 0 ? savedMinor / targetMinor : 0;
-
-      const pct = Math.round(clamp01(ratio) * 100);
 
       const key = savingsHealthKeyFromRatio(ratio);
       const d = savingsHealthDescriptor(key);

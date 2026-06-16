@@ -20,6 +20,7 @@ import LoadingButton from "../components/LoadingButton";
 
 import { useAuthStore } from "../store/authStore";
 import { usePlan } from "../store/planStore";
+import { makeTr } from "../domain/i18n";
 
 type RouteParams = {
   profileImageUri?: string | null;
@@ -34,8 +35,7 @@ export default function ProfileImageModal() {
   const supaUser = session?.user ?? null;
   const meta = (supaUser?.user_metadata as any) ?? {};
   const { language } = usePlan();
-  const isKo = language === "ko";
-  const tr = (en: string, ko: string) => (isKo ? ko : en);
+  const tr = makeTr(language);
   const routeParams = (route.params || {}) as RouteParams;
 
   const baseProfileImageUri = meta.avatar_url || meta.picture || null;
