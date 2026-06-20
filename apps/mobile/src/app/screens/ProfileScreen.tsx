@@ -82,7 +82,7 @@ export default function ProfileScreen() {
     String(
       (supaUser?.user_metadata as any)?.full_name ??
         (supaUser?.user_metadata as any)?.name ??
-        (profileEmail ? profileEmail.split("@")[0] : "")
+        (profileEmail ? profileEmail.split("@")[0] : ""),
     ) || "User";
   const profileImageUri =
     storedProfileImageUri ||
@@ -157,7 +157,7 @@ export default function ProfileScreen() {
         <Text style={CardSpacing.description}>
           {tr(
             "Overall plan completion rate across all periods",
-            "모든 기간에 걸친 전체 계획 완료율"
+            "모든 기간에 걸친 전체 계획 완료율",
           )}
         </Text>
       </ScreenCard>
@@ -172,7 +172,7 @@ export default function ProfileScreen() {
         <Text style={CardSpacing.description}>
           {tr(
             "Total amount saved across all periods",
-            "모든 기간에 걸쳐 저축한 총 금액"
+            "모든 기간에 걸쳐 저축한 총 금액",
           )}
         </Text>
       </ScreenCard>
