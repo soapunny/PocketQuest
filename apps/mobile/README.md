@@ -23,16 +23,16 @@ React Native + Expo 모바일 앱의 전체 구조를 처음부터 공부하는 
 
 ## 1. Tech Stack
 
-| 기술 | 역할 | 핵심 개념 |
-|---|---|---|
-| **React Native** | 네이티브 앱을 React + JavaScript/TypeScript로 작성 | 웹 React와 문법은 같지만 `<div>` 대신 `<View>`, CSS 대신 `StyleSheet` |
-| **Expo** | React Native 개발 전체를 관리하는 툴체인 | Dev server / 번들링 / 네이티브 모듈 래핑 / EAS 배포 빌드 |
-| **TypeScript** | 정적 타입 시스템 | compile time에 타입 오류 잡기 |
-| **React Navigation** | 화면 전환(navigation) 관리 | Stack Navigator + Tab Navigator |
-| **Zustand** | 경량 global state management | Redux보다 보일러플레이트가 적음 |
-| **React Context** | Auth/Transactions 같은 provider 패턴 | Zustand 이전에 설계된 store들 |
-| **Supabase** | Authentication + DB as a service | OAuth, JWT, session 관리 |
-| **Zod** | Runtime schema validation | TypeScript 타입과 runtime 체크를 동시에 |
+| 기술                 | 역할                                               | 핵심 개념                                                             |
+| -------------------- | -------------------------------------------------- | --------------------------------------------------------------------- |
+| **React Native**     | 네이티브 앱을 React + JavaScript/TypeScript로 작성 | 웹 React와 문법은 같지만 `<div>` 대신 `<View>`, CSS 대신 `StyleSheet` |
+| **Expo**             | React Native 개발 전체를 관리하는 툴체인           | Dev server / 번들링 / 네이티브 모듈 래핑 / EAS 배포 빌드              |
+| **TypeScript**       | 정적 타입 시스템                                   | compile time에 타입 오류 잡기                                         |
+| **React Navigation** | 화면 전환(navigation) 관리                         | Stack Navigator + Tab Navigator                                       |
+| **Zustand**          | 경량 global state management                       | Redux보다 보일러플레이트가 적음                                       |
+| **React Context**    | Auth/Transactions 같은 provider 패턴               | Zustand 이전에 설계된 store들                                         |
+| **Supabase**         | Authentication + DB as a service                   | OAuth, JWT, session 관리                                              |
+| **Zod**              | Runtime schema validation                          | TypeScript 타입과 runtime 체크를 동시에                               |
 
 ---
 
@@ -108,6 +108,7 @@ components/MetricCard.tsx
 React Native에서 bundler는 **Metro**다. `pnpm dev:mobile` 명령을 실행하면 터미널에 `Metro waiting on...`이 뜨는 게 바로 이것.
 
 **번들링이 중요한 이유:**
+
 - `import` 구문을 따라가며 실제로 사용되는 코드만 포함한다.
 - 사용하지 않는 코드는 제외한다 (tree shaking).
 - 결과물 하나를 폰에 전달하면 앱이 실행된다.
@@ -136,13 +137,13 @@ Wi-Fi / USB로 폰/에뮬레이터에 즉시 전달 (Hot Reload)
 
 ### Build (빌드) — 개발 vs 배포
 
-| | Development Build | Production Build |
-|---|---|---|
-| 목적 | 개발 중 테스트 | 앱스토어 배포 |
-| 속도 | 빠름 (최적화 없음) | 느림 (최적화 많음) |
-| 파일 크기 | 큼 | 작음 (코드 압축/난독화) |
-| 에러 메시지 | 상세하게 나옴 | 최소화됨 |
-| 도구 | Metro dev server | Expo EAS Build |
+|             | Development Build  | Production Build        |
+| ----------- | ------------------ | ----------------------- |
+| 목적        | 개발 중 테스트     | 앱스토어 배포           |
+| 속도        | 빠름 (최적화 없음) | 느림 (최적화 많음)      |
+| 파일 크기   | 큼                 | 작음 (코드 압축/난독화) |
+| 에러 메시지 | 상세하게 나옴      | 최소화됨                |
+| 도구        | Metro dev server   | Expo EAS Build          |
 
 앱스토어에 올리려면 Expo EAS(Expo Application Services)가 클라우드에서 `.ipa`(iOS) / `.apk`(Android) 파일을 만들어준다.
 
@@ -167,10 +168,10 @@ pnpm add react-native-reanimated
 // package.json
 {
   "dependencies": {
-    "zustand": "^5.0.10",   // 실제 앱에 필요한 라이브러리
+    "zustand": "^5.0.10" // 실제 앱에 필요한 라이브러리
   },
   "devDependencies": {
-    "typescript": "~5.9.2"  // 개발할 때만 필요한 도구
+    "typescript": "~5.9.2" // 개발할 때만 필요한 도구
   }
 }
 ```
@@ -258,12 +259,12 @@ pop  ←   [Login][Bootstrap]
 
 ### Stack vs Tab 비교
 
-| | Stack Navigator | Tab Navigator |
-|---|---|---|
-| 전환 방식 | push / pop (쌓기) | switch (교체) |
-| 뒤로가기 버튼 | 자동 생성 | 없음 |
-| UI 위치 | 상단 헤더 | 하단 탭 바 |
-| 비유 | 브라우저 앞으로/뒤로 | 브라우저 탭 |
+|               | Stack Navigator      | Tab Navigator |
+| ------------- | -------------------- | ------------- |
+| 전환 방식     | push / pop (쌓기)    | switch (교체) |
+| 뒤로가기 버튼 | 자동 생성            | 없음          |
+| UI 위치       | 상단 헤더            | 하단 탭 바    |
+| 비유          | 브라우저 앞으로/뒤로 | 브라우저 탭   |
 
 ### 중첩 구조 (Nested Navigators)
 
@@ -281,18 +282,22 @@ RootNavigator (Stack)      ← 앱 전체 흐름 담당
 ### 각 Screen의 역할
 
 **LoginScreen**
+
 - Google / Kakao OAuth 버튼을 보여줌
 - 버튼 누르면 인앱 브라우저(`WebBrowser`)가 열리고 OAuth 인증 진행
 - 성공하면 Supabase가 `access_token` 발급 → `authStore`에 저장
 - `isAuthenticated`가 true로 바뀌는 순간 RootNavigator가 자동으로 BootstrapScreen으로 전환
 
 **BootstrapScreen** — 로딩 + 에러 + Gate 3가지 역할을 동시에 함
+
 ```
 로딩 중  → 스피너 + "Loading…" 표시
 성공     → navigation.replace("Tabs") 로 탭 화면으로 이동
 실패     → 에러 메시지 + Retry 버튼 표시
 ```
+
 핵심은 **Gate(게이트) 역할**. `prefs`, `plan`, `dashboard` 3개 store가 모두 채워져야만 Tabs로 통과시킴:
+
 ```ts
 if (!isPrefsHydrated || !isPlanHydrated || !isDashboardHydrated) return; // 대기
 navigation.replace("Tabs"); // 모두 준비됐을 때만 통과
@@ -308,10 +313,12 @@ replace →  현재 화면을 제거하고 새 화면으로 교체  (뒤로가�
 ```
 
 Bootstrap → Tabs 전환이 뒤로가기 불가능한 이유:
+
 ```
 push 방식이었다면:   [Login][Bootstrap][Tabs]  ← 뒤로가기로 Bootstrap 돌아올 수 있음
 replace 방식:        [Login][Tabs]             ← Bootstrap이 스택에서 제거됨
 ```
+
 로그인 후 뒤로가기로 로딩 화면에 돌아가는 건 UX상 말이 안 되므로 `replace()`를 사용한다.
 
 ### Auth Gate 패턴
@@ -324,10 +331,11 @@ if (isLoading) return <LoadingSpinner />;
 
 return (
   <Stack.Navigator>
-    {!isAuthenticated
-      ? <Stack.Screen name="Login" component={LoginScreen} />
-      : <> {/* 로그인 후 화면들 */} </>
-    }
+    {!isAuthenticated ? (
+      <Stack.Screen name="Login" component={LoginScreen} />
+    ) : (
+      <> {/* 로그인 후 화면들 */} </>
+    )}
   </Stack.Navigator>
 );
 ```
@@ -390,18 +398,19 @@ export function AuthProvider({ children }) {
 
   return (
     <Ctx.Provider value={{ session, signOut }}>
-      {children}  {/* Provider 안의 모든 컴포넌트가 접근 가능 */}
+      {children} {/* Provider 안의 모든 컴포넌트가 접근 가능 */}
     </Ctx.Provider>
   );
 }
 
 // 3. Consumer — 데이터를 꺼내 쓰는 쪽
 export function useAuthStore() {
-  return useContext(Ctx);  // Provider 안 어디서든 바로 꺼낼 수 있음
+  return useContext(Ctx); // Provider 안 어디서든 바로 꺼낼 수 있음
 }
 ```
 
 **실제 사용 흐름:**
+
 ```
 App.tsx
 └── AuthProvider  (session 데이터 공급)
@@ -417,14 +426,14 @@ Auth는 Supabase의 `onAuthStateChange` 이벤트를 구독해야 한다:
 ```ts
 useEffect(() => {
   supabase.auth.getSession().then(({ data }) => {
-    setSession(data.session);  // 앱 시작 시 세션 복원
+    setSession(data.session); // 앱 시작 시 세션 복원
   });
 
   const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
-    setSession(s);  // 로그인/로그아웃 이벤트 수신
+    setSession(s); // 로그인/로그아웃 이벤트 수신
   });
 
-  return () => sub.subscription.unsubscribe();  // cleanup
+  return () => sub.subscription.unsubscribe(); // cleanup
 }, []);
 ```
 
@@ -469,25 +478,30 @@ isHydrated: false  →  true
 처음에는 store가 비어있다가(`null`) bootstrap API 응답으로 채워지는 순간 `isHydrated: true`가 된다.
 
 화면에서 로딩 게이트로 사용:
+
 ```tsx
-if (!isHydrated) return <LoadingCard />;  // 아직 데이터 없음 → 로딩 표시
-return <Dashboard data={dashboard} />;    // 데이터 있음 → 화면 표시
+if (!isHydrated) return <LoadingCard />; // 아직 데이터 없음 → 로딩 표시
+return <Dashboard data={dashboard} />; // 데이터 있음 → 화면 표시
 ```
 
 ### 화면에서 store 꺼내 쓰는 법 — 방법 1 vs 방법 2
 
 **방법 1 — 전체 store 구독**
+
 ```ts
 const { dashboard, isHydrated, isRefreshing } = useDashboardStore();
 ```
+
 store 안에 있는 모든 state를 한 번에 가져온다.  
 문제는 내가 `dashboard`만 필요한데 `isRefreshing`이 바뀌어도 이 컴포넌트가 re-render된다.
 
 **방법 2 — Selector로 필요한 것만 구독**
+
 ```ts
-const dashboard  = useDashboardStore((s) => s.dashboard);
+const dashboard = useDashboardStore((s) => s.dashboard);
 const isHydrated = useDashboardStore((s) => s.isHydrated);
 ```
+
 `(s) => s.dashboard`가 **selector**. "store 전체(`s`) 중에서 `dashboard`만 줘"라는 의미.  
 `dashboard`가 바뀔 때만 re-render. `isRefreshing`이 바뀌어도 영향 없음.
 
@@ -495,14 +509,15 @@ const isHydrated = useDashboardStore((s) => s.isHydrated);
 컴포넌트 함수가 다시 실행되고 화면을 다시 계산하는 것. 자주 일어날수록 앱이 느려진다.  
 DashboardScreen처럼 계산이 많은 화면에서는 불필요한 re-render를 줄이는 게 중요하다.
 
-| | 방법 1 | 방법 2 (Selector) |
-|---|---|---|
-| 코드 | `const { a, b } = useStore()` | `const a = useStore(s => s.a)` |
-| 구독 범위 | store 전체 | 내가 지정한 값만 |
-| re-render 조건 | store 안에 뭐든 바뀌면 | 내가 구독한 값만 바뀌면 |
-| 성능 | 불리 | 유리 |
+|                | 방법 1                        | 방법 2 (Selector)              |
+| -------------- | ----------------------------- | ------------------------------ |
+| 코드           | `const { a, b } = useStore()` | `const a = useStore(s => s.a)` |
+| 구독 범위      | store 전체                    | 내가 지정한 값만               |
+| re-render 조건 | store 안에 뭐든 바뀌면        | 내가 구독한 값만 바뀌면        |
+| 성능           | 불리                          | 유리                           |
 
 action 함수는 selector로 꺼내는 게 특히 중요하다. action은 절대 바뀌지 않는데 방법 1로 꺼내면 다른 state가 바뀔 때마다 불필요하게 re-render된다:
+
 ```ts
 // action은 항상 selector로
 const refresh = useDashboardStore((s) => s.refreshDashboard);
@@ -510,14 +525,14 @@ const refresh = useDashboardStore((s) => s.refreshDashboard);
 
 ### Context vs Zustand 비교
 
-| | React Context | Zustand |
-|---|---|---|
-| Provider 필요 | 필요 | 불필요 |
-| Boilerplate | 많음 | 적음 |
-| Selector | 없음 (전체 re-render) | 있음 (`store(s => s.field)`) |
-| 외부 이벤트 구독 | `useEffect`로 자연스럽게 | 번거로움 |
-| 주 용도 | Auth처럼 side effect가 있는 경우 | 단순 global state |
-| 이 앱에서 | authStore, transactionsStore | dashboardStore, planStore, settingsStore |
+|                  | React Context                    | Zustand                                  |
+| ---------------- | -------------------------------- | ---------------------------------------- |
+| Provider 필요    | 필요                             | 불필요                                   |
+| Boilerplate      | 많음                             | 적음                                     |
+| Selector         | 없음 (전체 re-render)            | 있음 (`store(s => s.field)`)             |
+| 외부 이벤트 구독 | `useEffect`로 자연스럽게         | 번거로움                                 |
+| 주 용도          | Auth처럼 side effect가 있는 경우 | 단순 global state                        |
+| 이 앱에서        | authStore, transactionsStore     | dashboardStore, planStore, settingsStore |
 
 ---
 
@@ -528,8 +543,8 @@ const refresh = useDashboardStore((s) => s.refreshDashboard);
 ```ts
 export const Colors = {
   ink: "#111111",
-  statusGood: "#16A34A",   // green
-  statusRisk: "#DC2626",   // red
+  statusGood: "#16A34A", // green
+  statusRisk: "#DC2626", // red
   overlay04: "rgba(0,0,0,0.04)",
 } as const;
 
@@ -550,6 +565,7 @@ export const Spacing = {
 
 색상, 크기, 간격 같은 디자인 값을 **이름 있는 상수**로 관리하는 것.  
 `"#16A34A"` 대신 `Colors.statusGood`을 쓰면:
+
 - 디자인 변경 시 `theme.ts` 한 곳만 수정하면 앱 전체에 적용된다.
 - 코드를 읽을 때 의도가 명확하다 ("statusGood이니까 초록색이겠구나").
 - 면접에서 "design system" 또는 "design tokens" 얘기가 나오면 이 패턴을 언급할 수 있다.
@@ -573,7 +589,7 @@ export const Colors = { ink: "#111111" } as const;
 ```ts
 export async function request<T>(
   endpoint: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
 ): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
   const response = await fetch(url, { ...options, headers });
@@ -591,10 +607,19 @@ export async function request<T>(
 
 ```ts
 export const transactionsApi = {
-  getList: (params) => request('/api/transactions', { headers: { Authorization: `Bearer ${token}` } }),
-  create:  (token, payload) => request('/api/transactions', { method: 'POST', body: JSON.stringify(payload) }),
-  update:  (token, id, patch) => request(`/api/transactions/${id}`, { method: 'PATCH' }),
-  delete:  (token, id) => request(`/api/transactions/${id}`, { method: 'DELETE' }),
+  getList: (params) =>
+    request("/api/transactions", {
+      headers: { Authorization: `Bearer ${token}` },
+    }),
+  create: (token, payload) =>
+    request("/api/transactions", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  update: (token, id, patch) =>
+    request(`/api/transactions/${id}`, { method: "PATCH" }),
+  delete: (token, id) =>
+    request(`/api/transactions/${id}`, { method: "DELETE" }),
 };
 ```
 
@@ -623,7 +648,9 @@ Custom hook은 "React 로직을 재사용하는 함수"다. 이름은 반드시 
 export function useBootStrap() {
   const auth = useAuthStore();
   const { applyBootstrapPlan } = usePlanStore();
-  const applyDashboard = useDashboardStore(s => s.applyDashboardFromBootstrap);
+  const applyDashboard = useDashboardStore(
+    (s) => s.applyDashboardFromBootstrap,
+  );
 
   const runBootstrap = useCallback(async () => {
     const payload = await fetchBootstrap(auth.supabaseAccessToken);
@@ -650,12 +677,12 @@ const runBootstrap = useCallback(async () => { ... }, [dependency]);
 
 ### Custom Hook vs Component
 
-| | Custom Hook | Component |
-|---|---|---|
-| 반환값 | 데이터/함수 | JSX |
-| UI 포함 | 없음 | 있음 |
-| 재사용 목적 | 로직 재사용 | UI 재사용 |
-| 이름 | `use`로 시작 | 대문자로 시작 |
+|             | Custom Hook  | Component     |
+| ----------- | ------------ | ------------- |
+| 반환값      | 데이터/함수  | JSX           |
+| UI 포함     | 없음         | 있음          |
+| 재사용 목적 | 로직 재사용  | UI 재사용     |
+| 이름        | `use`로 시작 | 대문자로 시작 |
 
 ---
 
@@ -667,13 +694,20 @@ const runBootstrap = useCallback(async () => { ... }, [dependency]);
 type Props = {
   title: string;
   value: string;
-  sub?: React.ReactNode;    // string 또는 JSX 모두 가능
+  sub?: React.ReactNode; // string 또는 JSX 모두 가능
   status?: { label: string; color: string };
   progress?: { ratio: number; color: string };
   variant?: "default" | "detail";
 };
 
-export function MetricCard({ title, value, sub, status, progress, variant }: Props) {
+export function MetricCard({
+  title,
+  value,
+  sub,
+  status,
+  progress,
+  variant,
+}: Props) {
   const isDetail = variant === "detail";
   // ...
 }
@@ -731,7 +765,7 @@ async function request<T>(endpoint: string): Promise<T> {
 }
 
 // 사용
-const data = await request<DashboardPayloadDTO>('/api/bootstrap');
+const data = await request<DashboardPayloadDTO>("/api/bootstrap");
 // data는 DashboardPayloadDTO 타입
 ```
 
@@ -763,7 +797,7 @@ type TxType = "EXPENSE" | "INCOME" | "SAVING";
 type Transaction = {
   type: TxType;
   category: string;
-  savingsGoalId?: string | null;  // SAVING일 때만 의미 있음
+  savingsGoalId?: string | null; // SAVING일 때만 의미 있음
 };
 ```
 
@@ -825,15 +859,26 @@ Bootstrap으로 초기화하면 메인 앱 진입 후에는 이미 데이터가 
 
 ## 면접에서 쓸 수 있는 키워드 정리
 
-| 패턴/개념 | 이 앱에서 어디 | 영어로 설명할 때 |
-|---|---|---|
-| Auth gate | RootNavigator | "conditional rendering based on auth state" |
-| Design tokens | theme.ts | "centralized design system with typed constants" |
-| Global state | Zustand stores | "lightweight global state with selectors" |
-| Custom hook | useBootStrap | "encapsulating reusable stateful logic" |
-| Bootstrap pattern | BootstrapScreen | "single API call to hydrate initial app state" |
-| Slot pattern | ScreenLayout | "composition via render props / children" |
-| Variant prop | MetricCard | "single component with multiple visual modes" |
-| SSOT | theme.ts, @pq/shared | "single source of truth for shared contracts" |
-| Type-safe navigation | RootStackParamList | "strongly typed route params" |
-| Discriminated union | TxType | "tagged union for exhaustive type narrowing" |
+| 패턴/개념            | 이 앱에서 어디       | 영어로 설명할 때                                 |
+| -------------------- | -------------------- | ------------------------------------------------ |
+| Auth gate            | RootNavigator        | "conditional rendering based on auth state"      |
+| Design tokens        | theme.ts             | "centralized design system with typed constants" |
+| Global state         | Zustand stores       | "lightweight global state with selectors"        |
+| Custom hook          | useBootStrap         | "encapsulating reusable stateful logic"          |
+| Bootstrap pattern    | BootstrapScreen      | "single API call to hydrate initial app state"   |
+| Slot pattern         | ScreenLayout         | "composition via render props / children"        |
+| Variant prop         | MetricCard           | "single component with multiple visual modes"    |
+| SSOT                 | theme.ts, @pq/shared | "single source of truth for shared contracts"    |
+| Type-safe navigation | RootStackParamList   | "strongly typed route params"                    |
+| Discriminated union  | TxType               | "tagged union for exhaustive type narrowing"     |
+
+---
+
+## 12. Interview Q&A — Common Mistakes
+
+| Question | Key Answer |
+| -------- | ---------- |
+| Why use a selector in Zustand? | Using a selector ensures the component only re-renders when the specific subscribed value changes, instead of re-rendering on any store update. |
+| What does `as const` do? | `as const` makes all properties of the object read-only, preventing value mutation at compile time. It also narrows the type from `string` to a literal type (e.g. `"#111111"`). Without `as const`, the properties are mutable even if the variable is declared with `const`. |
+| Why React Context for Auth instead of Zustand? | Supabase requires `useEffect` to subscribe to auth state changes. `useEffect` can only be used inside a React component, and React Context Provider is a component. Zustand store lives outside the component tree, so it can't use `useEffect` naturally. |
+| What is the Bootstrap pattern and why use it? | Bootstrap pattern is fetching all initial app data in a single API call before entering the main app, then hydrating all stores at once. We use it because a single API call eliminates per-screen loading and reduces network round trips. |
