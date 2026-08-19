@@ -7,6 +7,7 @@ export class ApiError extends Error {
     public status: number,
     public message: string,
     public details?: any,
+    public url?: string,
   ) {
     super(message);
     this.name = "ApiError";
@@ -30,19 +31,19 @@ export async function request<T>(
   if (!response.ok) {
     const text = await response.text().catch(() => "");
 
-    const err: any = new Error(
+    const err = new ApiError(
+      response.status,
       response.status === 401 ? "Unauthorized" : `HTTP ${response.status}`,
+      text,
+      url,
     );
-    err.status = response.status;
-    err.url = url;
-    err.body = text;
     throw err;
   }
 
-  if (response.status === 204) return undefined as any;
+  if (response.status === 204) return undefined as any; //성공 했지만 body가 없는 경우
 
   const contentType = response.headers.get("Content-Type") || "";
   if (contentType.includes("application/json"))
-    return (await response.json()) as T;
+    return (await response.json()) as T; //성공 했고 body가 json인 경우 요청 타입 T로 변환해서 반환
   return (await response.text()) as any;
 }
