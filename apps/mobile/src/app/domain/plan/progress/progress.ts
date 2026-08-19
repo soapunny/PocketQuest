@@ -1,6 +1,6 @@
 // apps/mobile/src/app/domain/plan/progress/progress.ts
 
-import type { Currency } from "../../../../../../../packages/shared/src/money/types";
+import type { Currency } from "@pq/shared/money/types";
 import type { Plan } from "../../../store/planStore";
 import { absMinor } from "../../money";
 import { isSavingsTx } from "../../transactions/classify";

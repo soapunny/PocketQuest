@@ -1,5 +1,5 @@
 import { minorUnitScale } from "./currency";
-import type { Currency } from "../../../../../../packages/shared/src/money/types";
+import type { Currency } from "@pq/shared/money/types";
 
 /**
  * Convert between currencies using a USD<->KRW fx rate.

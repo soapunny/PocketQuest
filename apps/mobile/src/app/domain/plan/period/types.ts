@@ -1,6 +1,6 @@
 // apps/mobile/src/app/domain/plan/period/types.ts
 
-import type { PeriodType } from "../../../../../../../packages/shared/src/plans/types";
+import type { PeriodType } from "@pq/shared/plans/types";
 
 export type { PeriodType };
 

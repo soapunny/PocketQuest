@@ -9,7 +9,7 @@
  * - Keep only transaction-specific helpers (validation / normalization).
  */
 
-import type { TxType } from "../../../../../../packages/shared/src/transactions/types";
+import type { TxType } from "@pq/shared/transactions/types";
 
 /**
  * Normalize any incoming category value into a canonical key shape.

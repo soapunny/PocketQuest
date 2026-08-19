@@ -5,7 +5,7 @@ import type {
   ServerPlanDTO,
   UpsertBudgetGoalRequestDTO,
   UpsertSavingsGoalRequestDTO,
-} from "../../../../../packages/shared/src/plans/types";
+} from "@pq/shared/plans/types";
 
 export const goalsApi = {
   budget: {
@@ -17,7 +17,7 @@ export const goalsApi = {
     upsert: async (
       token: string,
       planId: string,
-      data: UpsertBudgetGoalRequestDTO
+      data: UpsertBudgetGoalRequestDTO,
     ) => {
       return request<{ plan: ServerPlanDTO }>(
         `/api/plans/${planId}/goals/budget`,
@@ -25,7 +25,7 @@ export const goalsApi = {
           method: "POST",
           headers: { Authorization: `Bearer ${token}` },
           body: JSON.stringify(data),
-        }
+        },
       );
     },
   },
@@ -38,7 +38,7 @@ export const goalsApi = {
     create: async (
       token: string,
       planId: string,
-      data: UpsertSavingsGoalRequestDTO
+      data: UpsertSavingsGoalRequestDTO,
     ) => {
       return request<{ plan: ServerPlanDTO }>(
         `/api/plans/${planId}/goals/savings`,
@@ -46,7 +46,7 @@ export const goalsApi = {
           method: "POST",
           headers: { Authorization: `Bearer ${token}` },
           body: JSON.stringify(data),
-        }
+        },
       );
     },
     delete: async (token: string, planId: string, id: string) => {
@@ -55,7 +55,7 @@ export const goalsApi = {
         {
           method: "DELETE",
           headers: { Authorization: `Bearer ${token}` },
-        }
+        },
       );
     },
   },

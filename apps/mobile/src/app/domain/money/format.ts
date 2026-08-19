@@ -1,6 +1,6 @@
 // apps/mobile/src/app/domain/money/format.ts
 
-import type { Currency } from "../../../../../../packages/shared/src/money/types";
+import type { Currency } from "@pq/shared/money/types";
 import { getCurrencySymbol, minorUnitScale } from "../money";
 
 /**

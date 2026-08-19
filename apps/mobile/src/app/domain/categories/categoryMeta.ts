@@ -13,7 +13,7 @@
  * - `colorToken` is a design token string (avoid hardcoded hex in domain when possible).
  */
 
-import type { TxType } from "../../../../../../packages/shared/src/transactions/types";
+import type { TxType } from "@pq/shared/transactions/types";
 
 export type CategoryGroup =
   | "essentials"
@@ -291,7 +291,7 @@ export function getCategoryMeta(categoryKey: unknown): CategoryMeta {
  */
 export function sortCategoryKeysByMeta(
   keys: readonly string[],
-  txType?: TxType
+  txType?: TxType,
 ): string[] {
   const seen = new Set<string>();
   const normalized: string[] = [];
@@ -310,8 +310,8 @@ export function sortCategoryKeysByMeta(
     const ok = !txType
       ? true
       : !allowed
-      ? txType === "EXPENSE"
-      : allowed.includes(txType);
+        ? txType === "EXPENSE"
+        : allowed.includes(txType);
     return { k, meta, ok };
   });
 

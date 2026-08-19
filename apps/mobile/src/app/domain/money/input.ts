@@ -1,6 +1,6 @@
 // apps/mobile/src/app/domain/money/input.ts
 
-import type { Currency } from "../../../../../../packages/shared/src/money/types";
+import type { Currency } from "@pq/shared/money/types";
 
 /**
  * Safe parse for numeric input strings.

@@ -1,6 +1,6 @@
 // apps/mobile/src/app/lib/currency.ts
 // Currency helpers (formatting / minor unit utilities).
-import type { Currency } from "../../../../../../packages/shared/src/money/types";
+import type { Currency } from "@pq/shared/money/types";
 
 // Minor unit scale for each currency.
 // e.g., 1 USD = 100 cents, 1 KRW = 1 won

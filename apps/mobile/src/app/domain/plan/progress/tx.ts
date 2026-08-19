@@ -1,6 +1,6 @@
 // apps/mobile/src/app/domain/plan/progress/tx.ts
 
-import type { Currency } from "../../../../../../../packages/shared/src/money/types";
+import type { Currency } from "@pq/shared/money/types";
 import { absMinor, convertMinor } from "../../money";
 
 export function txToHomeMinor(tx: any, homeCurrency: Currency): number {

@@ -1,6 +1,6 @@
 // apps/mobile/src/app/domain/forms/dirty.ts
 
-import type { Currency } from "../../../../../../packages/shared/src/money/types";
+import type { Currency } from "@pq/shared/money/types";
 import { parseInputToMinor } from "../money";
 
 function normText(v: unknown): string {
@@ -28,11 +28,11 @@ export function isNameDirty(draftName: unknown, currentName: unknown): boolean {
 export function isMoneyDirty(
   draftText: unknown,
   currentMinor: unknown,
-  currency: Currency
+  currency: Currency,
 ): boolean {
   const draftMinor = Math.max(
     0,
-    parseInputToMinor(normText(draftText), currency)
+    parseInputToMinor(normText(draftText), currency),
   );
   return draftMinor !== normMinor(currentMinor);
 }
@@ -45,7 +45,7 @@ export function isBlankText(v: unknown): boolean {
 /** draft text -> minor (>=0), empty/invalid => 0 */
 export function moneyTextToMinor(
   draftText: unknown,
-  currency: Currency
+  currency: Currency,
 ): number {
   return Math.max(0, parseInputToMinor(normText(draftText), currency));
 }
@@ -57,7 +57,7 @@ export function deriveBudgetDirty(args: {
 }): { dirty: boolean; nextLimitMinor: number } {
   const nextLimitMinor = moneyTextToMinor(
     args.selectedLimitText,
-    args.currency
+    args.currency,
   );
   const dirty = nextLimitMinor !== normMinor(args.currentLimitMinor);
   return { dirty, nextLimitMinor };
@@ -117,7 +117,7 @@ export function deriveTransactionDirty(args: {
 
   const nextAmountMinorAbs = moneyTextToMinor(
     args.draftAmountText,
-    args.currency
+    args.currency,
   );
   const amountDirty = nextAmountMinorAbs !== normMinor(args.currentAmountMinor);
 

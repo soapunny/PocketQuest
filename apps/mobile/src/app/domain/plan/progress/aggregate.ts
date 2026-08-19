@@ -1,4 +1,4 @@
-import type { Currency } from "../../../../../../../packages/shared/src/money/types";
+import type { Currency } from "@pq/shared/money/types";
 import { txToHomeMinor } from "../progress";
 
 // EXPENSE 합계: category별

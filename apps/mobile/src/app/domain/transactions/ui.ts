@@ -1,6 +1,6 @@
 // apps/mobile/src/app/domain/transactions/ui.ts
 
-import { TxType } from "../../../../../../packages/shared/src/transactions/types";
+import { TxType } from "@pq/shared/transactions/types";
 
 export function typeUI(t: TxType) {
   if (t === "EXPENSE") {
